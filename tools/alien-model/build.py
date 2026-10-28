@@ -215,6 +215,24 @@ class Leaf:
         return Leaf(MIRROR @ self.c, MIRROR @ self.R, self.L, self.H, self.w0, self.w1)
 
 
+class Bent:
+    """A shape bent in its frame's u-v plane about c: its centre line rises by k u^2
+    along v. Not an exact distance, close enough for a gentle bend."""
+
+    def __init__(self, shape, c, R, k, reach):
+        self.shape, self.c, self.R, self.k, self.reach = shape, np.asarray(c, float), np.asarray(R, float), k, reach
+
+    def sd(self, P):
+        q = (P - self.c) @ self.R
+        q[:, 1] -= self.k * q[:, 0] ** 2
+        return self.shape.sd(self.c + q @ self.R.T)
+
+    def box(self):
+        lo, hi = self.shape.box()
+        pad = self.k * self.reach**2
+        return lo - pad, hi + pad
+
+
 class Both:
     """The intersection of two shapes."""
 
@@ -427,9 +445,9 @@ HEAD_H = 0.643
 HEAD_ASPECT = 1.43
 HEAD_HALF_W = HEAD_H / HEAD_ASPECT / 2
 HEAD_TOP_Y = HEAD_CHIN_Y + HEAD_H
-# The eye: a leaf tilted up at the outer corner. EYE_H makes the tilted outline as tall
-# for the head's width as the owner's picture's eyes (round 1's was too short).
-EYE_L, EYE_H, EYE_TILT = 0.07, 0.042, 28
+# The eye: a leaf tilted up at the outer corner, the shape of the owner's picture's eyes
+# (measured along their slant) at 1.2 times their size: the owner asked for bigger eyes.
+EYE_L, EYE_H, EYE_TILT = 0.084, 0.05, 28
 # The socket, and how far below the face the eyeball's crown sits. The eyeball is a
 # strong dome (an ellipsoid EYE_DOME deep), so its edge sinks well below the socket's
 # lip: that wall is what the wire draws as the eye's outline, and the dome inside it
@@ -441,6 +459,9 @@ EYE_DOME = 0.028
 # the skin's field came out with the skin's triangles across its edge, ragged once the
 # eyes were drawn black).
 EYE_TRIS = 240
+# The smile: the mouth's corners rise MOUTH_SMILE x (half-width)^2 above its middle, a
+# few millimetres. The owner asked for a tiny one.
+MOUTH_SMILE = 4.5
 # The crease between the lens and the socket's wall.
 EYE_GAP = 0.002
 # The head is modelled at B's size, where every part was measured, and shrunk about the
@@ -599,12 +620,13 @@ def head_ops():
     ops.append(Op("add", Ellipsoid(bulb, [0.015, 0.012, 0.012]), 0.01))
     for s in (-1, 1):
         ops.append(Op("sub", Ellipsoid(bulb + np.array([s * 0.008, -0.011, 0.004]), [0.0045, 0.003, 0.006]), 0.004))
-    # A small mouth with thin lips, and the long chin under it.
+    # A small mouth with thin lips in a tiny smile, and the long chin under it.
     pm, nm = on_head(0.0, 0.82)
     Rm = frame(nm, [1, 0, 0])
-    ops.append(Op("raise", Leaf(pm + Rm[:, 1] * 0.006, Rm, 0.042, 0.006), 0.008, depth=0.004))
-    ops.append(Op("raise", Leaf(pm - Rm[:, 1] * 0.0075, Rm, 0.037, 0.0075), 0.008, depth=0.0045))
-    ops.append(Op("socket", Leaf(pm, Rm, 0.04, 0.002), 0.002, depth=0.009))
+    smile = lambda shape: Bent(shape, pm, Rm, MOUTH_SMILE, 0.045)  # noqa: E731
+    ops.append(Op("raise", smile(Leaf(pm + Rm[:, 1] * 0.006, Rm, 0.042, 0.006)), 0.008, depth=0.004))
+    ops.append(Op("raise", smile(Leaf(pm - Rm[:, 1] * 0.0075, Rm, 0.037, 0.0075)), 0.008, depth=0.0045))
+    ops.append(Op("socket", smile(Leaf(pm, Rm, 0.04, 0.003)), 0.003, depth=0.009))
     pch, nch = on_head(0.0, 0.93)
     ops.append(Op("raise", Leaf(pch, frame(nch, [1, 0, 0]), 0.034, 0.03), 0.03, depth=0.003))
     landmarks = {"eye": pe, "eye_n": ne, "eye_R": Re, "eyeball": eyeball, "mouth": pm, "mouth_n": nm, "bulb": bulb, "chin": pch,
@@ -621,19 +643,48 @@ def head_ops():
 # the face with its own features crumpled them into the new ones.
 
 SQ_CENTER = np.array([0.0, 2.0, -0.005])
-SQ_RADII = np.array([0.15, 0.17, 0.165])
-# The squeezed eye, rounder and less tilted than the normal one.
-SQ_EYE_X, SQ_EYE_Y, SQ_EYE_TILT = 0.062, 2.0, 12
-SQ_EYE_L, SQ_EYE_H = 0.043, 0.026
+# The ball is just wide enough for the eyes, which keep their size in the squeeze (the
+# owner: "don't shrink them when u shrink head"), as in shrunk.png.
+SQ_RADII = np.array([0.16, 0.17, 0.165])
+# The squeezed eye's centre and tilt; it wraps round the ball (wrap_eye), so its outer
+# end turns onto the side of the head.
+SQ_EYE_X, SQ_EYE_Y, SQ_EYE_TILT = 0.09, 2.0, 12
 SQ_RIM = 0.016
-# The squeezed eye sinks, and the eyeball shrinks into it to SQ_EYE_BALL of its outline,
-# leaving a groove round it, as the normal eye has.
-SQ_EYE_SINK, SQ_EYE_BALL = 0.016, 0.85
+# The squeezed socket sinks round the eyeball, and a puffy rim stands SQ_RIM_GAP beyond
+# its edge (as a share of the eye's size).
+SQ_EYE_SINK, SQ_RIM_GAP = 0.016, 0.16
 SQ_MOUTH_Y, SQ_MOUTH_PUSH = 1.895, 0.024
 # The squeezed face's smaller features (wrinkles, nose, lips, chin, cheeks), scaled
 # together: at 1 they read only up close.
 SQ_FACE = 1.5
 SQ_CHIN_Y = 1.858
+
+
+def wrap_eye(e, R, q):
+    """Points q, in a normal eye's own frame (along, across, out), laid onto the squeezed
+    ball round its eye centre e with frame R: as far along the surface as along the eye,
+    the depth along the ball's normal. So the eye keeps its size and bends with the ball."""
+    q = np.atleast_2d(np.asarray(q, float))
+    r0 = np.linalg.norm(e - SQ_CENTER)
+    arc = np.linalg.norm(q[:, :2], axis=1, keepdims=True)
+    k = np.where(arc > 1e-9, r0 * np.tan(arc / r0) / np.maximum(arc, 1e-9), 1.0)
+    flat = e + (q[:, :2] * k) @ R[:, :2].T
+    d = (flat - SQ_CENTER) / SQ_RADII
+    on = SQ_CENTER + SQ_RADII * d / np.linalg.norm(d, axis=1, keepdims=True)
+    n = (on - SQ_CENTER) / SQ_RADII**2
+    return on + n / np.linalg.norm(n, axis=1, keepdims=True) * q[:, 2:3]
+
+
+def unwrap_eye(e, R, P):
+    """wrap_eye undone for points on the ball: each one's (along, across) in the eye's
+    frame, and whether it faces the eye's way at all."""
+    n = R[:, 2]
+    dp = (P - SQ_CENTER) @ n
+    t = ((e - SQ_CENTER) @ n) / np.where(dp > 1e-9, dp, 1e-9)
+    off = (SQ_CENTER + t[:, None] * (P - SQ_CENTER) - e) @ R[:, :2]
+    r0 = np.linalg.norm(e - SQ_CENTER)
+    flat = np.linalg.norm(off, axis=1, keepdims=True)
+    return off * np.where(flat > 1e-9, r0 * np.arctan(flat / r0) / np.maximum(flat, 1e-9), 1.0), dp > 1e-9
 
 
 def on_ball(x, y):
@@ -932,8 +983,8 @@ def squeeze_positions(V, F, lm, bare_ops, eye):
     landmark warp takes that smooth surface into the ball, the crown and the back of the
     skull are pulled onto the ball, and the squeezed face is drawn on it as smooth bumps
     along the normals: sunken round eyes in rims, wrinkles, a small nose, a pursed mouth.
-    The eyeballs (eye) move by the map that takes the normal eye's outline to the squeezed
-    one's, the same pairing the warp uses, so they stay in their sockets all the way."""
+    The eyeballs (eye) keep their size and wrap onto the ball (wrap_eye), by the same map
+    the warp's eye landmarks use, so they stay in their sockets all the way."""
     head = lm["head"]
     m = smoothstep(SQUEEZE_FROM_Y, SQUEEZE_FULL_Y, V[:, 1]) * np.maximum(near_neck(V), smoothstep(1.66, 1.71, V[:, 1]))
     mov = (m > 0) & ~eye
@@ -980,10 +1031,9 @@ def squeeze_positions(V, F, lm, bare_ops, eye):
         ([0, head_y(0.79), -0.115], [0, 1.88, -0.122]),
     ]
     sided = [
-        (pe + Re[:, 0] * (EYE_L - EYE_GAP), se + Rs[:, 0] * SQ_EYE_L),
-        (pe - Re[:, 0] * (EYE_L - EYE_GAP), se - Rs[:, 0] * SQ_EYE_L),
-        (pe + Re[:, 1] * (EYE_H - EYE_GAP), se + Rs[:, 1] * SQ_EYE_H),
-        (pe - Re[:, 1] * (EYE_H - EYE_GAP), se - Rs[:, 1] * SQ_EYE_H),
+        # The socket's lip all round, so the skin follows the wrapped eye's outline.
+        *[(pe + Re[:, :2] @ q, wrap_eye(se, Rs, [*q, 0.0])[0])
+          for q in ([EYE_L * math.cos(a), EYE_H * math.sin(a)] for a in np.linspace(0, 2 * math.pi, 12, endpoint=False))],
         (on_head(0.04, 0.82), on_ball(0.02, SQ_MOUTH_Y)[0]),
         (head_side(0.9), [0.072, 1.862, 0.0]),
         (head_side(0.97), [0.05, 1.838, 0.005]),
@@ -1033,11 +1083,11 @@ def squeeze_positions(V, F, lm, bare_ops, eye):
     N = vertex_normals(P, F)
     bump = np.zeros(len(P))
     for R, e in ((Rs, se), (MIRROR @ Rs, MIRROR @ se)):
-        rel = P - e
-        rho = np.hypot((rel @ R[:, 0]) / SQ_EYE_L, (rel @ R[:, 1]) / SQ_EYE_H)
-        sink = -SQ_EYE_SINK * (1 - smoothstep(0.75, 1.05, rho))
-        rim = SQ_RIM * np.exp(-(((rho - 1.32) / 0.3) ** 2))
-        bump += (sink + rim) * smoothstep(-0.035, 0.0, rel @ R[:, 2])
+        uv, facing = unwrap_eye(e, R, P)
+        rho = np.hypot(uv[:, 0] / EYE_L, uv[:, 1] / EYE_H)
+        sink = -SQ_EYE_SINK * (1 - smoothstep(0.92, 1.12, rho))
+        rim = SQ_RIM * np.exp(-(((rho - 1.12 - SQ_RIM_GAP) / SQ_RIM_GAP) ** 2))
+        bump += (sink + rim) * facing
     face = smoothstep(0.04, 0.08, P[:, 2])
     near = lambda c, s: np.exp(-((np.linalg.norm(P - c, axis=1) / s) ** 2))  # noqa: E731
     for s in (1, -1):
@@ -1055,16 +1105,21 @@ def squeeze_positions(V, F, lm, bare_ops, eye):
     # hand each vertex some of its neighbours' socket and nose depth back.
     bump = laplacian_smooth((bump * mov)[:, None], F, mov, 2)[:, 0]
     P = P + N * bump[:, None]
+    # The normal socket's deep walls crumple up on the squeezed socket's lip: smooth that
+    # band itself, between the floor the eyeball hides and the crest of the puffy rim.
+    lip = np.zeros(len(P), bool)
+    for R, e in ((Rs, se), (MIRROR @ Rs, MIRROR @ se)):
+        uv, facing = unwrap_eye(e, R, P)
+        rho = np.hypot(uv[:, 0] / EYE_L, uv[:, 1] / EYE_H)
+        lip |= mov & facing & (rho > 0.85) & (rho < 1.12 + SQ_RIM_GAP)
+    P = laplacian_smooth(P, F, lip, 6)
     # The throat has no features of its own, so there the whole move can be smoothed:
     # the warp squeezes it between the pinned neck and the tucked-in chin.
     throat = mov & (V[:, 1] < 1.86) & (np.hypot(V[:, 0], V[:, 2] - 0.03) < 0.12)
     P = V + laplacian_smooth(P - V, F, throat, 8)
-    su = SQ_EYE_BALL * SQ_EYE_L / (EYE_L - EYE_GAP)
-    sv = SQ_EYE_BALL * SQ_EYE_H / (EYE_H - EYE_GAP)
     for side, (e0, R0, e1, R1) in ((1, (pe, Re, se, Rs)), (-1, (MIRROR @ pe, MIRROR @ Re, MIRROR @ se, MIRROR @ Rs))):
         sel = eye & (np.sign(V[:, 0]) == side)
-        q = (V[sel] - e0) @ R0
-        P[sel] = e1 + (q * [su, sv, (su + sv) / 2]) @ R1.T
+        P[sel] = wrap_eye(e1, R1, (V[sel] - e0) @ R0)
     log(f"squeeze: {(mov | eye).sum()} vertices move, up to {np.linalg.norm(P - V, axis=1).max() * 100:.1f} cm")
     if "--debug-squeeze" in ARGS:
         np.savez(OUT / "squeeze-stages.npz", V=V, F=F, **stages)

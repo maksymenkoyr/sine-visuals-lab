@@ -158,6 +158,10 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
     eyeballs' pointed corners, which draw black.
   - The squeeze moves 2,911 vertices (the eyeballs among them), still up to
     26.6 cm.
+- 2026-10-28, round 4 (bigger eyes kept whole in the squeeze, a smile), by
+  `check.ts`: 10,246 vertices, 20,480 triangles, 532,732 bytes; 0 triangles
+  facing against their normals; 7 slivers, 6 at the eyeballs' corners and 1
+  on a thigh. The squeeze moves 3,026 vertices, up to 26.7 cm.
 
 ## Decisions and pivots
 
@@ -293,6 +297,19 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
     stays so: the eyeballs move by the same eye-to-eye map as the warp, so
     the scene can blend it from 0 to 1. The renders now show the
     in-betweens (a quarter, half, three quarters) to check that blend.
+- 2026-10-28, the owner on round 3: "1. make eyes bigger. 2. don't shrink
+  them when u shrink head. 3. add tiny smile". My calls on it:
+  - "shrink head" read as the squeeze, the owner's own word for it in the
+    brief, and as in shrunk.png, where the eyes stay big on the small head;
+  - the eyes are 1.2 times the picture's size;
+  - in the squeeze the eyeballs keep their size and wrap round the ball
+    (`wrap_eye`, which keeps distances along the surface); the squeezed
+    sockets and rims are laid out in the same wrapped coordinates, and 12
+    landmarks round each socket's lip hold the skin to them. The ball is a
+    little wider to hold them;
+  - the smile bends the mouth's slit and lips up at the corners
+    (`MOUTH_SMILE`); at the first, smaller bend it barely read up close. The
+    squeezed mouth stays pursed, as in shrunk.png.
 
 ## Tuning notes
 
@@ -328,7 +345,7 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 - Only one alien; the reference has a crowd.
 - Portrait screens crop the 16:9 frames to their middle.
 - About 5 of the mesh's triangles face inward at creases and are culled.
-- The new model (#772) waits for the owner's verdict on round 3. Once in the
+- The new model (#772) waits for the owner's verdict on round 4. Once in the
   scene (#773), its extra height needs the loops' cameras reframed, or the
   figure scaled: they frame today's 2.15 m alien.
 - In the new model's arms-down check the shoulders go a little square, the
