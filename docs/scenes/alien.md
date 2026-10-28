@@ -561,5 +561,5 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 - #782 (draft, 2026-10-28, for #751): the scene draws the alien live, Bounce
   squashes the figure itself, and the videos stay only for older tabs.
 - #778 and #782 (merged 2026-10-28).
-- #773 (2026-10-28): the scene draws the Blender model, loaded as
-  `mesh-v1.bin`, with black eyes; the framing waits for the owner.
+- #784 (draft, 2026-10-28, for #773): the scene draws the Blender model,
+  loaded as `mesh-v1.bin`, with black eyes; the framing waits for the owner.
