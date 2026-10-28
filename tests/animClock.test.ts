@@ -3,7 +3,7 @@ import { createAnimClock, type AnimClock, type AnimFrame } from "../src/render/a
 import { LOCK_MEANINGS } from "../src/render/lockMeaning.ts";
 import { FOLLOW_LOCK } from "../src/render/metronome.ts";
 import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
-import type { SilenceGateMarks } from "../src/audio/silenceGate.ts";
+import { SILENCE_GATE_MUSIC_CLOSE, SILENCE_GATE_MUSIC_OPEN, type SilenceGateMarks } from "../src/audio/silenceGate.ts";
 import { UNIT_TAILS, type HitShape } from "../src/audio/hitStrength.ts";
 import { engineReading } from "./engineReading.ts";
 
@@ -108,6 +108,30 @@ describe("createAnimClock", () => {
     const follower = frame({ level: 0.05, engine: { ...HIT({ snare: 3 }), hitLevel: 0.6 } });
     expect(createAnimClock().advance(DT, follower, undefined, marks).midOnset).toBe(true);
     expect(createAnimClock().advance(DT, frame({ level: 0.05, engine: HIT({ snare: 3 }) }), undefined, marks).midOnset).toBe(false);
+  });
+
+  it("music holds the gate open for a quiet room's hits, a follower's too", () => {
+    const shut: SilenceGateMarks = { closed: 0.5, open: 0.6 };
+    const music = { music: true, confidence: SILENCE_GATE_MUSIC_OPEN };
+    const own = createAnimClock().advance(DT, frame({ level: 0, engine: { ...HIT({ kick: 1.5 }), ...music } }), undefined, shut);
+    expect(own.lowOnset).toBe(true);
+    expect(own.gateDimmer).toBe(1);
+    const follower = frame({ level: 0, engine: { ...HIT({ kick: 1.5 }), ...music, hitLevel: 0 } });
+    expect(createAnimClock().advance(DT, follower, undefined, shut).lowOnset).toBe(true);
+    expect(createAnimClock().advance(DT, frame({ level: 0, engine: HIT({ kick: 1.5 }) }), undefined, shut).lowOnset).toBe(false);
+  });
+
+  it("keeps music's hold between the gate's two confidence marks, and lets go under the lower one", () => {
+    const shut: SilenceGateMarks = { closed: 0.5, open: 0.6 };
+    const clock = createAnimClock();
+    const tick = (confidence: number) =>
+      clock.advance(DT, frame({ level: 0, engine: { ...HIT({ hat: 1.5 }), music: true, confidence } }), undefined, shut).highOnset;
+    const between = (SILENCE_GATE_MUSIC_OPEN + SILENCE_GATE_MUSIC_CLOSE) / 2;
+    expect(tick(between)).toBe(false);
+    expect(tick(SILENCE_GATE_MUSIC_OPEN)).toBe(true);
+    expect(tick(between)).toBe(true);
+    expect(tick(SILENCE_GATE_MUSIC_CLOSE - 0.01)).toBe(false);
+    expect(tick(between)).toBe(false);
   });
 
   it("beatRatio is the engine's surge, 0 without a reading", () => {

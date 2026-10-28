@@ -26,7 +26,8 @@ the room's own loudness. That same adaptive shape is why `src/audio/
 silenceGate.ts` exists: its two marks weight the audio engine's hits
 (`src/audio/engine/`, gated in `src/render/bandEnergy.ts` via `src/render/animClock.ts`)
 against `FeatureFrame.level` — the one absolute-loudness reading in the pipeline —
-so a quiet room's own hiss can't fire on its own. The marks track the room's own
+so a quiet room's own hiss can't fire on its own, while the engine hearing a clear
+beat holds it open for a quiet mic's music. The marks track the room's own
 quiet level, fed each tick by `feedSilenceGateMeasurement`, as
 `src/audio/autoGain.ts`'s amount tracks the room's band span; neither resolves
 through `musicProfile.ts`'s dials, and neither is a setting.

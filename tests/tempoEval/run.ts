@@ -8,6 +8,7 @@ import { getHitShape } from "../../src/audio/hitStrength.ts";
 import {
   feedSilenceGateMeasurement,
   hitPasses,
+  musicHoldsGate,
   resetSilenceGateTracker,
   resolveSilenceGate,
   silenceGateDimmer,
@@ -249,6 +250,7 @@ export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMe
     resetSilenceGateTracker();
   }
   let gate: SilenceGateMarks | undefined = opts.gate ? SILENCE_GATE_SEED : undefined;
+  let musicHeld = false;
   const dt = 1 / fps;
   const totalDurationSec = mono.length / SR;
   const nFrames = Math.floor(totalDurationSec * fps);
@@ -329,7 +331,8 @@ export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMe
     heard.engine = reading;
     heard.bpm = engine.bpm;
     const strongest = Math.max(reading.kick, reading.snare, reading.hat);
-    heard.onset = hitPasses(strongest, gate ? silenceGateDimmer(heard.level, gate) : 1);
+    musicHeld = musicHoldsGate(reading, musicHeld);
+    heard.onset = hitPasses(strongest, gate ? silenceGateDimmer(heard.level, gate, musicHeld) : 1);
     heard.pulseOnset = strongest > 0;
 
     let frame: FeatureFrame = heard;

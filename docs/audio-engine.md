@@ -228,6 +228,13 @@ hears the audio before any gate, because a gated tracker starved tempo in rooms
 the gate read as quiet. Only a mic is gated: a tab share, a line in or a
 loopback has no room hiss, and its frames carry `FeatureFrame.gateOff`.
 
+The tracker also opens the gate. A quiet laptop mic's music sits under the
+gate's level marks, but the tracker still hears its beat, so while the reading
+says music with confidence over the gate's open mark, every hit counts, until
+confidence falls under its close mark (`musicHoldsGate`). An empty room's hiss
+never gets that periodic. Each device runs this off the `music` and
+`confidence` its frames carry, so the pop-out and a TV open with the laptop.
+
 ### The rise, every hop
 
 Besides hits, the onset detector reports each hop's rise against the hit

@@ -39,6 +39,21 @@
  * frame (net/outputSync.ts's `gate`), and a paired TV and the synthetic feed
  * hold SILENCE_GATE_SEED.
  *
+ * Music opens the gate too. Through a quiet laptop mic a song's `level` sits
+ * under the marks, so they read music and room alike as silence and drop
+ * most of its hits (#578). The engine's tempo tracker still hears that music:
+ * how periodic the onsets are (EngineReading.confidence) doesn't depend on
+ * level. So once the engine hears a steady pulse (EngineReading.music) with
+ * confidence at SILENCE_GATE_MUSIC_OPEN, every hit counts, until confidence
+ * falls under SILENCE_GATE_MUSIC_CLOSE or the pulse stops (musicHoldsGate;
+ * each device that draws keeps its own last answer, off the reading its
+ * frames carry, so a TV and the pop-out open with the laptop). The tracker
+ * hears the audio before any gate, so reading it closes no loop. Before the
+ * tracker finds the beat (seconds into a song, a beatless intro throughout),
+ * a quiet mic is still gated by level alone. Opening on loudness over the
+ * quietest room heard was measured too and dropped: a steady noise that
+ * starts later (a noise video, a fan) then fires as if there were no gate.
+ *
  * Only a mic is gated. A tab share, a line in or a loopback carries no room
  * hiss, and there the gate only ever dropped quiet music's hits: the floor
  * tracker read a steady stretch of a clean source as the room's floor (#777).
@@ -76,9 +91,28 @@
  * above it, rather than telling silence from music by loudness alone.
  */
 
+import type { EngineReading } from "./types.ts";
+
 export interface SilenceGateMarks {
   closed: number;
   open: number;
+}
+
+// The music path (this file's header). Tuned 2026-10-28 on the mic-gap takes
+// (#578): an empty room's confidence peaks a little over tempo.ts's MUSIC_ON,
+// enough to set `music` now and then, but never reaches OPEN, while a song
+// with a clear beat holds over it for most of its length. CLOSE lets a song
+// whose confidence dips keep its hits, and shuts within a couple of seconds
+// of the music stopping, sooner than `music` itself drops. Any lower OPEN let
+// rooms or the end of a set fire.
+export const SILENCE_GATE_MUSIC_OPEN = 0.5;
+export const SILENCE_GATE_MUSIC_CLOSE = 0.22;
+
+/** Whether music holds the gate open this tick (this file's header). `held`
+ *  is what this returned for the caller's previous tick. */
+export function musicHoldsGate(engine: EngineReading | null | undefined, held: boolean): boolean {
+  if (!engine?.music) return false;
+  return engine.confidence >= (held ? SILENCE_GATE_MUSIC_CLOSE : SILENCE_GATE_MUSIC_OPEN);
 }
 
 /** In FeatureFrame.level units — see this file's header. */
@@ -250,6 +284,8 @@ function clamp01(x: number): number {
  * multiplier's own rate of change eases in and out at each mark instead of
  * kinking there.
  *
+ * `musicHeld` is musicHoldsGate()'s answer this tick: music holds it at 1.
+ *
  * Two special cases:
  * - `marks.closed <= SILENCE_GATE_MIN` gates nothing: always returns 1.
  *   Nothing is quieter than level zero. The tracker never puts `closed`
@@ -258,8 +294,8 @@ function clamp01(x: number): number {
  * - A non-finite `level` returns 1 (fail open). Bad data reaching this
  *   function must never be the reason the visuals go silent.
  */
-export function silenceGateDimmer(level: number, marks: SilenceGateMarks): number {
-  if (marks.closed <= SILENCE_GATE_MIN) return 1;
+export function silenceGateDimmer(level: number, marks: SilenceGateMarks, musicHeld = false): number {
+  if (musicHeld || marks.closed <= SILENCE_GATE_MIN) return 1;
   if (!Number.isFinite(level)) return 1;
   const span = marks.open - marks.closed;
   if (span <= 0) return 1;

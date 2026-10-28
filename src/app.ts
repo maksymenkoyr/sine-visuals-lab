@@ -207,6 +207,7 @@ import {
   resolveSilenceGate,
   feedSilenceGateMeasurement,
   silenceGateDimmer,
+  musicHoldsGate,
   hitPasses,
   SILENCE_GATE_OFF,
   type SilenceGateMarks,
@@ -533,6 +534,8 @@ let lastFluxRatio: number | null = null;
 // `fired` is the local frame's onset (not the jitter-buffered `lastVis`), so it
 // and `suppressed` describe the same tick's decision.
 let lastGate: SilenceGateReading | null = null;
+/** musicHoldsGate()'s last answer for the local capture (src/audio/silenceGate.ts). */
+let gateMusicHeld = false;
 /** Read by the Source row via the deviceMenu deps' getInputHealth, not
  *  DeviceMenu.update(): that row refreshes on its own slower timer. */
 let lastInputHealth: InputHealthReading | null = null;
@@ -3260,8 +3263,9 @@ function readLocalCapture(
   f.engine = engine;
   f.gateOff = !captureIsMic;
   f.bpm = engineSource ? engineSource.bpm : 0;
+  gateMusicHeld = musicHoldsGate(engine, gateMusicHeld);
   // Followers that predate the reading still react to these two flags.
-  const dimmer = silenceGateDimmer(f.level, gate);
+  const dimmer = silenceGateDimmer(f.level, gate, gateMusicHeld);
   const strongest = engine ? Math.max(engine.kick, engine.snare, engine.hat) : 0;
   f.onset = hitPasses(strongest, dimmer);
   f.pulseOnset = strongest > 0;
