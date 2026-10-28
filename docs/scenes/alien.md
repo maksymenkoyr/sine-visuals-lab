@@ -492,3 +492,5 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   picked B's body, their own head picture and its squeeze, and Blender.
 - #778 (draft, 2026-10-27, for #772): the new model built in Blender by
   script, round 1 of its renders sent to the owner.
+- #782 (draft, 2026-10-28, for #751): the scene draws the alien live, Bounce
+  squashes the figure itself, and the videos stay only for older tabs.
