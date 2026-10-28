@@ -1,6 +1,6 @@
 /**
  * Alien — one grey alien dancing as a glowing green wireframe on black, in
- * three short loops, each a captured dance seen from its own angle (LOOPS in
+ * short loops, each a captured dance seen from its own angle (LOOPS in
  * reel.ts), drawn live every frame by renderer.ts. The music decides how:
  *   - Move: its wire (Level by default) times the slider is the dance's
  *     speed, eased so it glides; silence buys no frames and the alien holds;

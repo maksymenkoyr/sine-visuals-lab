@@ -52,7 +52,7 @@ export const SETTINGS: SceneSetting[] = [
     label: "Cut",
     description:
       "On: the loop repeats until the wired input node jumps out from its everyday ones, over the dotted line on its graph, " +
-      "then cuts to another of the three angles (never twice within a couple of seconds). Off: the loop on screen repeats",
+      "then cuts to another dance, each seen from its own angle (never twice within a couple of seconds). Off: the loop on screen repeats",
     group: "Camera",
     type: "boolean",
     min: 0,

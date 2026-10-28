@@ -1,5 +1,5 @@
 /**
- * The alien's three loops and the rules the music plays them by.
+ * The alien's loops and the rules the music plays them by.
  *
  * A loop is one captured dance (a clip from the dancers' library,
  * ../dancers/clipFormat.ts) seen through one fixed camera — LOOPS pairs
@@ -60,6 +60,30 @@ export const LOOPS: readonly LoopSpec[] = [
   { clip: "twist", camera: { eye: [-1.6, 1.95, 1.85], target: [0, 1.35, 0.1], focal: 3.0 } },
   // From the floor at his left front, close, looking up: he looms over the lens.
   { clip: "toprock2", camera: { eye: [0.7, 0.2, 1.6], target: [0, 1.0, 0.05], focal: 1.7 } },
+  // The loops below frame the Blender model's height, so his head stays in
+  // through every dance; the loops above still frame the old, shorter model
+  // (the scene record's Known issues). Wider than those: most of these dances
+  // are in the legs. The library's stillest clips are left out.
+  // Front, knees up, a little to his left: the arm routine.
+  { clip: "macarena", camera: { eye: [0.55, 1.6, 2.5], target: [0, 1.6, 0], focal: 2.3 } },
+  // Three-quarter from his left and above, knees up.
+  { clip: "chicken", camera: { eye: [1.6, 1.7, 2.0], target: [0, 1.25, 0.1], focal: 2.0 } },
+  // Side on, full body: the glide reads only in profile.
+  { clip: "moonwalk", camera: { eye: [3.0, 1.0, 0.3], target: [0, 1.15, 0], focal: 1.95 } },
+  // Front from low, full body, for the kicks.
+  { clip: "russian", camera: { eye: [0, 0.6, 3.1], target: [0, 1.0, 0.1], focal: 2.6 } },
+  // Three-quarter from his right, full body at hip height.
+  { clip: "charleston", camera: { eye: [-2.1, 1.1, 2.3], target: [0, 1.15, 0.1], focal: 2.1 } },
+  // High above his left front, looking down past the head at the feet.
+  { clip: "charleston2", camera: { eye: [0.8, 2.7, 2.4], target: [0, 1.05, 0], focal: 1.9 } },
+  // Front from a little above, full body.
+  { clip: "salsa", camera: { eye: [0, 1.8, 3.5], target: [0, 1.15, 0], focal: 2.4 } },
+  // Close from his left at hip height, knees up: hands on the head, hips swaying.
+  { clip: "lambada", camera: { eye: [1.3, 1.0, 1.8], target: [0, 1.4, 0], focal: 1.9 } },
+  // Front, a little to his right, low: he drops to the floor and comes back up.
+  { clip: "armup", camera: { eye: [-0.6, 0.9, 2.7], target: [0, 1.0, 0.2], focal: 2.0 } },
+  // Low at his left front, full body: a second toprock, from further back than toprock2's.
+  { clip: "toprock3", camera: { eye: [0.9, 0.4, 2.5], target: [0, 1.05, 0.2], focal: 1.9 } },
 ];
 
 /** Seconds a clip's loop lasts as it was captured. */

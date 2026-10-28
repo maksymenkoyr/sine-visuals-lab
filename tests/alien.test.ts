@@ -322,27 +322,35 @@ describe("alien mesh file", () => {
   });
 });
 
+const clipBin = readFileSync(new URL(`../public${CLIP_LIBRARY_URL}`, import.meta.url));
+const library = decodeClipLibrary(clipBin.buffer.slice(clipBin.byteOffset, clipBin.byteOffset + clipBin.byteLength));
+
+describe("alien loops", () => {
+  it("plays a clip the library has, each a different dance", () => {
+    for (const loop of LOOPS) expect(library.byName.get(loop.clip), loop.clip).toBeDefined();
+    expect(new Set(LOOPS.map((l) => l.clip)).size).toBe(LOOPS.length);
+  });
+});
+
+// The baked videos predate the loops after them: older builds still play them
+// (src/pinnedAssets.ts's header), so they must stay the first loops as LOOPS lists them.
 describe("alien bake", () => {
-  it("has a baked video for every loop, of that loop's clip, at its captured length", () => {
-    const bin = readFileSync(new URL(`../public${CLIP_LIBRARY_URL}`, import.meta.url));
-    const library = decodeClipLibrary(bin.buffer.slice(bin.byteOffset, bin.byteOffset + bin.byteLength));
-    expect(BAKED.loops.length).toBe(LOOPS.length);
-    LOOPS.forEach((loop, i) => {
-      const baked = BAKED.loops[i];
-      const clip = library.byName.get(loop.clip);
-      expect(clip, loop.clip).toBeDefined();
-      expect(baked.clip).toBe(loop.clip);
+  it("has a baked video for each of the first loops, of that loop's clip, at its captured length", () => {
+    expect(BAKED.loops.length).toBeLessThanOrEqual(LOOPS.length);
+    BAKED.loops.forEach((baked, i) => {
+      const clip = library.byName.get(LOOPS[i].clip);
+      expect(baked.clip).toBe(LOOPS[i].clip);
       expect(baked.frames).toBe(Math.round(clipSeconds(clip!) * BAKED.fps));
       expect(statSync(new URL(`../public${baked.file}`, import.meta.url)).size).toBeGreaterThan(10_000);
     });
   });
 
-  it("puts each loop's Bounce pivot where its camera sees the floor under the alien", () => {
-    LOOPS.forEach((loop, i) => {
-      const [u, v] = projectToFrame(loop.camera, BAKED.width / BAKED.height, [0, 0, 0]);
+  it("puts each baked loop's Bounce pivot where its camera sees the floor under the alien", () => {
+    BAKED.loops.forEach((baked, i) => {
+      const [u, v] = projectToFrame(LOOPS[i].camera, BAKED.width / BAKED.height, [0, 0, 0]);
       // The bake averages the pelvis's floor point; the dances barely leave the origin.
-      expect(Math.abs(BAKED.loops[i].pivot[0] - u)).toBeLessThan(0.1);
-      expect(Math.abs(BAKED.loops[i].pivot[1] - v)).toBeLessThan(0.15);
+      expect(Math.abs(baked.pivot[0] - u)).toBeLessThan(0.1);
+      expect(Math.abs(baked.pivot[1] - v)).toBeLessThan(0.15);
     });
   });
 });
