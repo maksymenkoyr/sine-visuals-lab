@@ -190,7 +190,9 @@ export function isMissingDeviceError(err: unknown): boolean {
  *  name too (e.g. a virtual "microphone" driver); a mic-shaped name (mic,
  *  microphone, headset, AirPods, any Bluetooth headset — Chrome on macOS
  *  suffixes its name "(Bluetooth)", Windows calls it "Hands-Free" — a
- *  webcam/camera's built-in mic) next;
+ *  webcam/camera's built-in mic, and Chromium's fake capture device, which
+ *  tools/ref-browser.mjs plays a song into as the mic, so tools such as
+ *  tools/tune-real.mjs run the mic's silence gate) next;
  *  anything else — a USB audio interface, a mixer's own sound card — is
  *  "line": a cable feeding in something that isn't this device's own
  *  mic. Used for the Input card's Source row (src/ui/deviceMenu.ts) and the
@@ -199,7 +201,7 @@ export function isMissingDeviceError(err: unknown): boolean {
 export type InputKind = "mic" | "line" | "loopback";
 
 const LOOPBACK_RE = /blackhole|loopback|soundflower|vb-?cable|virtual|stereo mix|what u hear/i;
-const MIC_RE = /mic|microphone|headset|airpods|bluetooth|hands-free|webcam|camera/i;
+const MIC_RE = /mic|microphone|headset|airpods|bluetooth|hands-free|webcam|camera|fake default audio input/i;
 
 export function inputKind(label: string): InputKind {
   if (LOOPBACK_RE.test(label)) return "loopback";

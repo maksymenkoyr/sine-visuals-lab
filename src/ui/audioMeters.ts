@@ -997,7 +997,7 @@ function hitsRuleHint(getSilenceGate: () => SilenceGateMarks): string {
   const gate =
     marks.closed <= SILENCE_GATE_MIN
       ? "Silence gate is off."
-      : `Quieter than ${pct(marks.closed)}% input level nothing counts; between ${pct(marks.closed)}% and ${pct(marks.open)}% a hit has to clear its line by more the quieter it is.`;
+      : `Quieter than ${pct(marks.closed)}% input level nothing counts; between ${pct(marks.closed)}% and ${pct(marks.open)}% a hit has to clear its line by more the quieter it is. While music with a clear beat plays, every hit counts, however quiet.`;
   return [
     "One track per kind of hit, a note for every reading that cleared its line.",
     "Filled: it counted, brighter the more it stood out.",

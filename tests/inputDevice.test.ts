@@ -126,6 +126,7 @@ describe("inputKind", () => {
     expect(inputKind("Stereo Mix (Realtek)")).toBe("loopback");
     expect(inputKind("AirPods Pro")).toBe("mic");
     expect(inputKind("WH-1000XM4 (Bluetooth)")).toBe("mic");
+    expect(inputKind("Fake Default Audio Input")).toBe("mic");
   });
 });
 

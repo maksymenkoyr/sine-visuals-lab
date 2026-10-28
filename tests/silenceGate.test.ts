@@ -6,11 +6,15 @@ import {
   resolveSilenceGate,
   feedSilenceGateMeasurement,
   silenceGateMarksForFloor,
+  musicHoldsGate,
   SILENCE_GATE_MIN,
+  SILENCE_GATE_MUSIC_CLOSE,
+  SILENCE_GATE_MUSIC_OPEN,
   SILENCE_GATE_OFF,
   SILENCE_GATE_SEED,
 } from "../src/audio/silenceGate.ts";
 import { createSyntheticFeed } from "../src/audio/synthetic.ts";
+import { engineReading } from "./engineReading.ts";
 
 const SEED_GAP = SILENCE_GATE_SEED.open - SILENCE_GATE_SEED.closed;
 
@@ -72,6 +76,32 @@ describe("silenceGateDimmer", () => {
       const frame = feed.frame(t);
       expect(silenceGateDimmer(frame.level, SILENCE_GATE_SEED)).toBe(1);
     }
+  });
+});
+
+describe("musicHoldsGate", () => {
+  const music = (confidence: number) => engineReading({ music: true, confidence });
+
+  it("opens on a steady pulse at the open mark, not just under it", () => {
+    expect(musicHoldsGate(music(SILENCE_GATE_MUSIC_OPEN), false)).toBe(true);
+    expect(musicHoldsGate(music(SILENCE_GATE_MUSIC_OPEN - 0.01), false)).toBe(false);
+  });
+
+  it("once open, holds down to the close mark", () => {
+    expect(musicHoldsGate(music(SILENCE_GATE_MUSIC_CLOSE), true)).toBe(true);
+    expect(musicHoldsGate(music(SILENCE_GATE_MUSIC_CLOSE - 0.01), true)).toBe(false);
+  });
+
+  it("never holds without a steady pulse or a reading", () => {
+    expect(musicHoldsGate(engineReading({ music: false, confidence: 1 }), true)).toBe(false);
+    expect(musicHoldsGate(null, true)).toBe(false);
+    expect(musicHoldsGate(undefined, true)).toBe(false);
+  });
+
+  it("held, the gate passes a bare hit in a dead silent room", () => {
+    expect(silenceGateDimmer(0, SILENCE_GATE_SEED, true)).toBe(1);
+    expect(hitPasses(1.01, silenceGateDimmer(0, SILENCE_GATE_SEED, true))).toBe(true);
+    expect(hitPasses(1.01, silenceGateDimmer(0, SILENCE_GATE_SEED, false))).toBe(false);
   });
 });
 

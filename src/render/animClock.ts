@@ -13,7 +13,7 @@ import { createSpectralCentroid, type SpectralCentroid } from "./spectralCentroi
 import { createBandPick, type BandPick } from "./bandPick.ts";
 import { BAND_SPLIT } from "../audio/bandSplit.ts";
 import { SMOOTHING_DEFAULT, smoothingRateScale } from "../audio/sensitivity.ts";
-import { silenceGateDimmer, type SilenceGateMarks } from "../audio/silenceGate.ts";
+import { musicHoldsGate, silenceGateDimmer, type SilenceGateMarks } from "../audio/silenceGate.ts";
 import { hitStrength, pulseDecayScales, UNIT_TAILS, type HitShape, type HitParts, type HitTails } from "../audio/hitStrength.ts";
 
 // Bundles every per-frame renderer-side clock a scene might want, so
@@ -184,8 +184,9 @@ export interface AnimFrame {
   hitTail: HitTails;
   /** This tick's silence-gate dimmer (src/audio/silenceGate.ts) — the same
    *  value bandEnergy.advance() was called with above, computed once here
-   *  from `gate`/`frame.level` (see advance()'s own doc). 1 with no gate or
-   *  a fully open room, down toward 0 the quieter the room reads. The band
+   *  from `gate`/`frame.level` and the frame's engine reading (see
+   *  advance()'s own doc). 1 with no gate, a fully open room or music
+   *  holding it open, down toward 0 the quieter the room reads. The band
    *  signals (signals.ts's BAND_SIGNALS) scale by it; a BeatListener's
    *  "bass"/"mid"/"high" sources are
    *  gated by construction (lowOnset/midOnset/highOnset are already false
@@ -220,7 +221,8 @@ export interface AnimClock {
    *  (0 -> Infinity) makes sectionIntensity/profile land exactly on the
    *  `raw` counterparts already exposed below — see the meters panel's RAW
    *  chip (src/ui/audioMeters.ts). `gate` (src/audio/silenceGate.ts), when
-   *  given, is turned into this tick's dimmer from `frame.level` right here
+   *  given, is turned into this tick's dimmer from `frame.level` (and
+   *  `frame.engine`'s music, silenceGate.ts's musicHoldsGate) right here
    *  and threaded into bandEnergy's own advance() — animClock stays
    *  param-driven and never reads the store itself, so only the real
    *  app.ts/tv.ts entry points pass marks; omitted by every preview/
@@ -299,6 +301,8 @@ export function createAnimClock(opts: { lockMeaning?: LockMeaning } = {}): AnimC
   const section: SectionIntensity = createSectionIntensity();
   const profile: MusicProfile = createMusicProfile();
   const centroid: SpectralCentroid = createSpectralCentroid();
+  // musicHoldsGate()'s last answer for this clock's frames.
+  let gateMusicHeld = false;
   let beatPulse = 0;
   let hats = 0;
   let lead = 0;
@@ -327,10 +331,11 @@ export function createAnimClock(opts: { lockMeaning?: LockMeaning } = {}): AnimC
         tailScales = pulseDecayScales(tailShape);
       }
       const hitTail = tailScales;
-      const dimmer = gate ? silenceGateDimmer(frame.level, gate) : 1;
+      gateMusicHeld = musicHoldsGate(frame.engine, gateMusicHeld);
+      const dimmer = gate ? silenceGateDimmer(frame.level, gate, gateMusicHeld) : 1;
       // A follower's hits carry the level of the frame they came in (EngineReading.hitLevel).
       const hitLevel = frame.engine?.hitLevel;
-      const hitDimmer = gate && hitLevel !== undefined ? silenceGateDimmer(hitLevel, gate) : dimmer;
+      const hitDimmer = gate && hitLevel !== undefined ? silenceGateDimmer(hitLevel, gate, gateMusicHeld) : dimmer;
       const flowPhase = flow.advance(dtSec, frame.energy);
       bandEnergy.advance(dtSec, frame, rateScale, hitDimmer, hit?.shape);
       kickBand.advance(dtSec, frame.bands, BAND_SPLIT.lowMid);
