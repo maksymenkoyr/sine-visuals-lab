@@ -287,6 +287,7 @@ import { createImmersiveMode, type ImmersiveMode } from "./ui/fullscreen.ts";
 import { createScenePicker, type ScenePickEntry, type ScenePicker } from "./ui/scenePicker.ts";
 import { requestWakeLock } from "./ui/wakeLock.ts";
 import { noteKeyUse } from "./ui/keyHints.ts";
+import { handleSceneArrows } from "./ui/sceneArrows.ts";
 import { shouldTickInBackground, startBackgroundTick } from "./net/backgroundTick.ts";
 import { createBroadcastTransport, createOutputBridge, type OutputBridge } from "./net/outputBridge.ts";
 import { combineBridges, createRoomBridge, type RoomBridge } from "./net/roomBridge.ts";
@@ -2978,6 +2979,21 @@ async function boot(): Promise<void> {
         e.preventDefault();
         noteKeyUse("pad");
         firePad(pad.id);
+      }
+    }
+    if (inViz && !typing) {
+      const moved = handleSceneArrows(e, scene, {
+        get: getSceneSetting,
+        set: (sceneId, spec, value) => {
+          setAutoEnabled(sceneId, spec.key, false);
+          setSceneSetting(sceneId, spec, value);
+        },
+      });
+      if (moved) {
+        deviceMenu?.settingChanged(scene.id, moved.spec.key);
+        noteKeyUse("arrows");
+        const places = Math.max(0, -Math.floor(Math.log10(moved.spec.step)));
+        showHud(`${moved.spec.label} ${moved.value.toFixed(places)}`);
       }
     }
     // Beat-trim keys (src/render/beatTrim.ts) use e.code (physical key), not

@@ -7,14 +7,20 @@ fast the dance on screen plays, and silence holds him still. Bounce squashes him
 the floor and springs him back on its wire's hits; Bounce smoothness turns
 that spring from a snap and a wobble into an ease and a glide. A loop repeats
 until the Cut setting's wire makes a hit that stands out from its everyday
-ones (the dotted line on its graph). In development, on main since #374.
+ones (the dotted line on its graph). Dance holds one dance, and Cut then
+waits; View shows every dance through one loop's camera, and the camera
+sliders under it (the arrow keys too) move that camera by hand. In
+development, on main since #374.
 
 ## Where the code is
 
 - `src/render/scenes/alien/card.ts`: the scene's card, loaded with the page: id,
   name, `SETTINGS`, the Motion section in `PANEL`, `MOVE_GAIN`, the `gallery`
-  record and `loadBody`. The body spreads the card, so the registered settings
-  are the body's own objects.
+  record and `loadBody`, and `arrows`: which camera sliders the arrow keys
+  move (`src/ui/sceneArrows.ts` handles the keys for any scene). The body
+  spreads the card, so the registered settings are the body's own objects.
+- `camera.ts`: the camera by hand: `handCamera()` moves the view by the
+  Camera sliders, `easeHand()` glides them.
 - `src/render/scenes/alien/index.ts`: the body, loaded after first paint. It
   loads the model and the dancers' clip library (`sceneMedia`, both fetched
   on the first mount and decoded once per page; black until both land), keeps
@@ -28,7 +34,9 @@ ones (the dotted line on its graph). In development, on main since #374.
 - `renderer.ts`: the model drawn live (mesh pass, bloom, composite) through a
   loop's camera, into this device's slice of the room, with Bounce's squash;
   `floorPivot()` finds the floor point the squash pulls toward.
-- `reel.ts`: the `LOOPS` table (clip + camera per loop) and the rules:
+- `reel.ts`: the `LOOPS` table (per loop: clip, camera, and the names its
+  Dance and View chips show), `chipLoop()` (which loop a Dance or View chip
+  holds) and the rules:
   `easeSpeed()` (Move), `stepCut()` (Cut), `stepBounce()` (Bounce) and
   `bounceSpring()` (Bounce smoothness). Its header has them in words.
 - `glsl.ts`: the look: GPU skinning, Bounce's squash on the skinned figure,
@@ -291,6 +299,46 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
     taken; he covers less of the frame there than in loop 0's close-up, so
     less of the picture changes. The rules for Move, Bounce and Cut are
     unchanged.
+- 2026-10-28, the Dance and View rows, headless Chromium on Metal on the
+  owner's M1 Pro, synthetic audio at 128 bpm, chips pressed with real mouse
+  presses:
+  - Dance on Moonwalk, then Russian: the scene shows that loop at once (the
+    readout says "loop 6 of 13 · moonwalk", then "loop 7").
+  - View on Close front shows Moonwalk through loop 0's close-up; on Side,
+    Russian through Moonwalk's side camera.
+  - Cut wired to Bass hit: 4 cuts in 10 s on Any, none in 10 s with Salsa
+    held.
+  - `tune-real` on `deTJ513J07Y`, then silence, 30 s from 4 s, with Dance
+    on Any and View on Own (the defaults):
+
+    | source | change med | change p95 | hits/min | energy | fps |
+    | --- | --- | --- | --- | --- | --- |
+    | song | 0.54 | 0.84 | 444 | 0.49 | 120 |
+    | silence | 0.00 | 0.00 | 0 | 0.00 | 120 |
+
+    Silence: "the picture holds still". The defaults play as before; the
+    song's numbers move with whichever dance the cuts land on.
+- 2026-10-28, the camera by hand, same set-up, keys pressed with
+  Playwright's keyboard:
+  - With nothing focused, 18 presses of → stored Orbit 90, 5 of ↑ Tilt 15
+    and 10 of Shift+↓ Distance 1.5; the HUD named each value.
+  - With the panel open during the presses, its Orbit and Distance
+    sliders moved with them (−30 and 0.80 after 6 × ← and 4 × Shift+↑).
+  - With the View row focused, → stepped its chip (Own to Close front) and
+    left the camera alone; a click on the picture moved focus to the page,
+    and the arrows moved the camera again.
+  - Save look stored Dance, View and the five camera sliders in the look.
+  - `tune-real` on `deTJ513J07Y`, then silence, 30 s from 4 s, on the
+    defaults (the camera at rest is exactly each loop's own):
+
+    | source | change med | change p95 | hits/min | energy | fps |
+    | --- | --- | --- | --- | --- | --- |
+    | song | 0.77 | 1.92 | 452 | 0.49 | 120 |
+    | silence | 0.00 | 0.00 | 0 | 0.00 | 120 |
+
+    Silence: "the picture holds still". The song's p95 is above the run
+    before because the cuts landed on closer views this time (loop 0's
+    close-up alone measured 1.77 / 2.48).
 
 ## Decisions and pivots
 
@@ -488,6 +536,45 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 
     https://claude.ai/artifact/A2YaDxiZPZWxEi6uEPwXq3
 
+- 2026-10-28, the owner: "i wanna polish moves. can u expose some control
+  to manually switch moves. also expose different camera views". My calls,
+  not asked:
+  - **Dance**, a row of chips: Any (the default, Cut picks as before) or
+    one dance, which he keeps doing while Cut waits. It sits at the end of
+    the Motion section, under Bounce smoothness, and is named Dance because
+    Move already names the speed.
+  - **View**, a row of chips in Camera above Cut: Own (the default, each
+    dance through its own camera) or one loop's camera for every dance. The
+    views are the loops' cameras, each named for where it stands; no new
+    camera was added. Cut still changes only the dance.
+  - Neither row is wired to the music.
+  - Saved looks keep a chip by its place in the row, so a new loop goes at
+    the end of `LOOPS`.
+- 2026-10-28, the owner: "is it possible to add some kind of manual control
+  over camer and abiliuty to save satting?", then, after my answer (camera
+  sliders, saved by the Looks card's Save look, perhaps a Copy camera
+  button): "can we export control to keyboard to. arrows? build it". My
+  calls:
+  - Five sliders in Camera, under View: **Orbit** (round him, degrees),
+    **Tilt** (over or under him, degrees), **Distance** (times the view's
+    own), **Height** (camera and aim lifted together, metres) and **Zoom**
+    (times the view's focal length). They are offsets on whichever view is
+    on screen, so at rest every view is exactly the loop's camera, and a
+    cut keeps them. The drawn camera eases to them over `HAND_EASE_SEC`, so
+    a held key glides; a cut or a new View chip still jumps. Tilt stops at
+    `PITCH_LIMIT`, short of straight down.
+  - The arrow keys: ← → Orbit, ↑ ↓ Tilt, Shift with ↑ ↓ Distance (↑ is
+    closer), each press a step the card's `arrows` sets. Height and Zoom are
+    sliders only. Alt and Option are left alone: they already play to the
+    output window. The keys reach the scene only while no slider, text field
+    or chip row has focus, so a focused View row still steps its chips. Any
+    scene can name its own arrow settings the same way (`SceneArrows`,
+    `src/ui/sceneArrows.ts`); the keys list (`?`) has a Camera row.
+  - Master Scale leaves the camera sliders alone (`masterScale: false`):
+    scaled, the camera would move whenever someone turned Master.
+  - Saving is the Looks card's Save look, as for every other setting. No
+    Copy camera button: the owner answered with keys, not that.
+
 ## Tuning notes
 
 - Move's slider multiplies the wire: 1 plays a loud song at about captured
@@ -502,6 +589,9 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   Cut threshold thins those out (see Measurements).
 - Judge the look in loop 0 (`?loop=0`), whose framing is the closest to the
   reference.
+- To polish one dance, hold it on Dance and step through View; the strip's
+  arrow keys move chip by chip. Then click the picture, so no row has focus,
+  and fly the camera with the arrows; Save look keeps the framing.
 
 ## Known issues and next steps
 
@@ -615,5 +705,7 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 - #778 and #782 (merged 2026-10-28).
 - #784 (draft, 2026-10-28, for #773): the scene draws the Blender model,
   loaded as `mesh-v1.bin`, with black eyes; the framing waits for the owner.
-- Draft (2026-10-28): ten more dances from the clip library, each with its
-  own camera framed for the new model.
+- #785 (merged 2026-10-28): ten more dances from the clip library, each
+  with its own camera framed for the new model.
+- #786 (draft, 2026-10-28): the Dance and View rows, then the camera by
+  hand: five Camera sliders and the arrow keys.

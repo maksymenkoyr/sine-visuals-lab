@@ -101,6 +101,8 @@ export const SHORTCUTS: readonly Shortcut[] = [
     ? { key: "Return", id: "go", label: "Play", hint: "Send this look to the output window: tap = at once, hold = glide there over twice as long (the right ⌘ and ⌥ Option do the same, G sends at once)" }
     : { key: "Enter", id: "go", label: "Play", hint: "Send this look to the output window: tap = at once, hold = glide there over twice as long (Alt does the same, G sends at once)" },
   { key: "1–9", id: "pad", label: "Fire pad", hint: "Fire pad 1–9 of the Set, panel open or closed" },
+  // A scene's own arrow keys (ui/sceneArrows.ts); Alien's camera is the only one so far.
+  { key: "← → ↑ ↓", id: "arrows", label: "Camera", hint: "Move the camera, in a scene that has one (Alien): ← → around, ↑ ↓ over and under, ⇧ ↑ ↓ closer and further" },
   // The held effects (render/heldEffects.ts): one row per effect, tagged on its
   // on-screen button in #fxBar (ui/effectControls.ts).
   ...EFFECTS.map((e) => ({ key: e.key, id: effectShortcutId(e.id), label: e.label, hint: e.hint })),

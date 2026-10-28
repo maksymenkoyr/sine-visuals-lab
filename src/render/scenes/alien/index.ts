@@ -10,7 +10,10 @@
  *   - Bounce: its wire (Bass hit by default) squashes the alien toward the
  *     floor under him and springs him back, on top of the dance (MESH_VERT
  *     in glsl.ts); Bounce smoothness turns that spring from a snap and a
- *     wobble into an ease and a glide.
+ *     wobble into an ease and a glide;
+ *   - Dance and View, not wired to the music: hold one dance (Cut then
+ *     waits) or one loop's camera for every dance; the camera sliders under
+ *     View, and the arrow keys, move that camera by hand (camera.ts).
  * reel.ts owns those rules and the LOOPS table; under the Move row a readout
  * shows what the music is buying (src/ui/widgets/alienPlay.ts, fed by
  * probe()).
@@ -39,8 +42,9 @@ import { CLIP_LIBRARY_URL, decodeClipLibrary, sampleClip, type Clip, type ClipLi
 import { createPose } from "../dancers/rig.ts";
 import { createAlienRenderer, floorPivot, type AlienRenderer, type Squash } from "./renderer.ts";
 import { decodeAlienMesh, MESH_URL, type AlienModel } from "./meshFile.ts";
-import { BOUNCE_MAX, clipSeconds, createBounce, createReel, easeSpeed, LOOPS, stepBounce, stepCut, type Reel } from "./reel.ts";
+import { BOUNCE_MAX, chipLoop, clipSeconds, createBounce, createReel, easeSpeed, LOOPS, stepBounce, stepCut, type Reel } from "./reel.ts";
 import { card, MOVE_GAIN, SETTINGS } from "./card.ts";
+import { easeHand, HAND_AT_REST, handCamera, type CameraHand } from "./camera.ts";
 
 // Scene media (src/pinnedAssets.ts's header): sceneMedia keys by path, so the
 // clips are the same copy Dancers and Code Rain hold.
@@ -89,6 +93,11 @@ export const alienScene: Scene = (() => {
   const reel: Reel = createReel();
   const bounce = createBounce();
   let speed = 0;
+  /** The camera by hand as drawn, easing toward the sliders (camera.ts). */
+  const hand: CameraHand = { ...HAND_AT_REST };
+  const handTarget: CameraHand = { ...HAND_AT_REST };
+  /** A mount's first drawn frame starts at the sliders instead of easing there. */
+  let handFresh = true;
   /** Per loop: how far through its clip the alien is, 0..1. */
   const phase = LOOPS.map(() => 0);
   let lastTime: number | null = null;
@@ -125,6 +134,7 @@ export const alienScene: Scene = (() => {
 
     init(_ctx: SceneContext) {
       lastTime = null;
+      handFresh = true;
       // A later mount (the gallery tile, then the full view) finds the model
       // and the clips already decoded; modelRequested and libraryRequested
       // keep a mount during a fetch from asking twice.
@@ -170,9 +180,11 @@ export const alienScene: Scene = (() => {
       last.speed = speed;
       last.rate = speed < HELD_BELOW ? 0 : Math.min(MAX_RATE, speed);
       last.cutSignal = drives.value("cut", anim.dropPulse, 0);
+      const heldDance = chipLoop(get("dance"));
+      if (heldDance !== null) reel.loop = heldDance;
       const cut = stepCut(reel, {
         dtSec: dt,
-        cutOn: pinnedLoop === null && get("cut") >= 0.5,
+        cutOn: pinnedLoop === null && heldDance === null && get("cut") >= 0.5,
         cutSignal: last.cutSignal,
         cutThreshold: standoutThreshold(drives, "cut"),
       });
@@ -197,7 +209,16 @@ export const alienScene: Scene = (() => {
       squash.x = live.pivot[0];
       squash.z = live.pivot[1];
       squash.squash = last.squash;
-      renderer.draw(pose, LOOPS[reel.loop].camera, ctx.quality.bloomPasses, viewport, squash);
+      handTarget.orbit = get("orbit");
+      handTarget.tilt = get("tilt");
+      handTarget.distance = get("distance");
+      handTarget.height = get("height");
+      handTarget.zoom = get("zoom");
+      if (handFresh) Object.assign(hand, handTarget);
+      else easeHand(hand, handTarget, dt);
+      handFresh = false;
+      const view = LOOPS[chipLoop(get("view")) ?? reel.loop].camera;
+      renderer.draw(pose, handCamera(view, hand), ctx.quality.bloomPasses, viewport, squash);
     },
 
     dispose() {

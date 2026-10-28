@@ -67,6 +67,25 @@ export interface SceneCard {
    *  plain per-setting rows — see PanelSection above. Omit for a scene with
    *  nothing custom to show (every setting renders as an ordinary row). */
   panel?: readonly PanelSection[];
+  /** Settings the arrow keys move while this scene is on screen — see
+   *  SceneArrows. Omit for a scene the arrows leave alone. */
+  arrows?: SceneArrows;
+}
+
+/** One of a scene's settings and how far one arrow press moves it: → and ↑
+ *  add `by`, ← and ↓ take it away. */
+interface ArrowNudge {
+  setting: string;
+  by: number;
+}
+
+/** What each arrow pair moves, alone and with Shift held. src/ui/sceneArrows.ts
+ *  has when a press reaches the scene and how it is written. */
+export interface SceneArrows {
+  leftRight?: ArrowNudge;
+  upDown?: ArrowNudge;
+  shiftLeftRight?: ArrowNudge;
+  shiftUpDown?: ArrowNudge;
 }
 
 export interface Scene extends SceneCard {

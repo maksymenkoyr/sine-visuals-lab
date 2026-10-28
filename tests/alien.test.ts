@@ -7,6 +7,7 @@ import { GROUP_TUNING } from "../src/render/bandEnergy.ts";
 import {
   BOUNCE_MAX,
   bounceSpring,
+  chipLoop,
   clipSeconds,
   createBounce,
   createReel,
@@ -19,6 +20,8 @@ import {
   type CutInput,
 } from "../src/render/scenes/alien/reel.ts";
 import { packSkin, projectToFrame } from "../src/render/scenes/alien/renderer.ts";
+import { card, SETTINGS } from "../src/render/scenes/alien/card.ts";
+import { easeHand, HAND_AT_REST, handCamera } from "../src/render/scenes/alien/camera.ts";
 import { STANDOUT_THRESHOLD_DEFAULT } from "../src/render/standout.ts";
 import { BAKED } from "../src/render/scenes/alien/loops/manifest.ts";
 import { CLIP_LIBRARY_URL, decodeClipLibrary } from "../src/render/scenes/dancers/clipFormat.ts";
@@ -329,6 +332,72 @@ describe("alien loops", () => {
   it("plays a clip the library has, each a different dance", () => {
     for (const loop of LOOPS) expect(library.byName.get(loop.clip), loop.clip).toBeDefined();
     expect(new Set(LOOPS.map((l) => l.clip)).size).toBe(LOOPS.length);
+  });
+
+  it("gives the Dance and View rows one chip per loop after Any and Own, each named once", () => {
+    for (const [key, first, names] of [
+      ["dance", "Any", LOOPS.map((l) => l.dance)],
+      ["view", "Own", LOOPS.map((l) => l.view)],
+    ] as const) {
+      const spec = SETTINGS.find((s) => s.key === key)!;
+      expect(spec.options).toEqual([first, ...names]);
+      expect(spec.max).toBe(spec.options!.length - 1);
+      expect(new Set(names).size, key).toBe(LOOPS.length);
+    }
+  });
+
+  it("draws every loop through its own camera while the camera sliders rest", () => {
+    for (const { camera } of LOOPS) {
+      const moved = handCamera(camera, HAND_AT_REST);
+      for (let i = 0; i < 3; i++) {
+        expect(moved.eye[i]).toBeCloseTo(camera.eye[i], 9);
+        expect(moved.target[i]).toBeCloseTo(camera.target[i], 9);
+      }
+      expect(moved.focal).toBe(camera.focal);
+    }
+  });
+
+  it("moves the camera by hand round, over, nearer, higher and tighter", () => {
+    const front = { eye: [0, 1, 3] as [number, number, number], target: [0, 1, 0] as [number, number, number], focal: 2 };
+    const round = handCamera(front, { ...HAND_AT_REST, orbit: 90 });
+    // A quarter turn walks it to its own right, +x (renderer.ts's cameraBasis).
+    expect(round.eye[0]).toBeCloseTo(3, 9);
+    expect(round.eye[2]).toBeCloseTo(0, 9);
+    const over = handCamera(front, { ...HAND_AT_REST, tilt: 30 });
+    expect(over.eye[1]).toBeCloseTo(1 + 3 * Math.sin(Math.PI / 6), 9);
+    // Past the limit it stops short of straight down, where the view has no right-hand side.
+    const top = handCamera(front, { ...HAND_AT_REST, tilt: 120 });
+    expect(Math.hypot(top.eye[0], top.eye[2])).toBeGreaterThan(0.1);
+    const near = handCamera(front, { ...HAND_AT_REST, distance: 0.5 });
+    expect(near.eye[2]).toBeCloseTo(1.5, 9);
+    const high = handCamera(front, { ...HAND_AT_REST, height: 0.4 });
+    expect(high.eye[1]).toBeCloseTo(1.4, 9);
+    expect(high.target[1]).toBeCloseTo(1.4, 9);
+    expect(handCamera(front, { ...HAND_AT_REST, zoom: 1.5 }).focal).toBe(3);
+  });
+
+  it("eases the camera by hand toward the sliders, most of the way in a few frames", () => {
+    const hand = { ...HAND_AT_REST };
+    const to = { orbit: 40, tilt: -10, distance: 2, height: 0.5, zoom: 1.4 };
+    for (let f = 0; f < 30; f++) easeHand(hand, to, 1 / 60);
+    expect(hand.orbit).toBeGreaterThan(38);
+    expect(hand.orbit).toBeLessThan(40);
+    expect(hand.distance).toBeGreaterThan(1.9);
+  });
+
+  it("gives the arrow keys camera sliders that Master Scale leaves alone", () => {
+    for (const slot of Object.values(card.arrows ?? {})) {
+      const spec = SETTINGS.find((s) => s.key === slot.setting);
+      expect(spec?.group, slot.setting).toBe("Camera");
+      expect(spec?.masterScale, slot.setting).toBe(false);
+    }
+  });
+
+  it("holds the loop under a Dance or View chip, and none on the first chip", () => {
+    expect(chipLoop(0)).toBeNull();
+    expect(chipLoop(1)).toBe(0);
+    expect(chipLoop(LOOPS.length)).toBe(LOOPS.length - 1);
+    expect(chipLoop(LOOPS.length + 1)).toBeNull();
   });
 });
 
