@@ -1,5 +1,5 @@
 /**
- * The alien drawn live: the skinned wireframe mesh (mesh.ts, glsl.ts) through
+ * The alien drawn live: the skinned wireframe model (meshFile.ts, glsl.ts) through
  * one loop's camera, squashed for Bounce, with bloom. The scene (index.ts)
  * draws it every frame; the bake page (bakePage.ts, driven by
  * tools/alien-bake.mjs) draws it too, to make the loop videos older builds
@@ -13,7 +13,8 @@ import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram
 import type { Viewport } from "../../scene.ts";
 import { sampleClip, type Clip } from "../dancers/clipFormat.ts";
 import { B, BONE_COUNT, CH_LIFT, createPose, createRigWorld, forwardKinematics, groundToFloor, quatConjugate, quatMul, quatRotate, type Pose } from "../dancers/rig.ts";
-import { alienMesh, MAX_INFLUENCES } from "./mesh.ts";
+import { MAX_INFLUENCES } from "./mesh.ts";
+import type { AlienModel } from "./meshFile.ts";
 import type { LoopCamera } from "./reel.ts";
 import { BLUR_FRAG, BLUR_STRIDE, COMPOSITE_FRAG, MESH_FRAG, MESH_VERT } from "./glsl.ts";
 
@@ -97,12 +98,11 @@ export interface AlienRenderer {
   dispose(): void;
 }
 
-export function createAlienRenderer(gl: WebGL2RenderingContext): AlienRenderer {
+export function createAlienRenderer(gl: WebGL2RenderingContext, mesh: AlienModel): AlienRenderer {
   const meshProg: GLProgram = createProgram(gl, MESH_FRAG, MESH_VERT);
   const blurProg: GLProgram = createProgram(gl, BLUR_FRAG);
   const compProg: GLProgram = createProgram(gl, COMPOSITE_FRAG);
   const quadVao = createFullscreenQuad(gl);
-  const mesh = alienMesh();
   const meshBufs: WebGLBuffer[] = [];
   const world = createRigWorld();
   const skin = new Float32Array(BONE_COUNT * 8);
@@ -122,6 +122,7 @@ export function createAlienRenderer(gl: WebGL2RenderingContext): AlienRenderer {
   attrib(1, mesh.normal, 3, gl.FLOAT, false);
   attrib(2, mesh.bones, MAX_INFLUENCES, gl.UNSIGNED_BYTE, false);
   attrib(3, mesh.weights, MAX_INFLUENCES, gl.UNSIGNED_BYTE, true);
+  attrib(4, mesh.eye, 1, gl.UNSIGNED_BYTE, false);
   gl.bindVertexArray(null);
   gl.bindBuffer(gl.ARRAY_BUFFER, null);
   const vertexCount = mesh.triCount * 3;

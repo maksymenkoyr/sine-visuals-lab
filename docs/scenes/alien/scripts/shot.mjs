@@ -40,7 +40,7 @@ if (evalJs) console.log("eval:", JSON.stringify(await page.evaluate(evalJs)));
 for (let i = 0; i < frames; i++) {
   const probe = await page.evaluate(() => {
     const a = window.__alien;
-    return a ? { loop: a.reel.loop, head: +a.reel.heads[a.reel.loop].toFixed(1), cuts: a.reel.cuts } : null;
+    return a ? { loop: a.reel.loop, phase: +a.phase[a.reel.loop].toFixed(3), cuts: a.reel.cuts } : null;
   });
   const file = `${out}-${String(i).padStart(2, "0")}.png`;
   await page.screenshot({ path: file });

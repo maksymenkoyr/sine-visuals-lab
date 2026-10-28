@@ -16,10 +16,12 @@
  * probe()).
  *
  * Each loop keeps its own place in its clip, so a cut back finds the alien
- * where he was left. The clips are the dancers' library, fetched on the first
- * mount; until it lands the scene draws black. The baked videos in
- * public/media/alien/ are no longer played: they stay for tabs on an older
- * build (src/pinnedAssets.ts's header), and loops/manifest.ts lists them.
+ * where he was left. The model (meshFile.ts, built in Blender by
+ * tools/alien-model/) and the clips (the dancers' library) are fetched on the
+ * first mount and decoded once per page; until both land the scene draws
+ * black. The baked videos in public/media/alien/ are no longer played: they
+ * stay for tabs on an older build (src/pinnedAssets.ts's header), and
+ * loops/manifest.ts lists them.
  *
  * DEV: `?loop=<n>` pins one loop (no cuts), and `window.__alien` exposes the
  * reel, the last wire readings and each loop's place for a headless run.
@@ -36,12 +38,14 @@ import { sceneMedia } from "../../../pinnedAssets.ts";
 import { CLIP_LIBRARY_URL, decodeClipLibrary, sampleClip, type Clip, type ClipLibrary } from "../dancers/clipFormat.ts";
 import { createPose } from "../dancers/rig.ts";
 import { createAlienRenderer, floorPivot, type AlienRenderer, type Squash } from "./renderer.ts";
+import { decodeAlienMesh, MESH_URL, type AlienModel } from "./meshFile.ts";
 import { BOUNCE_MAX, clipSeconds, createBounce, createReel, easeSpeed, LOOPS, stepBounce, stepCut, type Reel } from "./reel.ts";
 import { card, MOVE_GAIN, SETTINGS } from "./card.ts";
 
-// The dancers' clip library (src/pinnedAssets.ts's header, "Scene media"):
-// sceneMedia keys by path, so this is the same copy Dancers and Code Rain hold.
+// Scene media (src/pinnedAssets.ts's header): sceneMedia keys by path, so the
+// clips are the same copy Dancers and Code Rain hold.
 const clips = sceneMedia(CLIP_LIBRARY_URL);
+const meshMedia = sceneMedia(MESH_URL);
 
 export const ALIEN_ID = card.id;
 
@@ -73,8 +77,10 @@ export const alienScene: Scene = (() => {
   const get = (key: string): number => resolveSceneSetting(ALIEN_ID, SETTING_BY_KEY.get(key)!);
 
   let renderer: AlienRenderer | null = null;
+  let model: AlienModel | null = null;
   let loops: LiveLoop[] | null = null;
   let libraryRequested = false;
+  let modelRequested = false;
   const pose = createPose();
   const squash: Squash = { x: 0, z: 0, squash: 0 };
 
@@ -117,13 +123,25 @@ export const alienScene: Scene = (() => {
       };
     },
 
-    init(ctx: SceneContext) {
-      renderer = createAlienRenderer(ctx.gl);
+    init(_ctx: SceneContext) {
       lastTime = null;
-      // A later mount (the gallery tile, then the full view) finds the clips
-      // already decoded; libraryRequested keeps a mount during the fetch from
-      // asking twice.
-      if (!loops && !libraryRequested && typeof window !== "undefined" && typeof fetch === "function") {
+      // A later mount (the gallery tile, then the full view) finds the model
+      // and the clips already decoded; modelRequested and libraryRequested
+      // keep a mount during a fetch from asking twice.
+      if (typeof window === "undefined" || typeof fetch !== "function") return;
+      if (!model && !modelRequested) {
+        modelRequested = true;
+        meshMedia
+          .bytes()
+          .then((buf) => {
+            model = decodeAlienMesh(buf);
+          })
+          .catch((err: unknown) => {
+            modelRequested = false;
+            console.warn("alien: model unavailable", err);
+          });
+      }
+      if (!loops && !libraryRequested) {
         libraryRequested = true;
         clips
           .bytes()
@@ -139,7 +157,7 @@ export const alienScene: Scene = (() => {
 
     render(ctx: SceneContext, frame: FeatureFrame, viewport: Viewport, _palette: Palette, anim: AnimFrame, drives: SceneDrives = PASSTHROUGH_DRIVES) {
       const { gl } = ctx;
-      if (!renderer) return;
+      if (!renderer && model) renderer = createAlienRenderer(gl, model);
 
       // Own delta from timeSec: the gallery preview hands render() an un-latched anim.
       const dt = lastTime === null ? 1 / 60 : Math.max(0, Math.min(0.25, anim.timeSec - lastTime));
@@ -167,7 +185,7 @@ export const alienScene: Scene = (() => {
       last.squash = Math.max(-SQUASH_LIMIT, Math.min(SQUASH_LIMIT, bounce.squash));
 
       const live = loops?.[reel.loop];
-      if (!live) {
+      if (!live || !renderer) {
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
         gl.clearColor(0, 0, 0, 1);

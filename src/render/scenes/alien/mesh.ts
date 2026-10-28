@@ -30,9 +30,10 @@
  * fragment shader draws each triangle's own edges from a barycentric
  * derived from gl_VertexID, which only works when no vertex is shared.
  *
- * Pure and DOM/GL-free — tests/alien.test.ts builds it under node. Built
- * once per page (`alienMesh()` caches it): a few hundred milliseconds of
- * sampling is fine on scene entry but not on every one.
+ * The scene no longer draws it: it draws the Blender model (meshFile.ts),
+ * which keeps this file's bind pose and AlienMesh layout.
+ *
+ * Pure and DOM/GL-free — tests/alien.test.ts builds it under node.
  */
 import { BONE_COUNT, createPose, createRigWorld, forwardKinematics, tPose, type RigWorld } from "../dancers/rig.ts";
 import { PARTS, compileSet, setBounds, type CompiledSet, type PartSet } from "./body.ts";
@@ -337,12 +338,4 @@ export function buildAlienMesh(): AlienMesh {
   }
   if (BONE_COUNT > 255) throw new Error("alien mesh: bone indices no longer fit a byte");
   return { triCount, position, normal, bones, weights, bind };
-}
-
-let cached: AlienMesh | null = null;
-
-/** The one mesh every alien scene instance draws — built on first use. */
-export function alienMesh(): AlienMesh {
-  if (!cached) cached = buildAlienMesh();
-  return cached;
 }
