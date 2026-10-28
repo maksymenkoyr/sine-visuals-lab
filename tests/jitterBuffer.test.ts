@@ -124,5 +124,15 @@ describe("JitterBuffer", () => {
     buf.push(frame(0, 0.5));
     expect(buf.sampleAt(0)!.wave).toBeNull();
   });
+
+  it("hands on gateOff from the frame at or before the instant", () => {
+    const buf = new JitterBuffer();
+    buf.push(frame(0, 0.5));
+    buf.push({ ...frame(33, 0.5), gateOff: true });
+    expect(buf.sampleAt(0)!.gateOff).toBe(false);
+    expect(buf.sampleAt(20)!.gateOff).toBe(false);
+    expect(buf.sampleAt(33)!.gateOff).toBe(true);
+    expect(buf.sampleAt(9999)!.gateOff).toBe(true);
+  });
 });
 

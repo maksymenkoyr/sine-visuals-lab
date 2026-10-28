@@ -225,7 +225,8 @@ gate scales only that comparison. The engine's threshold, refractory, naming and
 tempo tracking never see it, so the hiss of a quiet room is not amplified into
 hits, and a clap in a silent room still opens its own gate. The tempo tracker
 hears the audio before any gate, because a gated tracker starved tempo in rooms
-the gate read as quiet.
+the gate read as quiet. Only a mic is gated: a tab share, a line in or a
+loopback has no room hiss, and its frames carry `FeatureFrame.gateOff`.
 
 ### The rise, every hop
 
@@ -250,7 +251,7 @@ nothing in the app moves either.
 Nothing between the mic and the engine is a setting. The engine taps the raw
 capture (`src/audio/capture.ts` turns off the browser's own echo cancelling,
 noise suppression and gain), and every stage the app adds after it adjusts
-itself: the silence gate tracks the room's floor (`src/audio/silenceGate.ts`),
+itself: the silence gate tracks a mic's room floor (`src/audio/silenceGate.ts`),
 auto-gain follows the room's band span (`src/audio/autoGain.ts`), and
 Sensitivity, Expansion and Smoothing follow the music per scene
 (`src/render/autoTune.ts`'s `resolveSensitivity` and friends). None of them
@@ -304,7 +305,8 @@ same levels, hits and beat from the reading its frames carry.
    the hits it latches.
 
 The silence gate's marks are not part of a room's look. Only the device that
-hears the room moves them; a paired TV holds `SILENCE_GATE_SEED`.
+hears the room moves them; a paired TV holds `SILENCE_GATE_SEED`, and gates
+nothing on a frame whose gate-off bit is set (`src/net/protocol.ts`).
 
 ## Known limits (2026-10-24)
 

@@ -31,7 +31,9 @@ import { type EngineReading, HIT_KINDS, HIT_STRENGTH_MAX, NUM_BANDS } from "../a
  *   [47..49] kick, snare, hat hit strength, Uint8 (0..HIT_STRENGTH_MAX -> 0..255; 0 = no hit)
  *   [50]     surge, Uint8 (0..HIT_STRENGTH_MAX -> 0..255)
  *   [51]     engine flags: bit0 music, bits1-2 surge kind (HIT_KINDS index),
- *            bit3 blocked, bit4 wave absent
+ *            bit3 blocked, bit4 wave absent, bit5 gate off (FeatureFrame.gateOff;
+ *            a sender from before it never sets it, so its followers gate as
+ *            they always did)
  *   [52]     confidence, Uint8
  *   [53]     downbeat confidence, Uint8
  *   [54..55] beat ago, Uint16 ms: how long before this frame the tracker's
@@ -104,6 +106,7 @@ const MUSIC_BIT = 1;
 const SURGE_KIND_SHIFT = 1;
 const BLOCKED_BIT = 8;
 const NO_WAVE_BIT = 16;
+const GATE_OFF_BIT = 32;
 const AGO_MAX_MS = 65535;
 
 /** The min and max of a stretch of raw mic samples, each in [-1,1]. */
@@ -189,6 +192,8 @@ export interface EncodableFrame {
   level: number;
   hats: number;
   lead: number;
+  /** FeatureFrame.gateOff; travels only with an engine tail. */
+  gateOff?: boolean;
   /** Absent or null sends no engine tail. */
   engine?: EngineReading | null;
 }
@@ -235,7 +240,10 @@ export function encodeFeatureFrame(frame: EncodableFrame, roomTimeMs: number, wa
     view.setUint8(o + 5, strength8(w.hat));
     view.setUint8(o + 6, unit8(w.surge / HIT_STRENGTH_MAX));
     const kind = Math.max(0, HIT_KINDS.indexOf(w.surgeKind));
-    view.setUint8(o + 7, (w.music ? MUSIC_BIT : 0) | (kind << SURGE_KIND_SHIFT) | (w.blocked ? BLOCKED_BIT : 0) | (wave ? 0 : NO_WAVE_BIT));
+    view.setUint8(
+      o + 7,
+      (w.music ? MUSIC_BIT : 0) | (kind << SURGE_KIND_SHIFT) | (w.blocked ? BLOCKED_BIT : 0) | (wave ? 0 : NO_WAVE_BIT) | (frame.gateOff ? GATE_OFF_BIT : 0),
+    );
     view.setUint8(o + 8, unit8(w.confidence));
     view.setUint8(o + 9, unit8(w.downbeatConfidence));
     view.setUint16(o + 10, ago16(w.beatAgoMs), true);
@@ -261,6 +269,8 @@ export interface DecodedFrame {
   wave: WaveEnvelope | null;
   /** The sender's engine reading; null when the frame carries none. */
   engine: WireEngine | null;
+  /** FeatureFrame.gateOff; false without an engine tail. */
+  gateOff: boolean;
 }
 
 export function decodeFeatureFrame(buf: ArrayBuffer): DecodedFrame | null {
@@ -303,10 +313,12 @@ export function decodeFeatureFrame(buf: ArrayBuffer): DecodedFrame | null {
   const lead = stems ? view.getUint8(o + 3) / 255 : 0;
   let engine: WireEngine | null = null;
   let waveAbsent = false;
+  let gateOff = false;
   if (buf.byteLength >= ENGINE_FRAME_BYTES) {
     const e = o + 4;
     const eflags = view.getUint8(e + 7);
     waveAbsent = (eflags & NO_WAVE_BIT) !== 0;
+    gateOff = (eflags & GATE_OFF_BIT) !== 0;
     engine = {
       low: view.getUint8(e) / 255,
       mid: view.getUint8(e + 1) / 255,
@@ -328,5 +340,5 @@ export function decodeFeatureFrame(buf: ArrayBuffer): DecodedFrame | null {
   const wave =
     buf.byteLength >= FRAME_BYTES && !waveAbsent ? { min: decodeWaveSample(view.getInt8(o)), max: decodeWaveSample(view.getInt8(o + 1)) } : null;
 
-  return { bands, energy, onset, pulseOnset, bpm, onsetPhase, level, hats, lead, roomTimeMs, wave, engine };
+  return { bands, energy, onset, pulseOnset, bpm, onsetPhase, level, hats, lead, roomTimeMs, wave, engine, gateOff };
 }

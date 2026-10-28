@@ -208,6 +208,8 @@ import {
   feedSilenceGateMeasurement,
   silenceGateDimmer,
   hitPasses,
+  SILENCE_GATE_OFF,
+  type SilenceGateMarks,
   type SilenceGateReading,
 } from "./audio/silenceGate.ts";
 import { getHitShape } from "./audio/hitStrength.ts";
@@ -370,6 +372,10 @@ let mainPlay: MainPlay | null = null;
 let laptopWaiting = false;
 
 let capture: CaptureHandle | null = null;
+/** Whether `capture` is a mic, the one source with a room's hiss for the
+ *  silence gate to hold back (src/audio/silenceGate.ts). Read once at attach:
+ *  a track's label never changes, and this runs every tick. */
+let captureIsMic = true;
 let bandAnalyser: BandAnalyser | null = null;
 /** Hats and Lead off the full FFT bins, computed only on ticks where stemsRead() says something reads them. */
 let stemGate: StemGate | null = null;
@@ -1506,6 +1512,9 @@ function captureAudioSource(kind: CaptureSourceKind): AudioSource {
  *  not carry between inputs. */
 function attachCapture(handle: CaptureHandle): void {
   capture = handle;
+  // Same test as the stop button's kind tag, so what it calls a mic is gated.
+  const label = liveInputLabel();
+  captureIsMic = handle.kind === "mic" && (!label || inputKind(label) === "mic");
   // A fresh extractor, not a reset() (it has none): its clocks (lastPulseTime,
   // lastOnsetTime, peakHoldUntil, ...) are absolute AudioContext.currentTime
   // values and a new context restarts near 0, so the old one would sit "in the
@@ -2018,7 +2027,7 @@ function wireDeviceMenu(): void {
     onSceneExpansionChange: (value) => setSceneExpansion(value),
     getSceneExpansionShape: () => EXPANSION_SHAPES.indexOf(getSceneExpansionShape()),
     onSceneExpansionShapeChange: (index) => setSceneExpansionShape(EXPANSION_SHAPES[index] ?? EXPANSION_SHAPE_DEFAULT),
-    resolveSilenceGate: () => resolveSilenceGate(),
+    resolveSilenceGate: () => gateFor(lastVis),
     getPowerMode: () => powerMode,
     onPowerModeChange: (mode) => {
       setPowerMode(mode);
@@ -3245,10 +3254,11 @@ function readLocalCapture(
       ? inputHealth.advance(extractor.dtSec, buildInputMeasure(inputHealthTap, lastMono, capture.context.sampleRate))
       : null;
   lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
-  const gate = resolveSilenceGate();
+  const gate = captureIsMic ? resolveSilenceGate() : SILENCE_GATE_OFF;
   const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale);
   const engine = engineSource ? engineSource.read(now) : null;
   f.engine = engine;
+  f.gateOff = !captureIsMic;
   f.bpm = engineSource ? engineSource.bpm : 0;
   // Followers that predate the reading still react to these two flags.
   const dimmer = silenceGateDimmer(f.level, gate);
@@ -3279,7 +3289,7 @@ function readLocalCapture(
   // Feeds next tick's resolveAutoGain(); the one-tick lag is fine (see feedAutoGainMeasurement).
   feedAutoGainMeasurement(extractor.bandSpanDb, extractor.dtSec);
   // Same one-tick lag (see feedSilenceGateMeasurement).
-  feedSilenceGateMeasurement(f.level, extractor.dtSec);
+  if (captureIsMic) feedSilenceGateMeasurement(f.level, extractor.dtSec);
   return { f, now };
 }
 
@@ -3373,7 +3383,13 @@ function sampleToVisual(s: VisualSample | null): FeatureFrame | null {
     hats: s.hats,
     lead: s.lead,
     engine: s.engine,
+    gateOff: s.gateOff,
   };
+}
+
+/** The marks a drawn frame's hits are gated with (src/audio/silenceGate.ts). */
+function gateFor(frame: FeatureFrame | null): SilenceGateMarks {
+  return frame?.gateOff ? SILENCE_GATE_OFF : resolveSilenceGate();
 }
 
 function loop(): void {
@@ -3462,7 +3478,7 @@ function tick(): void {
     applyRenderQuality(true);
     applyPowerMode(powerMode);
   }
-  if (outputBridge && lastVis) outputBridge.pushFrame(lastVis, { gate: resolveSilenceGate() }, { sens: outputSens, exp: outputExp, smoothing });
+  if (outputBridge && lastVis) outputBridge.pushFrame(lastVis, { gate: gateFor(lastVis) }, { sens: outputSens, exp: outputExp, smoothing });
 
   if (!inViz) {
     if (!document.hidden) gallery?.tick(nowRafMs);
@@ -3480,7 +3496,7 @@ function tick(): void {
         dtSec,
         lastVis,
         smoothing,
-        resolveSilenceGate(),
+        gateFor(lastVis),
         { shape: getHitShape() },
         nowRafMs,
       )
