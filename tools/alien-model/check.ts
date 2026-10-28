@@ -1,8 +1,8 @@
 // Reads tools/.cache/alien-model/alien.bin (the ALM1 mesh build.py writes; its
 // layout is in build.py's header) and prints it beside today's mesh from
 // mesh.ts: counts, file size, bounding box, then the checks the scene relies
-// on. Every weight sums to 255 and every bone index is a rig bone, or it exits
-// 1. Triangles that face against their vertex normals, and slivers, are
+// on. Every weight sums to 255, every bone index is a rig bone, and every
+// eye flag is 0 or 127, or it exits 1. Triangles that face against their vertex normals, and slivers, are
 // counted: both draw as dark specks in the wire.
 //
 //   node --experimental-strip-types tools/alien-model/check.ts
@@ -64,6 +64,15 @@ for (let v = 0; v < nv; v++) {
 }
 console.log(`weight sums off 255: ${badSums}; bone indices past BONE_COUNT ${BONE_COUNT}: ${badBones}`);
 
+let eyes = 0;
+let badFlags = 0;
+for (let v = 0; v < nv; v++) {
+  const flag = normal[v * 4 + 3];
+  if (flag === 127) eyes++;
+  else if (flag !== 0) badFlags++;
+}
+console.log(`eyes: ${eyes} vertices; eye flags not 0 or 127: ${badFlags}`);
+
 let most = 0;
 let moved = 0;
 for (let v = 0; v < nv; v++) {
@@ -97,4 +106,4 @@ for (let t = 0; t < nt; t++) {
   }
 }
 console.log(`triangles facing against their normals: ${against}; slivers under ${SLIVER_DEG} deg: ${slivers}`);
-if (badSums || badBones) process.exit(1);
+if (badSums || badBones || badFlags) process.exit(1);

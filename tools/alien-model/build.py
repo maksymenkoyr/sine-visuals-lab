@@ -27,10 +27,12 @@ Blender is Z-up: rig (x, y, z) is Blender (x, -z, y).
 
 alien.bin, little-endian, each section a whole array in this order: the
 magic ALM1, uint32 vertex count, uint32 triangle count; float32 position x3
-(bind pose, rig metres); int8 normal x4 (unit normal x 127, then 0); uint8
-bone x4 (BONES order); uint8 weight x4 (summing to 255); float32 squeeze x3
-(squeezed minus normal position, 0 below the neck); int8 squeezed normal x4;
-uint16 index x3 per triangle, wound so the normal points out.
+(bind pose, rig metres); int8 normal x4 (unit normal x 127, then 127 on an
+eyeball and 0 elsewhere, so the scene can draw the eyes apart from the skin);
+uint8 bone x4 (BONES order); uint8 weight x4 (summing to 255); float32
+squeeze x3 (squeezed minus normal position, 0 below the neck); int8 squeezed
+normal x4, the same eye flag last; uint16 index x3 per triangle, wound so the
+normal points out.
 
 Nothing here is random: a rerun writes the same alien.bin.
 """
@@ -428,10 +430,17 @@ HEAD_TOP_Y = HEAD_CHIN_Y + HEAD_H
 # The eye: a leaf tilted up at the outer corner. EYE_H makes the tilted outline as tall
 # for the head's width as the owner's picture's eyes (round 1's was too short).
 EYE_L, EYE_H, EYE_TILT = 0.07, 0.042, 28
-# The socket, and how far below the face the lens's front sits. That step, with almost
-# no blend, is what the wire draws as the eye's bright outline; round 1's lens sat
-# nearly flush and the eyes read as faint dense patches.
-EYE_SOCKET, EYE_SET = 0.03, 0.012
+# The socket, and how far below the face the eyeball's crown sits. The eyeball is a
+# strong dome (an ellipsoid EYE_DOME deep), so its edge sinks well below the socket's
+# lip: that wall is what the wire draws as the eye's outline, and the dome inside it
+# reads as an eye. Set 12 mm deep it read as an empty hole; a flat lens near the face
+# read as a closed slit.
+EYE_SOCKET, EYE_SET = 0.03, 0.002
+EYE_DOME = 0.028
+# Triangles per eyeball: its own shell, so its outline is its own clean edge (a dome in
+# the skin's field came out with the skin's triangles across its edge, ragged once the
+# eyes were drawn black).
+EYE_TRIS = 240
 # The crease between the lens and the socket's wall.
 EYE_GAP = 0.002
 # The head is modelled at B's size, where every part was measured, and shrunk about the
@@ -571,11 +580,11 @@ def head_ops():
     pe, ne = on_head(0.227 * W, 0.453)
     Re = eye_frame(pe, ne, EYE_TILT, 1)
     left.append(Op("socket", Leaf(pe, Re, EYE_L, EYE_H), 0.006, depth=EYE_SOCKET))
-    # The eye fills its socket, a glossy convex lens.
-    lens_depth = 0.024
-    lens = Ellipsoid(pe - ne * (EYE_SET + lens_depth), [EYE_L * 1.2, EYE_H * 1.25, lens_depth], Re)
-    left.append(Op("add", Both(Leaf(pe, Re, EYE_L - EYE_GAP, EYE_H - EYE_GAP), lens), 0.004))
     ops += left + [op.mirrored() for op in left]
+    # The eyeball fills the socket, a glossy dome cut to its outline less the crease. It
+    # is meshed as its own shell (eyeball_mesh), not part of the skin's field.
+    lens = Ellipsoid(pe - ne * (EYE_SET + EYE_DOME), [EYE_L * 1.1, EYE_H * 1.12, EYE_DOME], Re)
+    eyeball = Both(Leaf(pe, Re, EYE_L - EYE_GAP, EYE_H - EYE_GAP), lens)
 
     # The broad flat ridge from mid-forehead down between the eyes into the nose: a
     # buried ellipsoid, so it fades out with no outline.
@@ -598,7 +607,7 @@ def head_ops():
     ops.append(Op("socket", Leaf(pm, Rm, 0.04, 0.002), 0.002, depth=0.009))
     pch, nch = on_head(0.0, 0.93)
     ops.append(Op("raise", Leaf(pch, frame(nch, [1, 0, 0]), 0.034, 0.03), 0.03, depth=0.003))
-    landmarks = {"eye": pe, "eye_n": ne, "eye_R": Re, "mouth": pm, "mouth_n": nm, "bulb": bulb, "chin": pch,
+    landmarks = {"eye": pe, "eye_n": ne, "eye_R": Re, "eyeball": eyeball, "mouth": pm, "mouth_n": nm, "bulb": bulb, "chin": pch,
                  "brow": on_head(0.0, 0.36)[0], "head": head}
     return ops, landmarks
 
@@ -616,9 +625,14 @@ SQ_RADII = np.array([0.15, 0.17, 0.165])
 # The squeezed eye, rounder and less tilted than the normal one.
 SQ_EYE_X, SQ_EYE_Y, SQ_EYE_TILT = 0.062, 2.0, 12
 SQ_EYE_L, SQ_EYE_H = 0.043, 0.026
-SQ_RIM = 0.012
-SQ_EYE_SINK, SQ_EYE_BULGE = 0.01, 0.004
-SQ_MOUTH_Y, SQ_MOUTH_PUSH = 1.895, 0.018
+SQ_RIM = 0.016
+# The squeezed eye sinks, and the eyeball shrinks into it to SQ_EYE_BALL of its outline,
+# leaving a groove round it, as the normal eye has.
+SQ_EYE_SINK, SQ_EYE_BALL = 0.016, 0.85
+SQ_MOUTH_Y, SQ_MOUTH_PUSH = 1.895, 0.024
+# The squeezed face's smaller features (wrinkles, nose, lips, chin, cheeks), scaled
+# together: at 1 they read only up close.
+SQ_FACE = 1.5
 SQ_CHIN_Y = 1.858
 
 
@@ -913,14 +927,16 @@ def shrink_head(V, S):
     return c + (V - c) * k[:, None], c + (S - c) * k[:, None]
 
 
-def squeeze_positions(V, F, lm, bare_ops):
+def squeeze_positions(V, F, lm, bare_ops, eye):
     """The head's vertices go back onto the bare head (no eyes, nose or lips), a
     landmark warp takes that smooth surface into the ball, the crown and the back of the
     skull are pulled onto the ball, and the squeezed face is drawn on it as smooth bumps
-    along the normals: sunken round eyes in rims, wrinkles, a small nose, a pursed mouth."""
+    along the normals: sunken round eyes in rims, wrinkles, a small nose, a pursed mouth.
+    The eyeballs (eye) move by the map that takes the normal eye's outline to the squeezed
+    one's, the same pairing the warp uses, so they stay in their sockets all the way."""
     head = lm["head"]
     m = smoothstep(SQUEEZE_FROM_Y, SQUEEZE_FULL_Y, V[:, 1]) * np.maximum(near_neck(V), smoothstep(1.66, 1.71, V[:, 1]))
-    mov = m > 0
+    mov = (m > 0) & ~eye
     Bv = V.copy()
 
     def onto_bare(steps):
@@ -1019,22 +1035,22 @@ def squeeze_positions(V, F, lm, bare_ops):
     for R, e in ((Rs, se), (MIRROR @ Rs, MIRROR @ se)):
         rel = P - e
         rho = np.hypot((rel @ R[:, 0]) / SQ_EYE_L, (rel @ R[:, 1]) / SQ_EYE_H)
-        eye = -SQ_EYE_SINK * (1 - smoothstep(0.7, 1.05, rho)) + SQ_EYE_BULGE * np.maximum(1 - rho * rho, 0)
+        sink = -SQ_EYE_SINK * (1 - smoothstep(0.75, 1.05, rho))
         rim = SQ_RIM * np.exp(-(((rho - 1.32) / 0.3) ** 2))
-        bump += (eye + rim) * smoothstep(-0.035, 0.0, rel @ R[:, 2])
+        bump += (sink + rim) * smoothstep(-0.035, 0.0, rel @ R[:, 2])
     face = smoothstep(0.04, 0.08, P[:, 2])
     near = lambda c, s: np.exp(-((np.linalg.norm(P - c, axis=1) / s) ** 2))  # noqa: E731
     for s in (1, -1):
-        bump += 0.005 * near(on_ball(0.022 * s, 2.06)[0], 0.013) * face
-    bump += 0.006 * near(nose, 0.011)
+        bump += SQ_FACE * 0.005 * near(on_ball(0.022 * s, 2.06)[0], 0.013) * face
+    bump += SQ_FACE * 0.006 * near(nose, 0.011)
     mouth = sm + smn * SQ_MOUTH_PUSH
     bump += SQ_MOUTH_PUSH * near(sm, 0.021) * face
     dm = np.linalg.norm(P - mouth, axis=1)
-    bump += 0.004 * np.exp(-(((dm - 0.011) / 0.005) ** 2)) * face
-    bump -= 0.004 * near(mouth, 0.0045) * face
-    bump += 0.004 * near(on_ball(0.0, SQ_CHIN_Y)[0], 0.014)
+    bump += SQ_FACE * 0.004 * np.exp(-(((dm - 0.011) / 0.005) ** 2)) * face
+    bump -= SQ_FACE * 0.004 * near(mouth, 0.0045) * face
+    bump += SQ_FACE * 0.004 * near(on_ball(0.0, SQ_CHIN_Y)[0], 0.014)
     for s in (1, -1):
-        bump += 0.005 * near(on_ball(0.062 * s, 1.905)[0], 0.022)
+        bump += SQ_FACE * 0.005 * near(on_ball(0.062 * s, 1.905)[0], 0.022)
     # Only the bumps are smoothed: smoothing the whole move from the normal head would
     # hand each vertex some of its neighbours' socket and nose depth back.
     bump = laplacian_smooth((bump * mov)[:, None], F, mov, 2)[:, 0]
@@ -1043,10 +1059,35 @@ def squeeze_positions(V, F, lm, bare_ops):
     # the warp squeezes it between the pinned neck and the tucked-in chin.
     throat = mov & (V[:, 1] < 1.86) & (np.hypot(V[:, 0], V[:, 2] - 0.03) < 0.12)
     P = V + laplacian_smooth(P - V, F, throat, 8)
-    log(f"squeeze: {mov.sum()} vertices move, up to {np.linalg.norm(P - V, axis=1).max() * 100:.1f} cm")
+    su = SQ_EYE_BALL * SQ_EYE_L / (EYE_L - EYE_GAP)
+    sv = SQ_EYE_BALL * SQ_EYE_H / (EYE_H - EYE_GAP)
+    for side, (e0, R0, e1, R1) in ((1, (pe, Re, se, Rs)), (-1, (MIRROR @ pe, MIRROR @ Re, MIRROR @ se, MIRROR @ Rs))):
+        sel = eye & (np.sign(V[:, 0]) == side)
+        q = (V[sel] - e0) @ R0
+        P[sel] = e1 + (q * [su, sv, (su + sv) / 2]) @ R1.T
+    log(f"squeeze: {(mov | eye).sum()} vertices move, up to {np.linalg.norm(P - V, axis=1).max() * 100:.1f} cm")
     if "--debug-squeeze" in ARGS:
         np.savez(OUT / "squeeze-stages.npz", V=V, F=F, **stages)
     return V + (P - V) * m[:, None]
+
+
+def eyeball_mesh(scene, lm):
+    """Both eyeballs as closed shells of their own, meshed finer than the skin and
+    decimated to EYE_TRIS each."""
+    shape = lm["eyeball"]
+    lo, hi = shape.box()
+    V, F = mesh_field([Op("add", shape, 0.0)], lo - 0.004, hi + 0.004, 0.001)
+    if signed_volume(V, F) < 0:
+        F = F[:, ::-1].copy()
+    obj = make_mesh_object(scene, "eyeball", V, F)
+    dec = obj.modifiers.new("decimate", "DECIMATE")
+    dec.decimate_type = "COLLAPSE"
+    dec.ratio = EYE_TRIS / len(F)
+    dec.use_collapse_triangulate = True
+    apply_modifier(obj, dec)
+    V, F = mesh_arrays(obj)
+    bpy.data.objects.remove(obj)
+    return np.concatenate([V, V @ MIRROR]), np.concatenate([F, F[:, ::-1] + len(V)])
 
 
 # ---- Weights, export ----------------------------------------------------------------
@@ -1077,10 +1118,10 @@ def read_weights(obj):
     return bones, weights
 
 
-def write_bin(path, V, N, bones, weights, S, NS, F):
+def write_bin(path, V, N, bones, weights, S, NS, F, eye):
     if len(V) > 65535:
         raise SystemExit(f"alien.bin: {len(V)} vertices do not fit uint16 indices")
-    q = lambda n: np.concatenate([np.round(n * 127), np.zeros((len(n), 1))], axis=1).astype(np.int8)  # noqa: E731
+    q = lambda n: np.concatenate([np.round(n * 127), eye[:, None] * 127], axis=1).astype(np.int8)  # noqa: E731
     with open(path, "wb") as f:
         f.write(b"ALM1")
         f.write(struct.pack("<II", len(V), len(F)))
@@ -1099,6 +1140,7 @@ def write_bin(path, V, N, bones, weights, S, NS, F):
 WIRE_NEAR = (0.16, 1.0, 0.26)
 RIM = (0.1, 1.0, 0.22)
 SOLID_GREEN = (0.30, 0.62, 0.26)
+EYE_BLACK = (0.015, 0.015, 0.015)
 
 
 def wire_material():
@@ -1188,8 +1230,7 @@ def setup_solid(scene, bg=0.86):
     scene.render.engine = "BLENDER_WORKBENCH"
     sh = scene.display.shading
     sh.light = "STUDIO"
-    sh.color_type = "SINGLE"
-    sh.single_color = SOLID_GREEN
+    sh.color_type = "MATERIAL"
     sh.show_cavity = True
     sh.cavity_type = "BOTH"
     sh.show_specular_highlight = True
@@ -1217,13 +1258,35 @@ def render_to(scene, cam, path, res):
     bpy.ops.render.render(write_still=True)
 
 
-def render_all(scene, obj, arm, quick):
+def flat_material(name, color, roughness):
+    mat = bpy.data.materials.new(name)
+    mat.diffuse_color = (*color, 1.0)
+    mat.roughness = roughness
+    return mat
+
+
+def look_setter(scene, obj, eye_faces):
+    """Sets a look's materials (skin, then eyes) and its renderer. The eyes are black in
+    both: nothing lights the wire look, so a plain material there draws as black."""
+    mats = {"solid": [flat_material("skin", SOLID_GREEN, 0.5), flat_material("eye", EYE_BLACK, 0.15)],
+            "wire": [wire_material(), flat_material("eye-wire", EYE_BLACK, 0.15)]}
+
+    def use(look):
+        obj.data.materials.clear()
+        for m in mats[look]:
+            obj.data.materials.append(m)
+        obj.data.polygons.foreach_set("material_index", eye_faces.astype(np.int32))
+        obj.data.update()
+        (setup_solid if look == "solid" else setup_wire)(scene)
+
+    return use
+
+
+def render_all(scene, obj, arm, quick, eye_faces):
     RENDERS.mkdir(parents=True, exist_ok=True)
     scene.view_settings.view_transform = "Standard"
     obj.data.polygons.foreach_set("use_smooth", np.ones(len(obj.data.polygons), bool))
-    wire = wire_material()
-    obj.data.materials.clear()
-    obj.data.materials.append(wire)
+    use_look = look_setter(scene, obj, eye_faces)
     key = obj.data.shape_keys.key_blocks["Squeeze"] if obj.data.shape_keys else None
     body_c = [0.0, 1.22, 0.0]
     head_c = [0.0, HEAD_CHIN_Y + HEAD_H * HEAD_SCALE * 0.45, 0.02]
@@ -1236,14 +1299,17 @@ def render_all(scene, obj, arm, quick):
         oh = None if vname == "three-quarter" else 0.82 * HEAD_SCALE
         shots.append(("head", vname, camera(scene, f"head-{vname}", yaw, head_c, 4.0 if oh else 2.5 * HEAD_SCALE, ortho=oh, lens=110, pitch_deg=4 if oh is None else 0), res_head))
     for look in ("solid", "wire"):
-        (setup_solid if look == "solid" else setup_wire)(scene)
+        use_look(look)
         for part, vname, cam, res in shots:
-            for squeezed in (False, True):
-                if part == "body" and squeezed and vname != "three-quarter":
-                    continue
+            amounts = [0.0] if part == "body" and vname != "three-quarter" else [0.0, 1.0]
+            # The squeeze becomes a scene setting from 0 to 1, so its in-betweens are
+            # checked too: the scene blends the shape key linearly.
+            if part == "head" and vname == "three-quarter":
+                amounts = [0.0, 0.25, 0.5, 0.75, 1.0]
+            for amount in amounts:
                 if key:
-                    key.value = 1.0 if squeezed else 0.0
-                tag = "-squeezed" if squeezed else ""
+                    key.value = amount
+                tag = "" if amount == 0 else "-squeezed" if amount == 1 else f"-squeeze{round(amount * 100)}"
                 render_to(scene, cam, RENDERS / f"{part}-{vname}-{look}{tag}.png", res)
         log(f"{look} renders done")
     if key:
@@ -1251,10 +1317,10 @@ def render_all(scene, obj, arm, quick):
 
     # Posed checks: arms down and the head nodded 30 degrees forward, so the shoulders
     # and neck can be seen bending on the automatic weights.
-    pose_checks(scene, arm, obj, quick)
+    pose_checks(scene, arm, obj, quick, use_look)
 
 
-def pose_checks(scene, arm, obj, quick):
+def pose_checks(scene, arm, obj, quick, use_look):
     bpy.context.view_layer.objects.active = arm
     bpy.ops.object.mode_set(mode="POSE")
     pb = arm.pose.bones
@@ -1272,7 +1338,7 @@ def pose_checks(scene, arm, obj, quick):
     bpy.ops.object.mode_set(mode="OBJECT")
     res = (600, 600) if quick else (1000, 1000)
     for look in ("solid", "wire"):
-        (setup_solid if look == "solid" else setup_wire)(scene)
+        use_look(look)
         for vname, yaw in (("front", 0.0), ("side", 90.0), ("three-quarter", 38.0)):
             cam = camera(scene, f"posed-{vname}", yaw, [0.0, 1.72, 0.05], 4.0 if vname != "three-quarter" else 3.4, ortho=1.6 if vname != "three-quarter" else None, lens=60, pitch_deg=0 if vname != "three-quarter" else 6)
             render_to(scene, cam, RENDERS / f"posed-{vname}-{look}.png", res)
@@ -1352,11 +1418,17 @@ def main():
         if i < 3:
             onto_field(V, near)
     log(f"folded triangles left: {folded(V, F).sum()}")
-    obj.data.vertices.foreach_set("co", to_bl(V).astype(np.float32).ravel())
-    obj.data.update()
     edge_report(V, F, head_lm)
 
-    S = squeeze_positions(V, F, head_lm, body + [hops[0]])
+    EV, EF = eyeball_mesh(scene, head_lm)
+    eye = np.arange(len(V) + len(EV)) >= len(V)
+    F = np.concatenate([F, EF + len(V)])
+    V = np.concatenate([V, EV])
+    log(f"eyes: {len(EV)} vertices, {len(EF)} triangles")
+    bpy.data.objects.remove(obj)
+    obj = make_mesh_object(scene, "alien", V, F)
+
+    S = squeeze_positions(V, F, head_lm, body + [hops[0]], eye)
     V, S = shrink_head(V, S)
     obj.data.vertices.foreach_set("co", to_bl(V).astype(np.float32).ravel())
     obj.data.update()
@@ -1374,17 +1446,19 @@ def main():
     bpy.ops.object.vertex_group_limit_total(group_select_mode="ALL", limit=4)
     bpy.ops.object.vertex_group_normalize_all(group_select_mode="ALL", lock_active=False)
     bones, weights = read_weights(obj)
+    # An eyeball must not bend, so it rides the head bone alone.
+    bones[eye], weights[eye] = [BONE_INDEX["head"], 0, 0, 0], [255, 0, 0, 0]
     log("weights done")
 
     N = vertex_normals(V, F)
     NS = vertex_normals(S, F)
     delta = S - V
-    write_bin(OUT / "alien.bin", V, N, bones, weights, delta, NS, F)
+    write_bin(OUT / "alien.bin", V, N, bones, weights, delta, NS, F, eye)
     size = (OUT / "alien.bin").stat().st_size
     log(f"alien.bin: {len(V)} vertices, {len(F)} triangles, {size} bytes, squeeze up to {np.linalg.norm(delta, axis=1).max() * 100:.1f} cm")
     bpy.ops.wm.save_as_mainfile(filepath=str(OUT / "alien.blend"))
     if RENDER:
-        render_all(scene, obj, arm, QUICK)
+        render_all(scene, obj, arm, QUICK, eye[F].all(axis=1))
     log("done")
 
 

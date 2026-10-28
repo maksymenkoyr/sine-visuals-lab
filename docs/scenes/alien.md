@@ -151,6 +151,13 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
     was as long but only 0.14 wide.
   - B's head is 0.36 of B's height below the chin; round 1's was the same
     on the rig, so the head was not too big for B, only for today's framing.
+- 2026-10-28, round 3 (eyeballs, a clearer squeezed face), by `check.ts`:
+  - 10,246 vertices and 20,480 triangles; the two eyeballs are 244 and 480
+    of them. `alien.bin` is 532,732 bytes.
+  - 0 triangles face against their normals; 6 slivers, all at the
+    eyeballs' pointed corners, which draw black.
+  - The squeeze moves 2,911 vertices (the eyeballs among them), still up to
+    26.6 cm.
 
 ## Decisions and pivots
 
@@ -267,6 +274,25 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
     take a head about half as tall, no longer B's. The scene scales the
     whole figure to its frame (#773), so the height in metres matters only
     for proportion. `--head-scale 1` rebuilds round 1's size.
+- 2026-10-28, the owner on round 2: "it has eye holes but like no eyes can u
+  add them. also a tiny bit more distingushible facial features on squezed.
+  also technically i think squezes should be made from metamorphosing
+  normall one cos later we wanna use this animation as scene param". My
+  calls on it:
+  - each eye is an eyeball of its own, a glossy dome in the socket, meshed
+    as its own shell so its outline stays clean. A dome in the skin's field
+    came out ragged once the eyes were drawn black;
+  - `alien.bin` flags the eyeballs' vertices in each normal's fourth byte,
+    which was always 0, so the layout and size per vertex are unchanged and
+    the scene can draw the eyes black as the owner's picture has them. The
+    renders draw them black in both looks;
+  - the squeezed face's smaller features are scaled up together
+    (`SQ_FACE`), its eyes sink deeper in puffier rims, and its mouth is
+    pushed further;
+  - the squeeze already was the normal mesh moving, one shape key, and
+    stays so: the eyeballs move by the same eye-to-eye map as the warp, so
+    the scene can blend it from 0 to 1. The renders now show the
+    in-betweens (a quarter, half, three quarters) to check that blend.
 
 ## Tuning notes
 
@@ -302,7 +328,7 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 - Only one alien; the reference has a crowd.
 - Portrait screens crop the 16:9 frames to their middle.
 - About 5 of the mesh's triangles face inward at creases and are culled.
-- The new model (#772) waits for the owner's verdict on round 2. Once in the
+- The new model (#772) waits for the owner's verdict on round 3. Once in the
   scene (#773), its extra height needs the loops' cameras reframed, or the
   figure scaled: they frame today's 2.15 m alien.
 - In the new model's arms-down check the shoulders go a little square, the
