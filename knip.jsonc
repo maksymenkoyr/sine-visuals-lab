@@ -12,6 +12,8 @@
     // Run by hand from a doc or a .claude command, or spawned by path from a
     // script or test, which knip can't see; what each imports counts as used.
     "tools/alien-bake.mjs",
+    "tools/alien-model/check.ts",
+    "tools/alien-model/exportRig.ts",
     "tools/audio-latency.mjs",
     "tools/clip-convert.mjs",
     "tools/fix-conflicts-auto.mjs",

@@ -42,6 +42,11 @@ ones (the dotted line on its graph). In development, on main since #374.
 - `src/ui/widgets/alienPlay.ts`: the Move readout under the Move row: speed,
   frames bought per second, the loop on screen, and the loop as a strip of
   its frames with the playhead. Fed by the scene's `probe()`.
+- `tools/alien-model/`: the new alien, built headless in Blender (#772) and not
+  yet drawn by the scene (#773 puts it in). `exportRig.ts` writes the rig's bind
+  pose for Blender, `build.py` builds the model and writes `alien.bin` and the
+  renders, `check.ts` reads `alien.bin` beside today's mesh. `build.py`'s header
+  has the method and the file layout.
 - Reused, not copied: the dancers' rig, clip format and clip library
   (`../dancers/`, `CLIP_LIBRARY_URL`); the drive system (`drives.value`, `drives.threshold`);
   the Level signal (`feature.level`, #368); the standout detector
@@ -115,6 +120,48 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
     cuts, 2.06–2.89 s apart. The minimum shot still sets the pace; within
     it, not every hit is a standout. Learned floor about 0.14, peak 0.67.
   - Bass hit, Cut threshold 0.75: 3 cuts in the 45 s.
+
+- 2026-10-27, the new model from `tools/alien-model/` (Blender 5.2.3, the
+  owner's Mac), measured by `check.ts`:
+  - 10,002 vertices and 20,000 triangles (today's mesh: 20,304), indexed;
+    `alien.bin` is 520,092 bytes before compression.
+  - 2.442 m tall and ±1.079 m across the arms (today: 2.148 m and ±1.006 m).
+    The rig's bones are unchanged; the height is B's big head.
+  - The squeeze moves 2,572 vertices, the crown by up to 30.3 cm; nothing
+    below the neck's middle moves.
+  - 2 triangles face against their normals (today: 5), 3 are slivers under
+    4°. At a 2 mm field Blender's symmetric decimate folded 533 of them and
+    they drew as specks; at 3 mm about 10, and a relax onto the surface
+    leaves 2.
+  - Mean triangle edge after decimating: skull 34 mm, face 9, torso 20,
+    legs 19, hands 9, feet 13.
+  - The build takes about 16 s to `alien.bin`, 30 s with the renders, and a
+    rerun writes the same file.
+- 2026-10-28, round 2 of the model (the owner on round 1: "its pretty good"),
+  by `check.ts`:
+  - 2.365 m tall: the head shrunk 0.88× about the chin. Same vertex and
+    triangle counts and file size.
+  - 0 triangles face against their normals and 0 are slivers: the fold on
+    the skull's side, a speck in round 1, is relaxed out with the others.
+  - The squeeze moves 2,515 vertices, up to 26.6 cm after the shrink.
+  - Mean triangle edge: face 10 mm (round 1: 9); the skull, body, hands
+    and feet as before.
+  - Measured from the owner's head picture, the eye along its own axis is
+    0.31 of the head's width long and 0.19 wide, tilted 29°. Round 1's eye
+    was as long but only 0.14 wide.
+  - B's head is 0.36 of B's height below the chin; round 1's was the same
+    on the rig, so the head was not too big for B, only for today's framing.
+- 2026-10-28, round 3 (eyeballs, a clearer squeezed face), by `check.ts`:
+  - 10,246 vertices and 20,480 triangles; the two eyeballs are 244 and 480
+    of them. `alien.bin` is 532,732 bytes.
+  - 0 triangles face against their normals; 6 slivers, all at the
+    eyeballs' pointed corners, which draw black.
+  - The squeeze moves 2,911 vertices (the eyeballs among them), still up to
+    26.6 cm.
+- 2026-10-28, round 4 (bigger eyes kept whole in the squeeze, a smile), by
+  `check.ts`: 10,246 vertices, 20,480 triangles, 532,732 bytes; 0 triangles
+  facing against their normals; 7 slivers, 6 at the eyeballs' corners and 1
+  on a thigh. The squeeze moves 3,026 vertices, up to 26.7 cm.
 
 ## Decisions and pivots
 
@@ -196,6 +243,73 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   greyed out with that hint. The reel is unchanged.
 - 2026-10-11 — Sampler uniforms that were looked up with a raw `getUniformLocation` on every call now go through `GLProgram.setI`. Nothing visible changed: headless before/after shots look the same. (#349)
 - 2026-10-24 — Id, name, settings, panel and gallery record moved to `src/render/scenes/alien/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-26, the owner on the polish (#750): "core things like animation.
+  next thing is 3d model", and of today's model: "i want it to be just better
+  this is quite meh". Then: "ok so blender it is".
+- 2026-10-27, the owner on the new model, after three rounds of design
+  pictures (#753):
+  - the body: "i want him to have a typical body of this type of alian we
+    have alraedy", then "body from B" (round 1's B);
+  - the head: "i want his head to look like this [a classic green alien
+    head] kind of stupid", then "head should look as close to this as
+    possible";
+  - on the music: "i want there to be an option for them to react to music
+    by shrinking their head to this [a small round head with puffy eye
+    rims]", then "more squize too";
+  - the route: "lets try to build in blender using my two reference images +
+    B's body. cos this is now what i need".
+- 2026-10-27, built that way in `tools/alien-model/` (#772). My calls, not
+  asked:
+  - B's head height on the rig, with the owner's picture's proportions, so
+    the figure is about 29 cm taller than today's;
+  - the squeezed head is the normal head deformed into a ball, not a second
+    model, so it is a shape key on the same mesh. Projecting onto a second
+    modelled head folded the triangles round the eyes;
+  - the jaw bone deforms nothing, as before: nothing drives it for the alien.
+- 2026-10-28, the owner on round 1: "its pretty good. would we polish it?",
+  then "proceed" on my list: the eyes, the face's dense patches, a smaller
+  head. My calls on it:
+  - the eyes keep their length and get the picture's width, in a deeper
+    socket with the lens set back from the face: that step is what the
+    wire draws as an outline, the way today's alien's eyes read;
+  - the dense triangles ring the socket instead of filling the lens, and
+    the nose and mouth patches are tighter;
+  - the head shrinks to `HEAD_SCALE`, not to today's height: that would
+    take a head about half as tall, no longer B's. The scene scales the
+    whole figure to its frame (#773), so the height in metres matters only
+    for proportion. `--head-scale 1` rebuilds round 1's size.
+- 2026-10-28, the owner on round 2: "it has eye holes but like no eyes can u
+  add them. also a tiny bit more distingushible facial features on squezed.
+  also technically i think squezes should be made from metamorphosing
+  normall one cos later we wanna use this animation as scene param". My
+  calls on it:
+  - each eye is an eyeball of its own, a glossy dome in the socket, meshed
+    as its own shell so its outline stays clean. A dome in the skin's field
+    came out ragged once the eyes were drawn black;
+  - `alien.bin` flags the eyeballs' vertices in each normal's fourth byte,
+    which was always 0, so the layout and size per vertex are unchanged and
+    the scene can draw the eyes black as the owner's picture has them. The
+    renders draw them black in both looks;
+  - the squeezed face's smaller features are scaled up together
+    (`SQ_FACE`), its eyes sink deeper in puffier rims, and its mouth is
+    pushed further;
+  - the squeeze already was the normal mesh moving, one shape key, and
+    stays so: the eyeballs move by the same eye-to-eye map as the warp, so
+    the scene can blend it from 0 to 1. The renders now show the
+    in-betweens (a quarter, half, three quarters) to check that blend.
+- 2026-10-28, the owner on round 3: "1. make eyes bigger. 2. don't shrink
+  them when u shrink head. 3. add tiny smile". My calls on it:
+  - "shrink head" read as the squeeze, the owner's own word for it in the
+    brief, and as in shrunk.png, where the eyes stay big on the small head;
+  - the eyes are 1.2 times the picture's size;
+  - in the squeeze the eyeballs keep their size and wrap round the ball
+    (`wrap_eye`, which keeps distances along the surface); the squeezed
+    sockets and rims are laid out in the same wrapped coordinates, and 12
+    landmarks round each socket's lip hold the skin to them. The ball is a
+    little wider to hold them;
+  - the smile bends the mouth's slit and lips up at the corners
+    (`MOUTH_SMILE`); at the first, smaller bend it barely read up close. The
+    squeezed mouth stays pursed, as in shrunk.png.
 
 ## Tuning notes
 
@@ -231,6 +345,13 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 - Only one alien; the reference has a crowd.
 - Portrait screens crop the 16:9 frames to their middle.
 - About 5 of the mesh's triangles face inward at creases and are culled.
+- The new model (#772) waits for the owner's verdict on round 4. Once in the
+  scene (#773), its extra height needs the loops' cameras reframed, or the
+  figure scaled: they frame today's 2.15 m alien.
+- In the new model's arms-down check the shoulders go a little square, the
+  usual cost of automatic weights from a T-pose.
+- Where the skull's fold was relaxed out, a small knot of tiny triangles
+  is left among the big ones; it shows in the side close-up.
 
 ## Materials
 
@@ -244,6 +365,18 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   `playcheck.mjs` checks playback in Chromium or WebKit, optionally with
   play() refused until a click, the way iOS refuses it.
 - Reference media: `tools/.cache/refs/alien-dance/` (local only).
+- The new model (#772): `tools/alien-model/exportRig.ts`, `build.py` and
+  `check.ts`, run as in Resume here. It is original work, modelled by script
+  from shapes and measurements. Inspiration, all local and never in this
+  repo:
+  - the owner's two web pictures, a green alien head and the same kind of
+    head squeezed, in `tools/.cache/alien-design/owner-refs/`;
+  - round 1's B, our own design picture (#753), in
+    `tools/.cache/alien-design/round1/b-sleepy.png`, and round 2's side view
+    for the skull's depth.
+
+  The outputs go to `tools/.cache/alien-model/`: `rig.json`, `alien.bin`,
+  `alien.blend` and `renders/`.
 
 ## Resume here
 
@@ -259,6 +392,14 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   audio always reads loud, so it can't test silence.
 - Gotcha: `__viz.probe()` doesn't carry drive readings. Read
   `window.__alien.last` instead.
+- Rebuild the new model: `node --experimental-strip-types
+  tools/alien-model/exportRig.ts`, then
+  `/Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup -P
+  tools/alien-model/build.py` (Blender is not on PATH; add `-- --quick` for a
+  rough 4 mm draft, `-- --no-render` to skip the renders), then
+  `node --experimental-strip-types tools/alien-model/check.ts`. The
+  references live under the main checkout's `tools/.cache/`; a worktree needs
+  that folder linked in.
 
 ## History
 
@@ -278,3 +419,7 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   Measured headless, cache off: a 1280×800 gallery visit fetched 5351 KB
   before and 735 KB after; a deep link to Alien still fetches its three
   loops (about 4.3 MB), and so does a 1920×1080 gallery, where its tile mounts.
+- #753 (2026-10-27, closed): three rounds of design pictures; the owner
+  picked B's body, their own head picture and its squeeze, and Blender.
+- #778 (draft, 2026-10-27, for #772): the new model built in Blender by
+  script, round 1 of its renders sent to the owner.
