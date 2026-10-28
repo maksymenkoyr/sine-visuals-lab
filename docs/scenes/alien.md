@@ -379,6 +379,9 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
     readout says "held".
   - The quality preset's bloom passes now apply: high and mid draw both blur
     levels, as the bake did; low draws one, the floor quality none.
+- 2026-10-28, the owner on the review page's two looks (at DPR 2 the live
+  wire is crisper and stands out more than the stretched video did; Bounce
+  squashes the 3D figure): "good". Both kept as built.
 
 ## Tuning notes
 
@@ -401,8 +404,6 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   M1 Pro, longer on a weak laptop, once per page. A gallery visit where the
   tile mounts pays it too. #773 swaps in the Blender model, loaded rather
   than built.
-- At DPR 2 the live wire is crisper and stands out more than the stretched
-  video did; the owner hasn't yet said whether that is the look.
 - In the close-up the floor is far below the frame, so a squash reads as
   him dipping.
 - A head nod can push the neck's top through the back of the skull: the
