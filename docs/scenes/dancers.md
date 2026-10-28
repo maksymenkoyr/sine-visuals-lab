@@ -45,7 +45,10 @@ featured, registered at `minQuality: "floor"` so it also runs on TV presets.
 - `tools/clip-convert.mjs` + `tools/clip-cuts.json` (repo root, not under
   `src/`) — the offline converter that retargets a CMU BVH trial onto the
   rig and cuts it into a clip; `ClipMeta.source` on each clip records which
-  CMU trial and frame range it came from.
+  CMU trial and frame range it came from. A cut with no `start` gets its
+  loop from `findLoop()`; every clip's feet go through `polishFeet()`.
+  `tools/clip-candidates.json` lists the CMU dance trials not in the library
+  yet, uncut, for the converter's `--cuts`.
 - Tests (pure, DOM/GL-free): `tests/dancersRig.test.ts`,
   `tests/dancersMoves.test.ts`, `tests/dancersChoreo.test.ts`,
   `tests/dancersClipFormat.test.ts`, `tests/dancersPlayer.test.ts`, plus
@@ -73,6 +76,34 @@ freestanding raymarched skeleton, not a mesh character. No `/ref` video
 bundle: the motion itself comes from the CMU mocap database above, not from
 a visual reference video, and the rig/shading/choreography design is
 original work built around that data.
+
+## Measurements
+
+- 2026-10-28, feet. The retarget is faithful: on 05_02, 90_32, 90_33, 55_02
+  and 60_02 our foot's pitch and shin-to-foot angle match the raw BVH within
+  1°, so bad feet come from CMU's skeleton solve. Share of foot-frames with
+  the shin-to-foot angle past a human ankle (over 119° or under 14°), and of
+  standing foot-frames rolled over 25° or stood on the tip (more than 36°
+  below the rest foot), `clips-v1.bin` → the converter with `polishFeet()`:
+
+  | clip | past an ankle | rolled | on the tip |
+  |---|---|---|---|
+  | armup | 76% → 0% | 52% → 2% | 0% → 0% |
+  | twist | 31% → 0% | 0% → 0% | 0% → 0% |
+  | expressive | 0% → 0% | 26% → 3% | 96% → 17% |
+  | armshigh | 6% → 0% | 55% → 0% | 75% → 0% |
+  | toprock2 | 0% → 0% | 25% → 0% | 8% → 3% |
+  | moonwalk | 0% → 0% | 0% → 0% | 56% → 11% |
+  | salsa | 0% → 0% | 0% → 0% | 19% → 5% |
+  | russian | 6% → 4% | 0% → 0% | 20% → 20% |
+
+  The other eight clips were clean or within a few points. Over the 75
+  trials in `tools/clip-candidates.json`, the means go 4.8% → 0.1% past an
+  ankle, 4.4% → 0.7% rolled, 21.4% → 9.7% on the tip, and no clip got worse
+  by more than 5 points on any of the three.
+- 2026-10-28, loops. `scoreWindow()` on the hand cuts in `clip-cuts.json`,
+  as the bar for found loops: seams 0.06–0.56 leg lengths (armup the worst),
+  slides up to 0.68 apart from moonwalk's 3.22 (it travels by design).
 
 ## Decisions and pivots
 
@@ -118,6 +149,19 @@ original work built around that data.
   bundle evaluates too, and the older TV runtimes the es2017 build target
   exists for lack `fromEntries`. Same table, same indices — no visual change.
 - 2026-10-24: Id, name, settings and gallery record moved to `src/render/scenes/dancers/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-28: the owner saw feet that "don't work that well with some
+  moves" on Alien and asked for every CMU dance trial, "pre-polished". The
+  converter now finds a loop when a cut has no `start` (`findLoop()`),
+  cleans every clip's feet (`polishFeet()`; `--raw-feet` skips it), closes
+  each loop with a one-beat crossfade into the beat before frame 0 instead
+  of a short blend toward a frozen frame 0, and writes only `ClipMeta` into
+  the library (`clips-v1.bin` carries each trial's tempo estimate). The feet
+  rule limits only the shin-to-foot angle, never a turn read in the shin's
+  own frame, because the solve flips some feet half a turn about their
+  length (90_30); a standing foot whose top faces down is left as captured.
+  No toe bone: on the ball of the foot the whole foot still tips. The shipped
+  library is unchanged until the owner picks; the picks go into a new
+  `clips-v<n>.bin`.
 
 ## Tuning notes
 
@@ -144,8 +188,13 @@ original work built around that data.
   ones under separate registration like the Renegade) were agreed as a
   follow-up via a film-yourself → offline pose-estimation (WHAM / 4D-Humans
   style) → the same `clip-convert.mjs` input pipeline. Not started.
-- More CMU moves are just additional `tools/clip-cuts.json` entries away;
-  no pipeline work needed to add them.
+- 75 more CMU dance trials are cut and cleaned as candidates
+  (`tools/clip-candidates.json`); the owner marks which stay on the review
+  page (Materials). The kept ones move into `tools/clip-cuts.json` with the
+  found start, beats and bpm, and the library is rebuilt once.
+- Feet: a toe bone would let the ball of the foot bend instead of the whole
+  foot tipping; it changes `BONE_COUNT`, so every clip, both skins and
+  Alien's mesh with it.
 - Other characters as alternative skins were discussed as a further-out
   idea, not agreed as committed work.
 - Still a draft scene (`DRAFT_SCENE_IDS`), not yet promoted to featured.
@@ -155,6 +204,7 @@ original work built around that data.
 - Artifact: [Dancing Figures Decision Guide](https://claude.ai/artifact/82iRWoHJybg3nfxMp8M7H8). Source saved as `dancers/artifacts/dancing-figures-decision-guide.html`.
 - Artifact: [Dancer Lab](https://claude.ai/artifact/BZwSRAM3ABZazqVQkXMYS3). Source saved as `dancers/artifacts/dancer-lab.html`.
 - The motion-capture clips are in the repo (`public/media/dancers/`, named by `CLIP_LIBRARY_URL`), credited in `THIRD-PARTY-NOTICES.md`.
+- Artifact: [Dance Candidates](https://claude.ai/artifact/YXxsV7tonmgFbdqrMLHtko) (2026-10-28) — every candidate and library clip on a stick figure, feet before and after `polishFeet()`, with Keep/Maybe/Drop saved in its `picks` collection. Built from untracked `tools/.cache/clip-candidates/page/` (the converter's output as base64 text, and `rig.ts` + `clipFormat.ts` bundled by esbuild).
 
 ## Resume here
 
@@ -167,9 +217,10 @@ original work built around that data.
 - A rig change invalidates every clip (`clipFormat.ts`'s binary layout
   checks the bone count against `BONE_COUNT`) — rebuild the clip library
   after any bone-table change in `rig.ts`.
-- Gotcha carried over from the build session: CMU trials have no music, so
-  tempo/beat placement for a new clip has to be pinned by hand in the cut
-  list, not inferred from the source.
+- CMU trials have no music. A cut without `start` lets `findLoop()` place
+  the beats; pin `start`/`beats`/`bpm` by hand only when its pick looks off.
+- Candidates: `node tools/clip-convert.mjs --cuts tools/clip-candidates.json
+  --out <file> --report <json>` (add `--raw-feet` for the before).
 
 ## History
 
