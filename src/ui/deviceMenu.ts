@@ -636,6 +636,8 @@ export interface DeviceMenu {
   isOpen(): boolean;
   /** The scene or palette changed from outside (Set pad, key, Autopilot): rebuilds what follows the scene. No-op while closed (open() does it). */
   sceneChanged(): void;
+  /** One of the scene's settings was written outside the panel (its arrow keys, ui/sceneArrows.ts): its slider row shows the new value. */
+  settingChanged(sceneId: string, key: string): void;
   /** The stem split runs only while this is true (src/render/stemReaders.ts). */
   isStemsRowOnScreen(): boolean;
 }
@@ -5475,6 +5477,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshAuto(): void;
   }
   let sceneRowHandles: SceneRowHandle[] = [];
+  // Per setting key, a slider row re-reading the store: the panel doesn't
+  // watch it, so a write from outside (a scene's arrow keys) asks for this.
+  const sceneRowSyncs = new Map<string, () => void>();
   // Cleanup callbacks from WidgetCtx.onDispose (widgets/registry.ts), run once before the next full rebuild.
   let widgetDisposers: (() => void)[] = [];
 
@@ -5801,6 +5806,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       if (linked.length) row.setLinkedTicks(linked.map((l) => ({ value, colour: l.colour })));
     });
     row.sync(() => deps.getSceneSettingValue(sceneId, spec));
+    sceneRowSyncs.set(spec.key, () => row.sync(() => deps.getSceneSettingValue(sceneId, spec)));
     wirePreviewFocus(row.el);
     container.appendChild(row.el);
     sceneRowHandles.push(row);
@@ -5904,6 +5910,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     sceneRows.innerHTML = "";
     sceneWidgetCardsHost.innerHTML = "";
     sceneRowHandles = [];
+    sceneRowSyncs.clear();
     for (const c of driveSparkCanvases) untrackDriveCanvas(c);
     driveSparkCanvases = [];
     driveRowHandles = [];
@@ -6600,6 +6607,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     isOpen: () => isOpen,
     sceneChanged() {
       if (isOpen) syncToScene();
+    },
+    settingChanged(sceneId, key) {
+      if (isOpen && renderedSceneId === sceneId) sceneRowSyncs.get(key)?.();
     },
     applyMidiCc: (target, cc) => midiCard?.applyCc(target, cc),
     isStemsRowOnScreen: () => isOpen && audioMeters.stemRowsOnScreen(),

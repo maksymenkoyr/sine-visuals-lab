@@ -8,15 +8,19 @@ the floor and springs him back on its wire's hits; Bounce smoothness turns
 that spring from a snap and a wobble into an ease and a glide. A loop repeats
 until the Cut setting's wire makes a hit that stands out from its everyday
 ones (the dotted line on its graph). Dance holds one dance, and Cut then
-waits; View shows every dance through one loop's camera. In development, on
-main since #374.
+waits; View shows every dance through one loop's camera, and the camera
+sliders under it (the arrow keys too) move that camera by hand. In
+development, on main since #374.
 
 ## Where the code is
 
 - `src/render/scenes/alien/card.ts`: the scene's card, loaded with the page: id,
   name, `SETTINGS`, the Motion section in `PANEL`, `MOVE_GAIN`, the `gallery`
-  record and `loadBody`. The body spreads the card, so the registered settings
-  are the body's own objects.
+  record and `loadBody`, and `arrows`: which camera sliders the arrow keys
+  move (`src/ui/sceneArrows.ts` handles the keys for any scene). The body
+  spreads the card, so the registered settings are the body's own objects.
+- `camera.ts`: the camera by hand: `handCamera()` moves the view by the
+  Camera sliders, `easeHand()` glides them.
 - `src/render/scenes/alien/index.ts`: the body, loaded after first paint. It
   loads the model and the dancers' clip library (`sceneMedia`, both fetched
   on the first mount and decoded once per page; black until both land), keeps
@@ -314,6 +318,27 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 
     Silence: "the picture holds still". The defaults play as before; the
     song's numbers move with whichever dance the cuts land on.
+- 2026-10-28, the camera by hand, same set-up, keys pressed with
+  Playwright's keyboard:
+  - With nothing focused, 18 presses of → stored Orbit 90, 5 of ↑ Tilt 15
+    and 10 of Shift+↓ Distance 1.5; the HUD named each value.
+  - With the panel open during the presses, its Orbit and Distance
+    sliders moved with them (−30 and 0.80 after 6 × ← and 4 × Shift+↑).
+  - With the View row focused, → stepped its chip (Own to Close front) and
+    left the camera alone; a click on the picture moved focus to the page,
+    and the arrows moved the camera again.
+  - Save look stored Dance, View and the five camera sliders in the look.
+  - `tune-real` on `deTJ513J07Y`, then silence, 30 s from 4 s, on the
+    defaults (the camera at rest is exactly each loop's own):
+
+    | source | change med | change p95 | hits/min | energy | fps |
+    | --- | --- | --- | --- | --- | --- |
+    | song | 0.77 | 1.92 | 452 | 0.49 | 120 |
+    | silence | 0.00 | 0.00 | 0 | 0.00 | 120 |
+
+    Silence: "the picture holds still". The song's p95 is above the run
+    before because the cuts landed on closer views this time (loop 0's
+    close-up alone measured 1.77 / 2.48).
 
 ## Decisions and pivots
 
@@ -525,6 +550,30 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   - Neither row is wired to the music.
   - Saved looks keep a chip by its place in the row, so a new loop goes at
     the end of `LOOPS`.
+- 2026-10-28, the owner: "is it possible to add some kind of manual control
+  over camer and abiliuty to save satting?", then, after my answer (camera
+  sliders, saved by the Looks card's Save look, perhaps a Copy camera
+  button): "can we export control to keyboard to. arrows? build it". My
+  calls:
+  - Five sliders in Camera, under View: **Orbit** (round him, degrees),
+    **Tilt** (over or under him, degrees), **Distance** (times the view's
+    own), **Height** (camera and aim lifted together, metres) and **Zoom**
+    (times the view's focal length). They are offsets on whichever view is
+    on screen, so at rest every view is exactly the loop's camera, and a
+    cut keeps them. The drawn camera eases to them over `HAND_EASE_SEC`, so
+    a held key glides; a cut or a new View chip still jumps. Tilt stops at
+    `PITCH_LIMIT`, short of straight down.
+  - The arrow keys: ← → Orbit, ↑ ↓ Tilt, Shift with ↑ ↓ Distance (↑ is
+    closer), each press a step the card's `arrows` sets. Height and Zoom are
+    sliders only. Alt and Option are left alone: they already play to the
+    output window. The keys reach the scene only while no slider, text field
+    or chip row has focus, so a focused View row still steps its chips. Any
+    scene can name its own arrow settings the same way (`SceneArrows`,
+    `src/ui/sceneArrows.ts`); the keys list (`?`) has a Camera row.
+  - Master Scale leaves the camera sliders alone (`masterScale: false`):
+    scaled, the camera would move whenever someone turned Master.
+  - Saving is the Looks card's Save look, as for every other setting. No
+    Copy camera button: the owner answered with keys, not that.
 
 ## Tuning notes
 
@@ -541,7 +590,8 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 - Judge the look in loop 0 (`?loop=0`), whose framing is the closest to the
   reference.
 - To polish one dance, hold it on Dance and step through View; the strip's
-  arrow keys move chip by chip.
+  arrow keys move chip by chip. Then click the picture, so no row has focus,
+  and fly the camera with the arrows; Save look keeps the framing.
 
 ## Known issues and next steps
 
@@ -657,4 +707,5 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   loaded as `mesh-v1.bin`, with black eyes; the framing waits for the owner.
 - #785 (merged 2026-10-28): ten more dances from the clip library, each
   with its own camera framed for the new model.
-- #786 (draft, 2026-10-28): the Dance and View rows.
+- #786 (draft, 2026-10-28): the Dance and View rows, then the camera by
+  hand: five Camera sliders and the arrow keys.

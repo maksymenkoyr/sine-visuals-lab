@@ -72,6 +72,63 @@ export const SETTINGS: SceneSetting[] = [
     step: 1,
     default: 0,
   },
+  // The camera by hand, on top of the view (camera.ts). Master Scale leaves
+  // them alone: scaled, the camera would move whenever someone turned it.
+  {
+    key: "orbit",
+    label: "Orbit",
+    description: "Walks the camera round him from the view, in degrees: the ← → keys do the same. Left: the camera walks left. Right: it walks right",
+    group: "Camera",
+    min: -180,
+    max: 180,
+    step: 1,
+    default: 0,
+    masterScale: false,
+  },
+  {
+    key: "tilt",
+    label: "Tilt",
+    description: "Swings the camera under or over him from the view, in degrees: the ↑ ↓ keys do the same. Left: from below. Right: from above",
+    group: "Camera",
+    min: -60,
+    max: 60,
+    step: 1,
+    default: 0,
+    masterScale: false,
+  },
+  {
+    key: "distance",
+    label: "Distance",
+    description: "How far the camera stands from him, times the view's own: Shift with ↑ (closer) or ↓ (further) does the same. Left: closer. Right: further",
+    group: "Camera",
+    min: 0.3,
+    max: 3,
+    step: 0.01,
+    default: 1,
+    masterScale: false,
+  },
+  {
+    key: "height",
+    label: "Height",
+    description: "Raises or lowers the camera and where it looks together, in metres, so the frame slides. Left: lower. Right: higher",
+    group: "Camera",
+    min: -1.5,
+    max: 1.5,
+    step: 0.01,
+    default: 0,
+    masterScale: false,
+  },
+  {
+    key: "zoom",
+    label: "Zoom",
+    description: "The lens, times the view's own. Left: wider. Right: tighter",
+    group: "Camera",
+    min: 0.4,
+    max: 2.5,
+    step: 0.01,
+    default: 1,
+    masterScale: false,
+  },
   {
     key: "cut",
     label: "Cut",
@@ -109,6 +166,12 @@ export const card: SceneCard = {
   name: "Alien",
   settings: SETTINGS,
   panel: PANEL,
+  // One press: a few degrees round or over him, a twentieth of the way in.
+  arrows: {
+    leftRight: { setting: "orbit", by: 5 },
+    upDown: { setting: "tilt", by: 3 },
+    shiftUpDown: { setting: "distance", by: -0.05 },
+  },
 };
 
 export const loadBody = (): Promise<Scene> => import("./index.ts").then((m) => m.alienScene);
