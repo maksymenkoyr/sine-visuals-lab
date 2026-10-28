@@ -4,42 +4,38 @@ This file is expected to be rewritten wholesale each session — it's a snapshot
 not a history. Keep it short enough to read in one glance. Use `/wrap` to
 regenerate it at session close.
 
-_2026-10-24_
+_2026-10-28_
 
 ## In flight
 
-- **Audio engine (v5)**: the analysis built in `~/projects/audio-subsystem/v5`
-  replaces the app's own. Parent #675, label `audio engine`.
-  - Draft #674 (branch `worktree-audio-engine-v5`) is the first half:
-    - `src/audio/engine/` is in, identical frame for frame to v5;
-    - every capture runs it, and its reading (`FeatureFrame.engine`) reaches
-      the pop-out, the wire and a TV;
-    - nothing reads it yet, so the picture is unchanged.
-  - Parts: #677 hits and Bass/Mid/Treble, #678 beats and tempo plus removing
-    the old trackers, #679 bench score, #680 `docs/audio-engine.md`.
-- **Ready:** #669 (Meters: the Sound card).
-- **Drafts:**
-  - #676 Insiders blank page
-  - #648 Mic Auto room-path gate (overlaps #677's gate rule)
-  - #666, #652, #651 new scenes
-  - #647 token labels
-  - #646 usage source
-  - #641 scene pages
-  - #599 Caustics rings
-  - #569 rate limits
-  - #500 synced stores
-  - #479 `setI`
-- **Mic calibration (#577)** and the 1.0.0 road (#616) are unchanged since
-  2026-10-21.
+- **Alien** (parent #750): the live Blender model, ten more dances with their
+  own cameras (#785) and the Dance and View rows (#786) are merged.
+  - Ready: #783, the record notes the owner's "good" on the live look and
+    3D Bounce (record only).
+  - Open: #752 several aliens and a moving camera, #774 Squeeze.
+- **Ready PRs:** #744 Beat in two rows (#717), #686 knip baseline (#643).
+- **Drafts, by area:**
+  - Panel and cables: #754 (× at each end, #746); #743 is the first take of
+    #744; #735 and #730 are older takes of the cable click.
+  - Audio: #758 and #736 Hats, #648 Mic Auto room-path (superseded by merged
+    #781), #777 gate off.
+  - Output: #767 Projector grade.
+  - Scenes: #666 Cosmic Cloud.
+  - Plumbing: #646 usage source, #500 synced stores.
+- **Audio engine v5** is merged (#674, #683, #781 quiet-mic gate); open
+  findings for v6 are in #766.
+- The 1.0.0 road (#616) is unchanged since 2026-10-21.
 
 ## Open questions
 
-- The engine's design calls, on #675:
-  - keep the silence gate on engine hits?
-  - should Lock mean "a steady pulse is playing"?
-  - should the metronome adopt v5's downbeats?
-  - merge #674 before #677, or together?
+- Alien's feet look wrong on some dances: the fault is in the CMU data, not
+  the retarget (per-clip scores in the memory `dance-clip-feet`). Fix by
+  cleanup in `tools/clip-convert.mjs` (clamp the ankle, flatten a planted
+  foot) or a toe bone: the owner's call. No issue filed yet.
+- #774 Squeeze: its default wire and feel are still the owner's to say.
+- Which stale drafts to close: #743, #735, #730, #648?
 
 ## Next up
 
-- `/handoff #675` builds #677 first.
+- `/handoff` the Alien feet work, then build it.
+- #774 once the owner answers its two open points.
