@@ -13,12 +13,11 @@
  * `?w=&h=` sets the frame size.
  */
 import { CLIP_LIBRARY_URL, decodeClipLibrary, sampleClip, type ClipLibrary } from "../dancers/clipFormat.ts";
-import { B, CH_LIFT, createPose, createRigWorld, forwardKinematics, groundToFloor } from "../dancers/rig.ts";
-import { createAlienRenderer, projectToFrame } from "./renderer.ts";
+import { createPose } from "../dancers/rig.ts";
+import { FULL_VIEWPORT } from "../../scene.ts";
+import { createAlienRenderer, floorPivot, NO_SQUASH, projectToFrame } from "./renderer.ts";
 import { clipSeconds, LOOPS } from "./reel.ts";
 
-/** Poses averaged per loop for its pivot. */
-const PIVOT_SAMPLES = 32;
 const BLOOM_PASSES = 2;
 
 const params = new URLSearchParams(location.search);
@@ -32,7 +31,6 @@ const gl = canvas.getContext("webgl2", { preserveDrawingBuffer: true, antialias:
 if (!gl) throw new Error("bake: no WebGL2");
 const renderer = createAlienRenderer(gl);
 const pose = createPose();
-const world = createRigWorld();
 let library: ClipLibrary | null = null;
 
 function clipFor(loop: number) {
@@ -43,16 +41,8 @@ function clipFor(loop: number) {
 
 /** The floor point under the pelvis, averaged over the loop, in the frame. */
 function pivotFor(loop: number): [number, number] {
-  const clip = clipFor(loop);
-  let x = 0, z = 0;
-  for (let i = 0; i < PIVOT_SAMPLES; i++) {
-    sampleClip(clip, i / PIVOT_SAMPLES, pose);
-    forwardKinematics(pose, world);
-    groundToFloor(world, pose[CH_LIFT]);
-    x += world.pos[B.pelvis * 3];
-    z += world.pos[B.pelvis * 3 + 2];
-  }
-  return projectToFrame(LOOPS[loop].camera, width / height, [x / PIVOT_SAMPLES, 0, z / PIVOT_SAMPLES]);
+  const [x, z] = floorPivot(clipFor(loop));
+  return projectToFrame(LOOPS[loop].camera, width / height, [x, 0, z]);
 }
 
 const ready = fetch(CLIP_LIBRARY_URL)
@@ -70,7 +60,7 @@ const ready = fetch(CLIP_LIBRARY_URL)
   ready,
   frame(loop: number, phase: number): string {
     sampleClip(clipFor(loop), phase, pose);
-    renderer.draw(pose, LOOPS[loop].camera, BLOOM_PASSES);
+    renderer.draw(pose, LOOPS[loop].camera, BLOOM_PASSES, FULL_VIEWPORT, NO_SQUASH);
     return canvas.toDataURL("image/png");
   },
 };
