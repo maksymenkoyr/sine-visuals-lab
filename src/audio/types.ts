@@ -90,6 +90,9 @@ export interface FeatureFrame {
   /** The same hit before the silence gate. Kept for followers that predate
    *  `engine`: their beat clock votes on it. */
   pulseOnset: boolean;
+  /** True when the sender's source isn't a mic, so no device gates this
+   *  frame's hits (src/audio/silenceGate.ts). Absent reads as a mic. */
+  gateOff?: boolean;
   /** The engine's tempo in BPM, 0 while it hears no steady pulse. */
   bpm: number;
   /** The engine's beat phase [0,1) on this sender's clock. No consumer reads

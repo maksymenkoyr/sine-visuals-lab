@@ -17,6 +17,8 @@ export interface TimedFrame {
   /** The sender's engine reading (protocol.ts's engine tail), its beat ages
    *  against this frame's roomTimeMs; null, or absent, when it sent none. */
   engine?: WireEngine | null;
+  /** FeatureFrame.gateOff. */
+  gateOff?: boolean;
 }
 
 export interface Sample {
@@ -37,6 +39,8 @@ export interface Sample {
    *  tracker's state from the latest frame at or before the instant, its beat
    *  ages measured to the instant itself. null when the feed sends none. */
   engine: WireEngine | null;
+  /** FeatureFrame.gateOff of the frame at or before this instant. */
+  gateOff: boolean;
 }
 
 const MAX_HISTORY_MS = 2000;
@@ -140,7 +144,7 @@ export class JitterBuffer {
     beatAgoMs: 0,
     downbeatAgoMs: 0,
   };
-  private readonly scratchSample: Sample = { bands: this.scratchBands, energy: 0, bpm: 0, level: 0.5, hats: 0, lead: 0, wave: null, engine: null };
+  private readonly scratchSample: Sample = { bands: this.scratchBands, energy: 0, bpm: 0, level: 0.5, hats: 0, lead: 0, wave: null, engine: null, gateOff: false };
 
   push(frame: TimedFrame): void {
     // Network delivery can reorder; insert in timestamp order rather than
@@ -188,6 +192,7 @@ export class JitterBuffer {
     this.scratchSample.lead = a.lead + (b.lead - a.lead) * t;
     this.scratchSample.wave = b.wave ?? null;
     this.scratchSample.engine = this.engineAt(a, b, t, targetMs);
+    this.scratchSample.gateOff = a.gateOff === true;
     return this.scratchSample;
   }
 
@@ -200,6 +205,7 @@ export class JitterBuffer {
     this.scratchSample.lead = f.lead;
     this.scratchSample.wave = f.wave ?? null;
     this.scratchSample.engine = this.engineAt(f, f, 0, targetMs);
+    this.scratchSample.gateOff = f.gateOff === true;
     return this.scratchSample;
   }
 

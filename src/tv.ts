@@ -24,7 +24,7 @@ import { BUILD_INFO, versionHint, versionLabel } from "./version.ts";
 import { pinEverything, pinSceneMedia } from "./pinnedAssets.ts";
 import { loadScene, sceneReady } from "./render/lazyScene.ts";
 import { requestWakeLock } from "./ui/wakeLock.ts";
-import { SILENCE_GATE_SEED } from "./audio/silenceGate.ts";
+import { SILENCE_GATE_OFF, SILENCE_GATE_SEED } from "./audio/silenceGate.ts";
 import { getHitShape } from "./audio/hitStrength.ts";
 import { applySensitivity } from "./audio/sensitivity.ts";
 import type { FeatureFrame } from "./audio/types.ts";
@@ -910,6 +910,7 @@ async function main(): Promise<void> {
       hats: s.hats,
       lead: s.lead,
       engine: s.engine,
+      gateOff: s.gateOff,
     };
 
     // The same per-tick chain as app.ts's loop() and drawScene(), minus what
@@ -922,7 +923,7 @@ async function main(): Promise<void> {
     const smoothing = resolveSmoothing(scene.id);
     // Only the GPU draw is rate-capped — sampling and the anim clock's decay
     // stay on every rAF tick.
-    const anim = animClock.advance(dtSec, frame, smoothing, SILENCE_GATE_SEED, { shape: getHitShape() });
+    const anim = animClock.advance(dtSec, frame, smoothing, s.gateOff ? SILENCE_GATE_OFF : SILENCE_GATE_SEED, { shape: getHitShape() });
     advanceAutoTune(dtSec, anim.profile);
     renderLatch.accumulate(anim);
     const sensitivity = resolveSensitivity(scene.id);

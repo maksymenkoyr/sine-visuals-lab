@@ -7,6 +7,7 @@ import {
   feedSilenceGateMeasurement,
   silenceGateMarksForFloor,
   SILENCE_GATE_MIN,
+  SILENCE_GATE_OFF,
   SILENCE_GATE_SEED,
 } from "../src/audio/silenceGate.ts";
 import { createSyntheticFeed } from "../src/audio/synthetic.ts";
@@ -47,6 +48,11 @@ describe("silenceGateDimmer", () => {
     expect(silenceGateDimmer(0, off)).toBe(1);
     expect(silenceGateDimmer(0.01, off)).toBe(1);
     expect(silenceGateDimmer(0.5, off)).toBe(1);
+  });
+
+  it("SILENCE_GATE_OFF passes a bare hit in a dead silent room", () => {
+    expect(silenceGateDimmer(0, SILENCE_GATE_OFF)).toBe(1);
+    expect(hitPasses(1.01, silenceGateDimmer(0, SILENCE_GATE_OFF))).toBe(true);
   });
 
   it("fails open on a non-finite level", () => {

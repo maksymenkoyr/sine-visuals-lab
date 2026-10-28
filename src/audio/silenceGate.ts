@@ -39,6 +39,14 @@
  * frame (net/outputSync.ts's `gate`), and a paired TV and the synthetic feed
  * hold SILENCE_GATE_SEED.
  *
+ * Only a mic is gated. A tab share, a line in or a loopback carries no room
+ * hiss, and there the gate only ever dropped quiet music's hits: the floor
+ * tracker read a steady stretch of a clean source as the room's floor (#777).
+ * A frame off any other source carries FeatureFrame.gateOff, and every device
+ * that draws it gates it with SILENCE_GATE_OFF, a TV by the frame's gate-off
+ * bit (src/net/protocol.ts). The tracker hears only a mic, so a share in
+ * between leaves the room it learned as it was.
+ *
  * SILENCE_GATE_SEED is a placeholder, not measured against a real mic in a
  * real room: `closed` is low because the room that prompted this feature read
  * Level as zero, and `open` sits at or under the quietest level
@@ -79,6 +87,10 @@ export const SILENCE_GATE_MIN = 0;
 /** The marks before this room has been heard holding still, and for good on
  *  a device that never hears it (this file's header). */
 export const SILENCE_GATE_SEED: SilenceGateMarks = Object.freeze({ closed: 0.05, open: 0.15 });
+
+/** Marks that gate nothing (silenceGateDimmer's `closed` at SILENCE_GATE_MIN),
+ *  for a frame whose source isn't a mic. */
+export const SILENCE_GATE_OFF: SilenceGateMarks = Object.freeze({ closed: SILENCE_GATE_MIN, open: SILENCE_GATE_SEED.open });
 
 /** One tick's gate reading, off one device's own capture — not the marks
  *  (SilenceGateMarks), but what the gate actually did this tick.

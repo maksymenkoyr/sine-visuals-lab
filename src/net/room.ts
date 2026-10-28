@@ -76,6 +76,8 @@ export interface VisualSample {
    *  beat times on `timeSec`'s timeline; null when the feed sends none.
    *  Reused between calls, like the rest of the sample. */
   engine: EngineReading | null;
+  /** FeatureFrame.gateOff (JitterBuffer.sampleAt). */
+  gateOff: boolean;
 }
 
 /** The room's keys, as the laptop minted them. A host presents both; a phone
@@ -515,6 +517,7 @@ abstract class RoomConnectionBase {
       lead: s.lead,
       wave: s.wave,
       engine: s.engine ? this.sampleEngine(s.engine, timeSec) : null,
+      gateOff: s.gateOff,
     };
   }
 

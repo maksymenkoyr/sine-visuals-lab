@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { encodeFeatureFrame, decodeFeatureFrame } from "../src/net/protocol.ts";
 import { NUM_BANDS } from "../src/audio/types.ts";
 import { isClipping } from "../src/audio/waveform.ts";
+import { engineReading } from "./engineReading.ts";
 
 describe("protocol", () => {
   it("round-trips every field within quantization tolerance", () => {
@@ -204,6 +205,26 @@ describe("stem tail", () => {
     )!;
     expect(decoded.hats).toBe(1);
     expect(decoded.lead).toBe(0);
+  });
+});
+
+describe("gate-off bit", () => {
+  const base = { bands: new Float32Array(NUM_BANDS), energy: 0.2, onset: false, pulseOnset: false, bpm: 120, onsetPhase: 0, level: 0.3, hats: 0, lead: 0 };
+  const engine = engineReading({ music: true, blocked: true, snare: 2 });
+
+  it("round-trips with the engine tail, leaving the engine's own flags alone", () => {
+    for (const gateOff of [true, false]) {
+      const decoded = decodeFeatureFrame(encodeFeatureFrame({ ...base, engine, gateOff }, 1000, null))!;
+      expect(decoded.gateOff).toBe(gateOff);
+      expect(decoded.engine!.music).toBe(true);
+      expect(decoded.engine!.blocked).toBe(true);
+      expect(decoded.wave).toBeNull();
+    }
+  });
+
+  it("reads as gated from a sender that never set it, and from a frame with no engine tail", () => {
+    expect(decodeFeatureFrame(encodeFeatureFrame({ ...base, engine }, 1000))!.gateOff).toBe(false);
+    expect(decodeFeatureFrame(encodeFeatureFrame({ ...base, gateOff: true }, 1000, { min: -0.1, max: 0.1 }))!.gateOff).toBe(false);
   });
 });
 

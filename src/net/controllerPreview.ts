@@ -34,6 +34,7 @@ export function silentSample(s: VisualSample): VisualSample {
     lead: 0,
     wave: null,
     engine: null,
+    gateOff: s.gateOff,
   };
 }
 
