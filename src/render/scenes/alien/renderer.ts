@@ -1,16 +1,18 @@
 /**
  * The alien drawn live: the skinned wireframe mesh (mesh.ts, glsl.ts) through
- * one loop's camera, with bloom. The scene itself no longer draws this — it
- * plays videos baked from it (index.ts) — so this runs only on the bake page
- * (bakePage.ts, driven by tools/alien-bake.mjs), which renders every frame of
- * every loop and hands them to ffmpeg.
+ * one loop's camera, squashed for Bounce, with bloom. The scene (index.ts)
+ * draws it every frame; the bake page (bakePage.ts, driven by
+ * tools/alien-bake.mjs) draws it too, to make the loop videos older builds
+ * still play.
  *
  * Passes (the Gates pattern): the mesh into a sharp target with its own depth
  * buffer, two blur levels for the bloom, then a composite to the drawing
  * buffer.
  */
 import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../../gl.ts";
-import { BONE_COUNT, CH_LIFT, createRigWorld, forwardKinematics, groundToFloor, quatConjugate, quatMul, quatRotate, type Pose } from "../dancers/rig.ts";
+import type { Viewport } from "../../scene.ts";
+import { sampleClip, type Clip } from "../dancers/clipFormat.ts";
+import { B, BONE_COUNT, CH_LIFT, createPose, createRigWorld, forwardKinematics, groundToFloor, quatConjugate, quatMul, quatRotate, type Pose } from "../dancers/rig.ts";
 import { alienMesh, MAX_INFLUENCES } from "./mesh.ts";
 import type { LoopCamera } from "./reel.ts";
 import { BLUR_FRAG, BLUR_STRIDE, COMPOSITE_FRAG, MESH_FRAG, MESH_VERT } from "./glsl.ts";
@@ -18,6 +20,34 @@ import { BLUR_FRAG, BLUR_STRIDE, COMPOSITE_FRAG, MESH_FRAG, MESH_VERT } from "./
 /** Bloom gains for the two blur levels. */
 const GLOW_A_GAIN = 0.55;
 const GLOW_B_GAIN = 1.1;
+/** Poses averaged per clip for its Bounce pivot. */
+const PIVOT_SAMPLES = 32;
+
+/** Bounce for one frame: the squash (positive is shorter and wider) and the
+ *  floor point it squashes toward, x and z in metres. */
+export interface Squash {
+  x: number;
+  z: number;
+  squash: number;
+}
+
+export const NO_SQUASH: Squash = { x: 0, z: 0, squash: 0 };
+
+/** The floor point under the pelvis, averaged over the clip's loop, as x and
+ *  z in metres: where Bounce squashes the alien toward. */
+export function floorPivot(clip: Clip): [number, number] {
+  const pose = createPose();
+  const world = createRigWorld();
+  let x = 0, z = 0;
+  for (let i = 0; i < PIVOT_SAMPLES; i++) {
+    sampleClip(clip, i / PIVOT_SAMPLES, pose);
+    forwardKinematics(pose, world);
+    groundToFloor(world, pose[CH_LIFT]);
+    x += world.pos[B.pelvis * 3];
+    z += world.pos[B.pelvis * 3 + 2];
+  }
+  return [x / PIVOT_SAMPLES, z / PIVOT_SAMPLES];
+}
 
 const scratchInv = new Float32Array(4);
 const scratchQ = new Float32Array(4);
@@ -61,8 +91,9 @@ export function projectToFrame(cam: LoopCamera, aspect: number, p: readonly numb
 }
 
 export interface AlienRenderer {
-  /** Draws `pose` through `cam` to the drawing buffer, filling it. */
-  draw(pose: Pose, cam: LoopCamera, bloomPasses: number): void;
+  /** Draws `pose` through `cam`, as this device's `viewport` slice of the
+   *  room, to the drawing buffer, filling it. */
+  draw(pose: Pose, cam: LoopCamera, bloomPasses: number, viewport: Viewport, squash: Squash): void;
   dispose(): void;
 }
 
@@ -75,6 +106,7 @@ export function createAlienRenderer(gl: WebGL2RenderingContext): AlienRenderer {
   const meshBufs: WebGLBuffer[] = [];
   const world = createRigWorld();
   const skin = new Float32Array(BONE_COUNT * 8);
+  const squashVec = new Float32Array(3);
 
   const meshVao = gl.createVertexArray();
   gl.bindVertexArray(meshVao);
@@ -185,7 +217,7 @@ export function createAlienRenderer(gl: WebGL2RenderingContext): AlienRenderer {
   }
 
   return {
-    draw(pose, cam, bloomPasses) {
+    draw(pose, cam, bloomPasses, viewport, squash) {
       ensureTargets();
       forwardKinematics(pose, world);
       groundToFloor(world, pose[CH_LIFT]);
@@ -205,7 +237,11 @@ export function createAlienRenderer(gl: WebGL2RenderingContext): AlienRenderer {
       gl.disable(gl.BLEND);
       meshProg.use();
       meshProg.setV2("uResolution", gl.drawingBufferWidth, gl.drawingBufferHeight);
-      meshProg.setV4("uViewport", 0, 0, 1, 1);
+      meshProg.setV4("uViewport", viewport.x, viewport.y, viewport.w, viewport.h);
+      squashVec[0] = squash.x;
+      squashVec[1] = squash.z;
+      squashVec[2] = squash.squash;
+      meshProg.setV3v("uSquash", squashVec);
       meshProg.setV4v("uSkin", skin);
       meshProg.setV3v("uEye", cam.eye as unknown as number[]);
       meshProg.setV3v("uRight", right);

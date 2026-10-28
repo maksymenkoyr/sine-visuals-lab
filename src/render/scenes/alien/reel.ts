@@ -3,12 +3,10 @@
  *
  * A loop is one captured dance (a clip from the dancers' library,
  * ../dancers/clipFormat.ts) seen through one fixed camera — LOOPS pairs
- * them, each from its own angle. tools/alien-bake.mjs renders every loop to
- * a video (manifest.json beside them says how many frames, at what rate);
- * the scene (index.ts) plays those videos.
+ * them, each from its own angle. The scene (index.ts) draws them live.
  *
  * **Move: music pays for frames.** The loop on screen plays at `speed` × its
- * baked rate, where the target speed is the Move setting times what its wire
+ * captured speed, where the target speed is the Move setting times what its wire
  * reads. The speed eases toward that target over SPEED_EASE_SEC
  * (`easeSpeed`), so the dance doesn't twitch with every flicker of the
  * level. Silence reads 0: the speed eases down and the loop holds on the
@@ -25,10 +23,10 @@
  * either cut every beat or, under a sustained bassline, never; the scene
  * record has the measurements.)
  *
- * **Bounce: squash and stretch.** On top of the dance the whole picture
- * squashes toward the floor under the alien and springs back past rest
- * (`stepBounce`, a damped spring chasing the Bounce signal), the cartoon
- * squash-and-stretch done as a filter on the baked frame. Bounce smoothness
+ * **Bounce: squash and stretch.** On top of the dance the alien squashes
+ * toward the floor under him and springs back past rest (`stepBounce`, a
+ * damped spring chasing the Bounce signal), the cartoon squash-and-stretch
+ * done on the figure itself (MESH_VERT in glsl.ts). Bounce smoothness
  * (`bounceSpring`) softens that spring: slower and more damped, so the squash
  * eases in and glides back without a wobble. A softer spring alone would
  * never reach a short hit's depth, so the target is scaled up to match: one
@@ -124,7 +122,7 @@ export function stepCut(reel: Reel, input: CutInput, rand: () => number = Math.r
   return true;
 }
 
-/** The deepest squash, as a share of the picture's height, at Bounce 1 with
+/** The deepest squash, as a share of the alien's height, at Bounce 1 with
  *  its signal at 1. */
 export const BOUNCE_MAX = 0.14;
 /** The spring's natural frequency (Hz) and damping ratio at smoothness 0:

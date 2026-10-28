@@ -5,10 +5,12 @@
  * MESH_VERT skins every vertex of mesh.ts's bind-pose mesh to the rig: each
  * bone's skin transform is a rotation (uSkin[2b]) and a translation
  * (uSkin[2b+1].xyz) taking a bind-pose point to where that bone carries it
- * now, and a vertex is the weighted sum over its MAX_INFLUENCES bones. It
- * then projects through the loop's camera into room space and the device's
- * slice of it (the CAMERA math Gates and Ambience use, kept in clip space so
- * the depth test and perspective-correct interpolation still work).
+ * now, and a vertex is the weighted sum over its MAX_INFLUENCES bones. Bounce
+ * then squashes the skinned figure toward the floor point under him (uSquash:
+ * pivot x, pivot z, squash), shorter and wider by BOUNCE_WIDEN. It then
+ * projects through the loop's camera into room space and the device's slice
+ * of it (the CAMERA math Gates and Ambience use, kept in clip space so the
+ * depth test and perspective-correct interpolation still work).
  *
  * MESH_FRAG draws each triangle's own three edges from a barycentric derived
  * from gl_VertexID (mesh.ts de-indexes the mesh for this), LINE_HALF_PX wide
@@ -21,10 +23,9 @@
  *
  * The bloom is BLUR_FRAG on two smaller targets; COMPOSITE_FRAG adds them
  * to the sharp picture through a soft knee (renderer.ts owns the passes).
- * All of that runs only when the loops are baked (bakePage.ts); the scene
- * itself draws one pass, PLAYER_FRAG, over the baked frames.
  */
 import { BONE_COUNT } from "../dancers/rig.ts";
+import { BOUNCE_WIDEN } from "./reel.ts";
 
 const f = (v: number): string => v.toFixed(4);
 const v3 = (c: readonly number[]): string => `vec3(${c.map(f).join(", ")})`;
@@ -68,6 +69,7 @@ uniform vec3 uUp;
 uniform vec3 uFwd;
 uniform float uFocal;
 uniform float uDepthMid;
+uniform vec3 uSquash;
 out vec3 vNormal;
 out vec3 vToEye;
 out vec3 vBary;
@@ -89,6 +91,12 @@ void main() {
     p += w * (qrot(q, aPos) + uSkin[b * 2 + 1].xyz);
     n += w * qrot(q, aNormal);
   }
+  // Added as offsets so a squash of 0 leaves every vertex bit for bit where it was.
+  float widen = uSquash.z * ${f(BOUNCE_WIDEN)};
+  p.xz += (p.xz - uSquash.xy) * widen;
+  p.y -= p.y * uSquash.z;
+  n.xz /= 1.0 + widen;
+  n.y /= 1.0 - uSquash.z;
   vec3 rel = p - uEye;
   vec3 view = vec3(dot(rel, uRight), dot(rel, uUp), dot(rel, uFwd));
   float roomAspect = (uResolution.x / max(uViewport.z, 0.0001)) / (uResolution.y / max(uViewport.w, 0.0001));
@@ -157,40 +165,6 @@ void main() {
   c += (texture(uTex, vUv + uBlurStep * 3.0).rgb + texture(uTex, vUv - uBlurStep * 3.0).rgb) * 0.0540541;
   c += (texture(uTex, vUv + uBlurStep * 4.0).rgb + texture(uTex, vUv - uBlurStep * 4.0).rgb) * 0.0162162;
   outColor = vec4(c, 1.0);
-}
-`;
-
-/** The scene's one pass: the baked frame of the loop on screen, scaled to
- *  cover the room (cropping what overflows, never stretching) and seen
- *  through this device's slice of it, then squashed about the loop's pivot
- *  (the floor under the alien, in frame coordinates — below the frame for a
- *  close-up) by uScale for Bounce. Outside the frame is black. */
-export const PLAYER_FRAG = `#version 300 es
-precision highp float;
-in vec2 vUv;
-out vec4 outColor;
-uniform vec2 uResolution;
-uniform vec4 uViewport; // x,y,w,h slice of the shared room-space canvas (sceneCommon.ts)
-uniform sampler2D uVideo;
-uniform vec2 uVideoSize;
-uniform vec2 uPivot;
-uniform vec2 uScale;
-uniform float uHasFrame;
-
-void main() {
-  vec2 room = uViewport.xy + vUv * uViewport.zw;
-  float roomAspect = (uResolution.x / max(uViewport.z, 0.0001)) / (uResolution.y / max(uViewport.w, 0.0001));
-  float frameAspect = uVideoSize.x / uVideoSize.y;
-  vec2 uv = room - 0.5;
-  if (roomAspect > frameAspect) uv.y *= frameAspect / roomAspect;
-  else uv.x *= roomAspect / frameAspect;
-  uv += 0.5;
-  // Bounce: the picture scaled about the pivot, so sample the inverse.
-  uv = uPivot + (uv - uPivot) / uScale;
-  bool inside = all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0)));
-  // Video rows run top-down; uv's y runs up.
-  vec3 c = inside ? texture(uVideo, vec2(uv.x, 1.0 - uv.y)).rgb : vec3(0.0);
-  outColor = vec4(c * uHasFrame, 1.0);
 }
 `;
 

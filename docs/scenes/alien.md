@@ -1,9 +1,9 @@
 # Alien (`alien`)
 
 One grey alien dancing as a glowing green wireframe on black, in three short
-loops: each loop is one captured dance seen from its own angle, baked to a
-video. The music pays for the frames: the Move setting's wire sets how fast the
-loop on screen plays, and silence holds the frame. Bounce squashes him toward
+loops: each loop is one captured dance seen from its own angle, drawn live
+every frame. The music pays for the frames: the Move setting's wire sets how
+fast the dance on screen plays, and silence holds him still. Bounce squashes him toward
 the floor and springs him back on its wire's hits; Bounce smoothness turns
 that spring from a snap and a wobble into an ease and a glide. A loop repeats
 until the Cut setting's wire makes a hit that stands out from its everyday
@@ -15,24 +15,27 @@ ones (the dotted line on its graph). In development, on main since #374.
   name, `SETTINGS`, the Motion section in `PANEL`, `MOVE_GAIN`, the `gallery`
   record and `loadBody`. The body spreads the card, so the registered settings
   are the body's own objects.
-- `src/render/scenes/alien/index.ts`: the body, loaded after first paint: a video player. It holds one `<video>`
-  per loop (its bytes from `sceneMedia`, fetched on the first mount), the frame upload, the `?loop=<n>` DEV pin and the
-  `window.__alien` DEV hook (reel, last wire readings, videos).
+- `src/render/scenes/alien/index.ts`: the body, loaded after first paint. It
+  loads the dancers' clip library (`sceneMedia`, fetched on the first mount;
+  black until it lands), keeps each loop's place in its clip, samples the pose
+  and has `renderer.ts` draw it. Also the `?loop=<n>` DEV pin and the
+  `window.__alien` DEV hook (reel, last wire readings, each loop's place).
+- `renderer.ts`: the alien drawn live (mesh pass, bloom, composite) through a
+  loop's camera, into this device's slice of the room, with Bounce's squash;
+  `floorPivot()` finds the floor point the squash pulls toward.
 - `reel.ts`: the `LOOPS` table (clip + camera per loop) and the rules:
   `easeSpeed()` (Move), `stepCut()` (Cut), `stepBounce()` (Bounce) and
   `bounceSpring()` (Bounce smoothness). Its header has them in words.
-- `glsl.ts`: `PLAYER_FRAG`, the scene's one pass: the baked frame to cover
-  the room, squashed about the loop's pivot. The rest of it is the live look,
-  used only by the bake: GPU skinning, the barycentric wireframe, the fresnel
-  rim and outline, the blur and composite.
-- `loops/manifest.ts` (`BAKED`): frame rate, size, and per loop its clip,
-  its video under `public/media/alien/`, frame count and Bounce pivot. Both
-  are made by `tools/alien-bake.mjs`, which writes a new `-v<n>` name rather
-  than replace a video (`src/pinnedAssets.ts`'s header, "Scene media").
-- The bake: `renderer.ts` draws the alien live (mesh pass, bloom,
-  composite); `bakePage.ts` (served by `tools/alien-bake/index.html` on the
-  dev server) draws any frame of any loop; `tools/alien-bake.mjs` saves every
-  frame and encodes each loop with ffmpeg.
+- `glsl.ts`: the look: GPU skinning, Bounce's squash on the skinned figure,
+  the barycentric wireframe, the fresnel rim and outline, the blur and
+  composite.
+- The old baked videos, `public/media/alien/loop{0,1,2}-v1.mp4`, are no longer
+  played. They stay for tabs on an older build (`src/pinnedAssets.ts`'s
+  header, "Scene media"). `loops/manifest.ts` (`BAKED`) lists them, and the
+  bake that made them still works but is optional: `bakePage.ts` (served by
+  `tools/alien-bake/index.html` on the dev server) draws any frame of any
+  loop, and `tools/alien-bake.mjs` saves every frame and encodes each loop
+  with ffmpeg.
 - `body.ts`: the alien's shape as data (`PARTS`, each part on a rig bone, in
   that bone's frame) and its distance field, `compileSet()`, with per-part
   bounding-sphere pruning.
@@ -162,6 +165,55 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   `check.ts`: 10,246 vertices, 20,480 triangles, 532,732 bytes; 0 triangles
   facing against their normals; 7 slivers, 6 at the eyeballs' corners and 1
   on a thigh. The squeeze moves 3,026 vertices, up to 26.7 cm.
+- 2026-10-28, drawn live instead of the videos (#751), headless Chromium on
+  Metal on the owner's M1 Pro, videos before and live after:
+  - GPU per frame at 3024×1890, quality high, by `gpu-bench --scenes alien`
+    (a one-pixel readback per frame), three alternating rounds: the player
+    0.55–0.84 ms, live 1.58–2.05 ms. The player's video decoding is not in
+    its number. For the run, the bench page waited 1.5 s after `init` so the
+    videos and the clips had landed (a local edit, not kept). The in-app
+    per-draw timing (`--app --dpr 2`) read 0.56 ms for the player and about
+    8 ms summed over the live passes, but on Metal a timer query around one
+    pass can take in most of the frame, so it overstates. The weak-laptop
+    run #556 asks for has not been made.
+  - The mesh build in Chromium: 160–173 ms, once per page (`alienMesh()`
+    caches it), on the first mount.
+  - Each loop's first frame, Move and Bounce at 0, at 1600×900: the same
+    pose and framing as the video, the wire sharper. Mean green 11–14%
+    brighter. At 3024×1890 (DPR 2), where the video was a 1280×720 picture
+    stretched 2.4×, the mean is 6% darker, but the lines are crisp and stand
+    out more.
+  - Bounce, one frame per loop squashed 0.14 (Bounce 1 on a full hit) and
+    stretched 0.08, beside the old picture squash of the same frame: the
+    same dip and spread. In the close-up the old squash showed the video's
+    top edge as a flat cut through the head, and the stretch its bottom edge
+    as a black band under the hips; live has neither. A squash in 3D moves
+    near parts further on screen than far ones, so in loop 1 a sliver of the
+    far arm shows from behind the near one.
+  - Slow Move, `deTJ513J07Y` as the mic with loop 0 pinned, logged on every
+    rendered frame (60 fps) for 15 s: Move 0.2 (speed 0.11–0.19), Move 0.1
+    (0.055–0.095), and an 18 dB quieter copy at Move 1 (0–0.28). The dance
+    moved on every render while the speed was above 0. At those speeds a
+    screen frame bought a median of 0.14–0.29 frames of the old 120 fps
+    video, so the player showed each of its frames 3 to 7 times, and it
+    would have paused 41% (Move 0.1) and 49% (the quiet copy) of the time,
+    under its 0.07× floor.
+  - Opening the scene, and hovering its gallery tile, fetch
+    `/media/dancers/clips-v1.bin` once and no `/media/alien/` file (the
+    videos were 4.3 MB).
+  - `tune-real` on `deTJ513J07Y`, then silence, 30 s from 4 s:
+
+    | source | change med | change p95 | hits/min | energy | fps |
+    | --- | --- | --- | --- | --- | --- |
+    | song, videos | 1.23 | 2.05 | 426 | 0.47 | 120 |
+    | song, live | 1.28 | 2.21 | 450 | 0.49 | 120 |
+    | silence, videos | 0.00 | 0.00 | 0 | 0.00 | 120 |
+    | silence, live | 0.00 | 0.00 | 0 | 0.00 | 120 |
+
+    Silence, both times: "the picture holds still".
+  - The Move readout, song then silence: speed 0.71–0.81×, buying 23–26
+    fr/s, the frame climbing through the clip's 128; in silence 0.00×,
+    0 fr/s, "held", the strip grey.
 
 ## Decisions and pivots
 
@@ -310,6 +362,23 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   - the smile bends the mouth's slit and lips up at the corners
     (`MOUTH_SMILE`); at the first, smaller bend it barely read up close. The
     squeezed mouth stays pursed, as in shrunk.png.
+- 2026-10-26, the owner on drawing him live (#750): "if i wanna have more
+  then one of them can we render? if i wanna have more freedom for camera +
+  smoothenest i think render is preferable". Built on 2026-10-28 (#751): the
+  scene draws the alien every frame and no longer plays the videos. They lost
+  on more than one alien and a free camera (each loop had its camera baked
+  in), on a slow Move (the 120 fps videos repeat frames below about 0.5× on
+  a 60 Hz screen, and browsers pause them below 0.07×), on iOS's play()
+  rules, and on 4.3 MB per visitor. My calls in building it:
+  - Bounce squashes the figure itself, about the floor point under his
+    pelvis averaged over the loop: the point the bake's pivot was projected
+    from. Beside the old picture squash it is the same dip, without the
+    frame's edges, and near parts move more than far ones (Measurements).
+  - No playback floor. The eased speed nears 0 in silence without reaching
+    it, so under `HELD_BELOW` (it reads 0.00×) he holds still and the
+    readout says "held".
+  - The quality preset's bloom passes now apply: high and mid draw both blur
+    levels, as the bake did; low draws one, the floor quality none.
 
 ## Tuning notes
 
@@ -328,18 +397,14 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 
 ## Known issues and next steps
 
-- Size: the three videos (about 4.3 MB) download the first time the scene
-  or its gallery tile mounts. On 2026-10-15 the In development row started
-  961 CSS px down the gallery at desktop widths, so a window taller than
-  that mounts the tile, and downloads them, on a plain gallery visit. A
-  poster frame for the tile would avoid that.
-- Video playback rate can't go below about 0.07×; slower than that the loop
-  pauses.
-- On an iPhone or iPad that no one has tapped, or one in Low Power Mode, the
-  loop moves by a seek per frame instead of playing, which may stutter on an
-  older device. The iOS fix (see Decisions) is unconfirmed on real hardware.
-- In the close-up the Bounce pivot is far below the frame, so a squash
-  reads as the whole picture dipping.
+- The first mount builds the mesh on the main thread: about 0.17 s on the
+  M1 Pro, longer on a weak laptop, once per page. A gallery visit where the
+  tile mounts pays it too. #773 swaps in the Blender model, loaded rather
+  than built.
+- At DPR 2 the live wire is crisper and stands out more than the stretched
+  video did; the owner hasn't yet said whether that is the look.
+- In the close-up the floor is far below the frame, so a squash reads as
+  him dipping.
 - A head nod can push the neck's top through the back of the skull: the
   neck and head are separate surfaces.
 - Only one alien; the reference has a crowd.
@@ -355,14 +420,16 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 
 ## Materials
 
-- The bake: `tools/alien-bake.mjs` (its header has the command) and the
-  bake page `tools/alien-bake/index.html`.
+- The bake, now optional: `tools/alien-bake.mjs` (its header has the
+  command) and the bake page `tools/alien-bake/index.html`.
 - Working scripts: `alien/scripts/`. `shot.mjs` takes headless shots,
   `realmusic.mjs` drives a fake mic and logs the player, and `mkwav.py`
   builds the music/hiss/music test file. `summarize.py`, `simhold.py` and
   `cutsum.py` (Cut: cut times, hit peaks, the dotted line) read the logs. `meshcheck.ts` and `clipcheck.ts` run under
   `node --experimental-strip-types`, and `tile.py` makes contact sheets.
-  `playcheck.mjs` checks playback in Chromium or WebKit, optionally with
+  `glide.mjs` logs the dance's place on every render at a low Move and
+  `readout.mjs` reads the Move readout (Resume here has both). `playcheck.mjs`
+  checked the old video player in Chromium or WebKit, optionally with
   play() refused until a click, the way iOS refuses it.
 - Reference media: `tools/.cache/refs/alien-dance/` (local only).
 - The new model (#772): `tools/alien-model/exportRig.ts`, `build.py` and
@@ -382,11 +449,13 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 
 - `npm run dev`, then `/?audio=synthetic&bpm=128#/v/alien`. Add `&loop=<n>`
   to pin one loop.
-- Changed the alien, a loop or the look? Rebake with the dev server
-  running: `FFMPEG=<ffmpeg> node tools/alien-bake.mjs --port <p>`, then
-  look at a decoded frame before committing the videos. Keep the old videos
-  (a tab on an older build may still fetch them) and add the new ones to
-  `tests/mediaManifest.ts`; `tests/sceneMedia.test.ts` prints their lines.
+- The scene draws live, so a change to the alien, a loop or the look shows
+  at once; nothing needs rebaking. The old videos stay as they are (a tab on
+  an older build may still fetch them).
+- Slow Move: `node docs/scenes/alien/scripts/glide.mjs <wav> --port <p>
+  --move 0.1` logs the dance's place on every render and counts stalls.
+  `readout.mjs <wav> <outPrefix> --port <p> --at 12,36` reads and shoots the
+  Move readout at those seconds (a song then silence shows both states).
 - Real music: `node docs/scenes/alien/scripts/realmusic.mjs <wav> out.json
   --port <p>` (add `--cut anim.lowOnset` to wire Cut to Bass hit). Synthetic
   audio always reads loud, so it can't test silence.
