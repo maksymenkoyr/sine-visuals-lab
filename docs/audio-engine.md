@@ -235,6 +235,21 @@ confidence falls under its close mark (`musicHoldsGate`). An empty room's hiss
 never gets that periodic. Each device runs this off the `music` and
 `confidence` its frames carry, so the pop-out and a TV open with the laptop.
 
+Hats is a hit found beside the engine, not by it: a peak of the sound above
+`HATS_LO_HZ` over its own floor (`src/audio/stemSplit.ts`, then
+`src/render/levelHits.ts` in `animClock.ts`). Because the engine names each
+attack once, its hats miss most hi-hats that land with a kick or a snare; Hats
+reads only the top of the spectrum, so it keeps them. It borrows one verdict
+from the engine: a peak counts only while `music` is on. The jumps above also
+wait for it; their confidence floor only lost Hats real hits. Changing the engine's naming to find these hats would
+move every bench score above; this leaves them untouched. Measured 2026-10-26
+on the five mic-gap songs against Demucs's hats (±50 ms): the engine's own hat
+hits, without Treble's jumps, scored F 0.04 (tab share), 0.23 and 0.26 (laptop mic, quiet and noisy room);
+Hats 0.68, 0.65 and 0.70 with the gate, 0.68, 0.64 and 0.68 without. The
+silence gate already keeps an empty room's hiss out of Hats, but talking opens
+it, and "s" sounds peak like hats: the bench's `talk.wav` through the panel's
+mic counted 20 Hats in 10 s without the music gate and none with it.
+
 ### The rise, every hop
 
 Besides hits, the onset detector reports each hop's rise against the hit

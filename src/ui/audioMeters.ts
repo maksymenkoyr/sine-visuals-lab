@@ -58,7 +58,7 @@ import {
   unitStyle,
 } from "./controlsKit.ts";
 import { setHintText } from "./hintSwatches.ts";
-import { createLevelHits, LEVEL_HIT_MIN } from "./levelHits.ts";
+import { LEVEL_HIT_MIN } from "../render/levelHits.ts";
 import { createCanvasSizer } from "./canvasSizer.ts";
 import { watchOnScreen } from "./onScreen.ts";
 import {
@@ -109,9 +109,9 @@ import { isBandPicked, toggleBandPick } from "./bandPicks.ts";
  *    wherever Any fired, every track a faint line on each metronome beat, and
  *    the Surge track Onset surge's trace instead of notes. Its readouts count
  *    hits over the card's span.
- *  - Stems: Lead (stemReaders.ts) as a line row, Hats as a Hits track (it
- *    ticks on each hit and falls back between them, so levelHits.ts puts a
- *    note at each of its peaks, brighter the higher it went), then the Kick
+ *  - Stems: Lead (stemReaders.ts) as a line row, Hats as a Hits track (a
+ *    note at each of its peaks, AnimFrame.hatsPeak, brighter the higher it
+ *    went, and quiet where the engine heard no music), then the Kick
  *    row (the one band the app picks by itself, signals.ts's anim.kickBand).
  *    Lead and Hats are measured only on the device with the mic: Lead draws a
  *    gap where they weren't, Hats no notes. app.ts runs the split while this
@@ -939,7 +939,7 @@ interface HitTrackSpec {
   choice: SignalId;
   row: MeterRowId;
   /** Which detector's hits it draws; "level" for notes picked off a level
-   *  (levelHits.ts, the Stems card's Hats); null for Surge, a reading with no hits. */
+   *  (AnimFrame.hatsPeak, the Stems card's Hats); null for Surge, a reading with no hits. */
   lane: HitLane | "level" | null;
 }
 type RollTrackSpec = HitTrackSpec & { lane: HitLane | null };
@@ -1243,7 +1243,7 @@ function levelTrackHint(t: HitTrack, nowMs: number, spanSec: number): string {
   const parts = [
     `${driveSourceLabel(t.spec.choice)}: ${driveSourceDescription(t.spec.choice)}`,
     `A note at each peak that reached ${pct(LEVEL_HIT_MIN)}%, brighter the higher it went.`,
-    `In the last ${formatHistorySpan(spanSec)}: ${t.counted.countSince(nowMs, spanSec)}.`,
+    `In the last ${formatHistorySpan(spanSec)}: ${t.counted.countSince(nowMs, spanSec)} counted, ${t.quiet.countSince(nowMs, spanSec)} while no music was heard.`,
   ];
   if (t.lastStandout !== null) parts.push(`The last one reached ${pct(t.lastStandout)}%.`);
   return parts.join(" ");
@@ -1751,15 +1751,23 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   );
   heatFloorHosts.set(stemHats.el, stemHats.floor);
   stemHats.setHint(levelTrackHint(stemHats, 0, stemsSpan.sec()));
-  const hatsHits = createLevelHits();
   const hatsBeatMarks = createBeatMarks();
-  /** Every tick, on screen or not. A stem not measured this tick draws no note. */
+  /** Every tick, on screen or not. A stem not measured this tick draws no
+   *  note; a peak while the engine heard no music draws as a quiet one. */
   function recordHats(frame: FeatureFrame | null, anim: AnimFrame | null, nowMs: number): void {
     const beatMark = hatsBeatMarks(anim);
-    const level = frame && anim && deps.stemsMeasured() ? SIGNALS["anim.hats"].read(frame, anim) : null;
-    const peak = hatsHits.update(level);
-    stemHats.push(level === null ? null : peak === null ? 0 : CODE_OF_VERDICT.fired, peak, beatMark, null, nowMs);
-    if (peak === null) return;
+    if (!frame || !anim || !deps.stemsMeasured()) {
+      stemHats.push(null, null, beatMark, null, nowMs);
+      return;
+    }
+    const peak = anim.hatsPeak;
+    const code = peak === 0 ? 0 : anim.hatsOnset ? CODE_OF_VERDICT.fired : CODE_OF_VERDICT.gated;
+    stemHats.push(code, anim.hatsOnset ? peak : null, beatMark, null, nowMs);
+    if (peak === 0) return;
+    if (!anim.hatsOnset) {
+      stemHats.quiet.add(nowMs);
+      return;
+    }
     stemHats.counted.add(nowMs);
     stemHats.lastFireMs = nowMs;
     stemHats.lastStandout = peak;

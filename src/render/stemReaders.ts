@@ -13,7 +13,8 @@ import type { SignalId } from "./signals.ts";
  *  - a setting of the scene is wired to one, through a source that isn't
  *    muted (`wiresReadStems` below). A setting left on its built-in reaction
  *    counts when its `drive.sceneSources` names one, so a scene whose own code
- *    reads AnimFrame.hats or .lead must list them there.
+ *    reads AnimFrame.lead or any of its Hats fields (hats, hatsOnset, …)
+ *    must list them there.
  *  - a crossfade is running: the outgoing scene still reads its own wires
  *    (compositor.ts's `drivesFor`) until the blend ends.
  *  - the panel's Stems card (Lead and Hats) is unfolded and on screen.

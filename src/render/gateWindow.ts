@@ -248,6 +248,7 @@ function edgeTailLane(id: SignalId): HitLane | null {
     case "anim.midOnset":
       return "mid";
     case "anim.highOnset":
+    case "anim.hats":
       return "high";
     case "anim.dropOnset":
       return null;
@@ -268,6 +269,7 @@ function edgeDecayPerSec(id: SignalId): number {
     case "anim.midOnset":
       return GROUP_TUNING.mid.pulseDecayRate;
     case "anim.highOnset":
+    case "anim.hats":
       return GROUP_TUNING.high.pulseDecayRate;
     case "anim.dropOnset":
       return DROP_PULSE_DECAY_PER_SEC;
@@ -295,7 +297,7 @@ export function parseHitHeight(raw: unknown): HitHeight | null {
 /** Hits whose detector reads how far the hit cleared its firing line, so a
  *  Graded height has something to grade; every other hit-kind entry (the
  *  metronome, Drop) is a bare trigger and Graded would only repeat Fixed. */
-const GRADED_EDGES: ReadonlySet<SignalId> = new Set<SignalId>(["feature.onset", "anim.lowOnset", "anim.midOnset", "anim.highOnset"]);
+const GRADED_EDGES: ReadonlySet<SignalId> = new Set<SignalId>(["feature.onset", "anim.lowOnset", "anim.midOnset", "anim.highOnset", "anim.hats"]);
 
 export function hasHitStrength(id: SignalId): boolean {
   return GRADED_EDGES.has(id);
@@ -303,7 +305,9 @@ export function hasHitStrength(id: SignalId): boolean {
 
 /** Graded height's target on a hit-kind entry's edge: the stand-out of the
  *  hit that just fired (hitStrength.ts's hitStandout on the engine's ratio),
- *  the strongest of the lanes that fired for Any hit. A bare trigger reads 1. */
+ *  the strongest of the lanes that fired for Any hit, and for Hats how high
+ *  its peak went (already against its loudest recent hit). A bare trigger
+ *  reads 1. */
 function edgeGradedLevel(id: SignalId, anim: AnimFrame): number {
   switch (id) {
     case "anim.lowOnset":
@@ -312,6 +316,8 @@ function edgeGradedLevel(id: SignalId, anim: AnimFrame): number {
       return hitStandout(anim.hits.mid.ratio, HIT_KNEE_DEFAULT);
     case "anim.highOnset":
       return hitStandout(anim.hits.high.ratio, HIT_KNEE_DEFAULT);
+    case "anim.hats":
+      return anim.hatsHit;
     case "feature.onset": {
       let best = 0;
       if (anim.lowOnset) best = Math.max(best, hitStandout(anim.hits.low.ratio, HIT_KNEE_DEFAULT));

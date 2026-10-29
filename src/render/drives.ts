@@ -122,18 +122,18 @@ import { createWireModState, freshWireMod, clampWireMod, sameWireMod, stepWireMo
  * `sourceValues()`'s per-source traces.
  *
  * **Heights.** A hit-kind source can read two ways, and only a catalogue
- * hit that measures how far it cleared its firing line (`hasHitStrength` in
- * gateWindow.ts: Bass/Mid/High hit and Any hit) has a choice; every other
- * source ignores `height`:
+ * hit that measures its own size (`GRADED_EDGES` in gateWindow.ts) has a
+ * choice; every other source ignores `height`:
  *
  *   - **Fixed** (the default, and the only height that existed before
  *     patches) — the catalogue's own decaying pulse, a flat 1 on every hit,
  *     or the grid's own pulse. "This hit is binary: it either lands or it
  *     doesn't", however hard it hit.
  *   - **Graded** — the engine's own size for that hit: how far it stood
- *     clear of its firing line (hitStrength.ts's `hitStandout`), decaying at
- *     the source's own pulse-decay rate. A whisper lands short, a slam lands
- *     tall. The envelope itself is stepHeightEnv in gateWindow.ts.
+ *     clear of its firing line (hitStrength.ts's `hitStandout`), or for Hats
+ *     how high its peak went, decaying at the source's own pulse-decay
+ *     rate. A whisper lands short, a slam lands tall. The envelope itself is
+ *     stepHeightEnv in gateWindow.ts.
  *
  *   Graded decays at *that source's own* existing pulse-decay rate —
  *   src/render/animClock.ts's BEAT_PULSE_DECAY_PER_SEC for Any hit,

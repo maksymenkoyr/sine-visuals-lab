@@ -1,8 +1,9 @@
 /**
  * Picks the hits out of a level that ticks up on each hit and falls back
- * between them (Hats, src/audio/stemSplit.ts), so a drum-roll track
- * (audioMeters.ts) can draw it the way it draws real hits: a note per hit, as
- * bright as the hit was high.
+ * between them (Hats, src/audio/stemSplit.ts), so it can be a hit like the
+ * engine's lanes: animClock.ts turns each peak into AnimFrame.hatsOnset on
+ * every device, and the Stems card's drum-roll track (src/ui/audioMeters.ts)
+ * draws a note per peak.
  *
  * A hit is one of the level's peaks: it is reported on the first tick the
  * level turns down, if it got at least LEVEL_HIT_MIN high. Then nothing fires
