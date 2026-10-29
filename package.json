@@ -35,8 +35,7 @@
     "difficulty": "node tools/difficulty.mjs",
     "pr-shots": "node tools/pr-shots.mjs",
     "fix-conflicts": "bash tools/fix-conflicts.sh",
-    "aliases": "cat tools/aliases.txt",
-    "prune-worktrees": "node tools/prune-worktrees.mjs"
+    "aliases": "cat tools/aliases.txt"
   },
   "dependencies": {
     "@fontsource/chakra-petch": "^5.3.0",
