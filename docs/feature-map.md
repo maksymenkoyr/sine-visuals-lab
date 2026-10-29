@@ -189,6 +189,9 @@ Darker means more important.
 
 - ●●○ **Pop-out output** — a chrome-free second window for a projector or a
   second monitor. For DJs · `src/output.ts`, `src/net/outputSync.ts`
+  - ●○○ **Projector grade** — Black floor, Midtones and Colour on the Output
+    card, for a cheap projector's grey blacks and washed-out colour ·
+    `src/render/pictureGrade.ts`, `src/ui/powerCard.ts`
   - ●●○ **Cue and Play** — hold Cue to try a change on the output, Play to
     send it; hold Play to glide · `src/ui/outputControls.ts`,
     `src/ui/outputKeys.ts`

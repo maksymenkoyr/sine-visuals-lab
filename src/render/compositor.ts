@@ -5,16 +5,18 @@ import type { SceneDrives } from "./drives.ts";
 import { createFullscreenQuad, createProgram, drawFullscreenQuad, type GLProgram } from "./gl.ts";
 import { effectLook, NO_EFFECTS, stepFade, type EffectLook, type HeldEffects } from "./heldEffects.ts";
 import type { Palette } from "./palette.ts";
+import { gradeUniform, isNeutralGrade, NEUTRAL_GRADE, type PictureGrade } from "./pictureGrade.ts";
 import type { Scene, SceneContext, Viewport } from "./scene.ts";
 import { SceneRenderError } from "./sceneGuard.ts";
 
 /**
  * "Draw this frame": the one place app.ts, output.ts and tv.ts call instead of
- * a bare `scene.render(...)`. It adds two things on top of a scene — a
+ * a bare `scene.render(...)`. It adds three things on top of a scene — a
  * crossfade from the scene that was on screen to the one that replaced it
- * (timing: crossfade.ts), and the held effects (heldEffects.ts) — and when
- * neither is in play it IS a bare `scene.render(...)`: no viewport call, no
- * texture, no pass, nothing extra on the GPU, the same pixels as before.
+ * (timing: crossfade.ts), the held effects (heldEffects.ts) and the output's
+ * projector grade (pictureGrade.ts) — and when none is in play it IS a bare
+ * `scene.render(...)`: no viewport call, no texture, no pass, nothing extra
+ * on the GPU, the same pixels as before.
  *
  * Scenes draw straight into the default framebuffer, and many bind
  * framebuffer null at the end of their own passes, so their target cannot be
@@ -38,8 +40,9 @@ import { SceneRenderError } from "./sceneGuard.ts";
  * the doubled cost would step quality down for good.
  *
  * Freeze. Engaging it captures the finished picture (crossfade included, other
- * effects not) once; while held, that texture is presented and the scene is not
- * rendered at all, so the scene carries on from where it was on release.
+ * effects and the grade not) once; while held, that texture is presented and
+ * the scene is not rendered at all, so the scene carries on from where it was
+ * on release.
  *
  * Afterwards the GL state is what scenes expect: framebuffer null, BLEND,
  * DEPTH_TEST, SCISSOR_TEST and CULL_FACE off, texture unit 0 active with
@@ -80,6 +83,8 @@ export interface Compositor {
   /** Replaces the engaged held effects (ui/effectControls.ts on the main
    *  window, the `effects` message on the output). */
   setEffects(effects: HeldEffects): void;
+  /** Replaces the projector grade (only output.ts sets one). */
+  setGrade(grade: PictureGrade): void;
   /** Starts a crossfade from `outgoing` to the scene `render` is given. Ends
    *  any crossfade already running first (see cancel). */
   begin(outgoing: Scene, opts?: CrossfadeOptions): void;
@@ -111,11 +116,16 @@ uniform float uMix;
 uniform float uInvert;
 uniform float uFlash;
 uniform float uBlack;
+uniform vec3 uGrade;
 out vec4 o;
 void main() {
   vec3 c = mix(texture(uA, vUv).rgb, texture(uB, vUv).rgb, uMix);
   if (uInvert > 0.5) c = 1.0 - c;
   c = mix(c, vec3(1.0), uFlash);
+  c = max(c - uGrade.x, 0.0) / (1.0 - uGrade.x);
+  c = pow(c, vec3(uGrade.y));
+  c = clamp(mix(vec3(dot(c, vec3(0.2126, 0.7152, 0.0722))), c, uGrade.z), 0.0, 1.0);
+  // After the grade, so a blackout fades evenly whatever the floor cuts.
   c *= 1.0 - uBlack;
   o = vec4(c, 1.0);
 }`;
@@ -158,6 +168,7 @@ function freeTarget(gl: WebGL2RenderingContext, t: Target | null): null {
 export function createCompositor(gl: WebGL2RenderingContext, opts: CompositorOptions): Compositor {
   let transition: { crossfade: Crossfade; outgoing: Scene } | null = null;
   let effects: HeldEffects = NO_EFFECTS;
+  let grade: PictureGrade = NEUTRAL_GRADE;
   let blackLevel = 0;
   let lastNowMs: number | null = null;
   /** The outgoing capture (only during a blend), the live picture, and the frozen one. */
@@ -234,9 +245,9 @@ export function createCompositor(gl: WebGL2RenderingContext, opts: CompositorOpt
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
-  /** Mixes `a` -> `b` by `mix` (1 = only `b`) with `look`'s effects into
-   *  `into` (null = the canvas), then puts the GL state back for the scenes. */
-  function pass(into: Target | null, a: Target, b: Target, mix: number, look: EffectLook): void {
+  /** Mixes `a` -> `b` by `mix` (1 = only `b`) with `look`'s effects and `g`
+   *  into `into` (null = the canvas), then puts the GL state back for the scenes. */
+  function pass(into: Target | null, a: Target, b: Target, mix: number, look: EffectLook, g: PictureGrade): void {
     gl.bindFramebuffer(gl.FRAMEBUFFER, into ? into.fbo : null);
     gl.viewport(0, 0, into ? into.w : gl.drawingBufferWidth, into ? into.h : gl.drawingBufferHeight);
     gl.disable(gl.BLEND);
@@ -250,6 +261,7 @@ export function createCompositor(gl: WebGL2RenderingContext, opts: CompositorOpt
     p.setF("uInvert", look.invert ? 1 : 0);
     p.setF("uFlash", look.flash);
     p.setF("uBlack", look.black);
+    p.setV3v("uGrade", gradeUniform(g));
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, a.tex);
     gl.activeTexture(gl.TEXTURE0);
@@ -276,6 +288,9 @@ export function createCompositor(gl: WebGL2RenderingContext, opts: CompositorOpt
     setEffects(next) {
       if (effects.freeze && !next.freeze) frozen = freeTarget(gl, frozen);
       effects = next;
+    },
+    setGrade(next) {
+      grade = next;
     },
     begin(outgoing, o) {
       finish();
@@ -305,7 +320,8 @@ export function createCompositor(gl: WebGL2RenderingContext, opts: CompositorOpt
       }
       const blend = !broken && view !== null && view.stage === "blend";
       const fx = broken ? NO_EFFECTS : effects;
-      const needsPass = blend || fx.invert || fx.strobe || fx.freeze || blackLevel > 0;
+      const g = broken ? NEUTRAL_GRADE : grade;
+      const needsPass = blend || fx.invert || fx.strobe || fx.freeze || blackLevel > 0 || !isNeutralGrade(g);
 
       if (!needsPass) {
         // The outgoing scene alone while a blend waits for its beat, else the scene.
@@ -318,7 +334,7 @@ export function createCompositor(gl: WebGL2RenderingContext, opts: CompositorOpt
         ensureProgram();
         const look = effectLook(fx, blackLevel);
         if (fx.freeze && frozen) {
-          pass(null, frozen, frozen, 1, look);
+          pass(null, frozen, frozen, 1, look, g);
           return { governable: false };
         }
         capB = sized(capB);
@@ -337,9 +353,9 @@ export function createCompositor(gl: WebGL2RenderingContext, opts: CompositorOpt
         drawSceneInto(f, shown, capB);
         if (fx.freeze) {
           frozen = makeTarget(gl, capB.w, capB.h);
-          pass(frozen, a, capB, mix, NO_LOOK);
+          pass(frozen, a, capB, mix, NO_LOOK, NEUTRAL_GRADE);
         }
-        pass(null, a, capB, mix, look);
+        pass(null, a, capB, mix, look, g);
         return { governable: !blend };
       } catch (err) {
         // A scene's own throw is not a GPU failure: effects stay on for the next frame.

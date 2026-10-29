@@ -34,7 +34,7 @@
 /** Keys that belong to one window or one person's chrome, never mirrored:
  *  the room identity, panel/tip/toast state, which audio source this
  *  machine picked (the output gets frames, not audio), and each window's
- *  own quality, power and resolution settings (render/outputPower.ts: the
+ *  own quality, power, resolution and grade settings (render/outputPower.ts: the
  *  output's travel as a `power` message, outside Cue). */
 export const PRIVATE_KEYS: ReadonlySet<string> = new Set([
   "vibe.deviceId",
@@ -63,6 +63,7 @@ export const PRIVATE_KEYS: ReadonlySet<string> = new Set([
   "vibe.preview.size",
   "vibe.output.resolution",
   "vibe.preview.resolution",
+  "vibe.output.grade",
   // The pairing sessions (src/net/sessions.ts) hold room secrets: never
   // mirrored to the pop-out, and not `vibe.*`, so never in a room look either.
   "svl.hostRoom",
