@@ -42,7 +42,7 @@ import { CLIP_LIBRARY_URL, decodeClipLibrary, sampleClip, type Clip, type ClipLi
 import { createPose } from "../dancers/rig.ts";
 import { createAlienRenderer, floorPivot, type AlienRenderer, type Squash } from "./renderer.ts";
 import { decodeAlienMesh, MESH_URL, type AlienModel } from "./meshFile.ts";
-import { BOUNCE_MAX, chipLoop, clipSeconds, createBounce, createReel, easeSpeed, LOOPS, stepBounce, stepCut, type Reel } from "./reel.ts";
+import { BOUNCE_MAX, chipLoop, chipView, clipSeconds, createBounce, createReel, easeSpeed, LOOP_VIEW, LOOPS, stepBounce, stepCut, VIEWS, type Reel } from "./reel.ts";
 import { card, MOVE_GAIN, SETTINGS } from "./card.ts";
 import { easeHand, HAND_AT_REST, handCamera, type CameraHand } from "./camera.ts";
 
@@ -217,7 +217,7 @@ export const alienScene: Scene = (() => {
       if (handFresh) Object.assign(hand, handTarget);
       else easeHand(hand, handTarget, dt);
       handFresh = false;
-      const view = LOOPS[chipLoop(get("view")) ?? reel.loop].camera;
+      const view = VIEWS[chipView(get("view")) ?? LOOP_VIEW[reel.loop]].camera;
       renderer.draw(pose, handCamera(view, hand), ctx.quality.bloomPasses, viewport, squash);
     },
 

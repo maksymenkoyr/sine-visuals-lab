@@ -104,6 +104,22 @@ original work built around that data.
 - 2026-10-28, loops. `scoreWindow()` on the hand cuts in `clip-cuts.json`,
   as the bar for found loops: seams 0.06–0.56 leg lengths (armup the worst),
   slides up to 0.68 apart from moonwalk's 3.22 (it travels by design).
+- 2026-10-29, `clips-v2.bin` (the owner's 34): every clip matches the one
+  reviewed on the candidates page within 0.5° per bone and 6 mm of root
+  (the cut list pins bpm to 3 decimals). 634 KB, 548 KB gzipped, against
+  `clips-v1.bin`'s 297 KB. `tune-real` on `deTJ513J07Y`, then silence, 30 s
+  from 4 s, on the defaults, headless Chromium on Metal, main (before) and
+  this branch (after) served side by side:
+
+  | source | change med | change p95 | hits/min | energy | fps |
+  | --- | --- | --- | --- | --- | --- |
+  | song, before | 2.08 | 2.98 | 442 | 0.49 | 120 |
+  | silence, before | 0.42 | 0.71 | 0 | 0.00 | 120 |
+  | song, after | 2.07 | 2.86 | 440 | 0.48 | 120 |
+  | silence, after | 0.42 | 0.73 | 0 | 0.00 | 120 |
+
+  The silence rows are the procedural sway (`moves.ts`), as before; the
+  song's p95 stands 3.9× above silence, 4.2× before.
 
 ## Decisions and pivots
 
@@ -159,9 +175,14 @@ original work built around that data.
   rule limits only the shin-to-foot angle, never a turn read in the shin's
   own frame, because the solve flips some feet half a turn about their
   length (90_30); a standing foot whose top faces down is left as captured.
-  No toe bone: on the ball of the foot the whole foot still tips. The shipped
-  library is unchanged until the owner picks; the picks go into a new
-  `clips-v<n>.bin`.
+  No toe bone: on the ball of the foot the whole foot still tips.
+- 2026-10-29: the owner marked the candidates page and said "save all that
+  i marked keep. ignore rest". `tools/clip-cuts.json` now holds those 34:
+  toprock2, toprock3, charleston and charleston2 from before, and 30 new
+  ones with their found start, beats and bpm pinned. My reading, not
+  asked: the clips marked Drop (the other 12 old ones) left the library.
+  All four families still have clips; Alien took the new list as its
+  dances (`docs/scenes/alien.md`). `clips-v1.bin` stays for older tabs.
 
 ## Tuning notes
 
@@ -188,10 +209,8 @@ original work built around that data.
   ones under separate registration like the Renegade) were agreed as a
   follow-up via a film-yourself → offline pose-estimation (WHAM / 4D-Humans
   style) → the same `clip-convert.mjs` input pipeline. Not started.
-- 75 more CMU dance trials are cut and cleaned as candidates
-  (`tools/clip-candidates.json`); the owner marks which stay on the review
-  page (Materials). The kept ones move into `tools/clip-cuts.json` with the
-  found start, beats and bpm, and the library is rebuilt once.
+- The 45 CMU dance trials the owner didn't keep stay listed in
+  `tools/clip-candidates.json`, for another look one day.
 - Feet: a toe bone would let the ball of the foot bend instead of the whole
   foot tipping; it changes `BONE_COUNT`, so every clip, both skins and
   Alien's mesh with it.
@@ -233,3 +252,6 @@ original work built around that data.
   show (the pop-out, a room with another device) still fetches it up front.
   Measured headless, cache off: a deep link to Dancers fetched 5363 KB
   before and 1037 KB after, 290 KB of it the clip library.
+- #788 (draft, 2026-10-28/29): the converter finds loops and cleans feet;
+  75 CMU dance trials reviewed as candidates; `clips-v2.bin` holds the
+  owner's 34.

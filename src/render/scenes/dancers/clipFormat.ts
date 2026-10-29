@@ -23,7 +23,7 @@ import { BONES, BONE_COUNT, CH_LIFT, CH_ROOT_X, CH_ROOT_Z, POSE_LENGTH, boneChan
 /** Where the site serves the clip library: a file under public/media/ that is
  *  never replaced (src/pinnedAssets.ts's header, "Scene media"). A rebuilt
  *  library is a new file with the next version in its name; point this at it. */
-export const CLIP_LIBRARY_URL = "/media/dancers/clips-v1.bin";
+export const CLIP_LIBRARY_URL = "/media/dancers/clips-v2.bin";
 
 export interface ClipMeta {
   /** Unique within the library; the `?clip=` DEV override and logs use it. */

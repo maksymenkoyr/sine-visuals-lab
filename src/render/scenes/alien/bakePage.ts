@@ -16,7 +16,7 @@ import { CLIP_LIBRARY_URL, decodeClipLibrary, sampleClip, type ClipLibrary } fro
 import { createPose } from "../dancers/rig.ts";
 import { FULL_VIEWPORT } from "../../scene.ts";
 import { createAlienRenderer, floorPivot, NO_SQUASH, projectToFrame, type AlienRenderer } from "./renderer.ts";
-import { clipSeconds, LOOPS } from "./reel.ts";
+import { clipSeconds, LOOP_VIEW, LOOPS, VIEWS } from "./reel.ts";
 import { decodeAlienMesh, MESH_URL } from "./meshFile.ts";
 
 const BLOOM_PASSES = 2;
@@ -43,7 +43,7 @@ function clipFor(loop: number) {
 /** The floor point under the pelvis, averaged over the loop, in the frame. */
 function pivotFor(loop: number): [number, number] {
   const [x, z] = floorPivot(clipFor(loop));
-  return projectToFrame(LOOPS[loop].camera, width / height, [x, 0, z]);
+  return projectToFrame(VIEWS[LOOP_VIEW[loop]].camera, width / height, [x, 0, z]);
 }
 
 const bytes = (url: string): Promise<ArrayBuffer> => fetch(url).then((res) => res.arrayBuffer());
@@ -63,7 +63,7 @@ const ready = Promise.all([bytes(CLIP_LIBRARY_URL), bytes(MESH_URL)])
   frame(loop: number, phase: number): string {
     sampleClip(clipFor(loop), phase, pose);
     if (!renderer) throw new Error("bake: frame() before ready");
-    renderer.draw(pose, LOOPS[loop].camera, BLOOM_PASSES, FULL_VIEWPORT, NO_SQUASH);
+    renderer.draw(pose, VIEWS[LOOP_VIEW[loop]].camera, BLOOM_PASSES, FULL_VIEWPORT, NO_SQUASH);
     return canvas.toDataURL("image/png");
   },
 };

@@ -34,9 +34,10 @@ development, on main since #374.
 - `renderer.ts`: the model drawn live (mesh pass, bloom, composite) through a
   loop's camera, into this device's slice of the room, with Bounce's squash;
   `floorPivot()` finds the floor point the squash pulls toward.
-- `reel.ts`: the `LOOPS` table (per loop: clip, camera, and the names its
-  Dance and View chips show), `chipLoop()` (which loop a Dance or View chip
-  holds) and the rules:
+- `reel.ts`: the `VIEWS` table (the cameras, each with its View chip's
+  name), the `LOOPS` table (per loop: clip, Dance chip name and the view it
+  is seen through; `LOOP_VIEW` resolves those), `chipLoop()` and
+  `chipView()` (which loop or view a chip holds) and the rules:
   `easeSpeed()` (Move), `stepCut()` (Cut), `stepBounce()` (Bounce) and
   `bounceSpring()` (Bounce smoothness). Its header has them in words.
 - `glsl.ts`: the look: GPU skinning, Bounce's squash on the skinned figure,
@@ -44,7 +45,8 @@ development, on main since #374.
   black, the blur and composite.
 - The old baked videos, `public/media/alien/loop{0,1,2}-v1.mp4`, are no longer
   played. They stay for tabs on an older build (`src/pinnedAssets.ts`'s
-  header, "Scene media"). `loops/manifest.ts` (`BAKED`) lists them, and the
+  header, "Scene media"), baked from `clips-v1.bin` through the first three
+  views, which the tests check them against. `loops/manifest.ts` (`BAKED`) lists them, and the
   bake that made them still works but is optional: `bakePage.ts` (served by
   `tools/alien-bake/index.html` on the dev server) draws any frame of any
   loop, and `tools/alien-bake.mjs` saves every frame and encodes each loop
@@ -339,6 +341,30 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
     Silence: "the picture holds still". The song's p95 is above the run
     before because the cuts landed on closer views this time (loop 0's
     close-up alone measured 1.77 / 2.48).
+- 2026-10-29, the owner's dances from `clips-v2.bin`, headless Chromium on
+  Metal on the owner's M1 Pro:
+  - Framing, measured off screen: the real model (`mesh-v1.bin`) skinned on
+    the CPU over 32 frames of each loop and projected through each view
+    into a 16:9 frame. Every new dance has at least one view where he never
+    touches an edge; the one picked fills 0.66 (Break flips, Front) to 0.95
+    (Egyptian 3, High left) of the frame's height. toprock2 through Floor up
+    still loses his head off the top in 66% of frames (Known issues).
+  - Shots with `?loop=` of Break flips, Egyptian 3, Salsa, Cartwheel and
+    Lean back: each whole in its frame.
+  - `tune-real` on `deTJ513J07Y`, then silence, 30 s from 4 s, on the
+    defaults, main (before) and this branch (after) served side by side:
+
+    | source | change med | change p95 | hits/min | energy | fps |
+    | --- | --- | --- | --- | --- | --- |
+    | song, before | 1.50 | 2.70 | 434 | 0.48 | 120 |
+    | silence, before | 0.00 | 0.00 | 0 | 0.00 | 120 |
+    | song, after | 0.25 | 0.59 | 428 | 0.48 | 120 |
+    | silence, after | 0.00 | 0.00 | 0 | 0.00 | 120 |
+
+    Silence: "the picture holds still" on both. Less of the picture changes
+    on the song because Expressive's close-up, the loop the reel opens on
+    before, left with the dances the owner dropped: every kept dance is a
+    full-body shot. The rules for Move, Bounce and Cut are unchanged.
 
 ## Decisions and pivots
 
@@ -574,6 +600,22 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
     scaled, the camera would move whenever someone turned Master.
   - Saving is the Looks card's Save look, as for every other setting. No
     Copy camera button: the owner answered with keys, not that.
+- 2026-10-29, the owner marked every clip on the Dance Candidates page
+  (`docs/scenes/dancers.md`, Materials) and said "save all that i marked
+  keep. ignore rest". The dancers' library became those 34 clips
+  (`clips-v2.bin`): of the old dances only Toprock 2, Charleston,
+  Charleston 2 and Toprock 3 stay, joined by 30 new ones. My reading, not
+  asked: the clips marked Drop leave, Expressive and Twist with them.
+  - The cameras moved out of `LOOPS` into `VIEWS`, so the View row stays at
+    its 13 cameras, each at its old index, instead of growing a chip per
+    dance; a view no dance uses (Close front, High right) stays a chip.
+    Each loop names its view; the new dances took existing views, picked by
+    the framing measure (Measurements), and none needed a new camera.
+  - Dance chip indexes moved: the dropped dances left the middle of the
+    row. The rows are on Insiders only (#786, after Stable v0.2.0), so at
+    most a day of saved looks lands on a different dance.
+  - The bake test now checks the old videos against `clips-v1.bin` and the
+    first three views, the library and cameras they were baked from.
 
 ## Tuning notes
 
@@ -595,18 +637,20 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 
 ## Known issues and next steps
 
-- In the close-up the floor is far below the frame, so a squash reads as
-  him dipping.
+- In the Close front view the floor is far below the frame, so a squash
+  reads as him dipping.
 - Only one alien; the reference has a crowd.
 - Portrait screens crop the 16:9 frames to their middle.
-- He is 2.37 m tall against the old 2.15 m, and the first loops' cameras
+- He is 2.37 m tall against the old 2.15 m, and the first three views
   (those with baked videos) still frame the old height, so his head runs
-  off the top in each of them. The owner's call on pulling them back is open
-  (Decisions). The loops added after them frame the new height.
-- Most of the added loops are full-body shots, so he is smaller on screen
-  there than in loop 0's close-up, and less of the picture changes
-  (Measurements). Which moves and cameras stay is the owner's call
-  (Decisions).
+  off the top in each of them. Toprock 2, the dance the reel opens on, is
+  seen through Floor up. The owner's call on pulling them back is open
+  (Decisions). The views after them frame the new height.
+- Every dance is a full-body shot now, so he is smaller on screen than in
+  the old opening close-up and less of the picture changes on a song
+  (Measurements, 2026-10-29). Which dance opens the reel, and whether one
+  gets a close view, is the owner's call.
+- The Dance row has a chip per dance, 34 of them after Any.
 - The model has 7 slivers under 4°, 6 of them at the eyeballs' corners,
   which draw black.
 - In the model's arms-down check the shoulders go a little square, the
@@ -709,3 +753,5 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   with its own camera framed for the new model.
 - #786 (draft, 2026-10-28): the Dance and View rows, then the camera by
   hand: five Camera sliders and the arrow keys.
+- #788 (draft, 2026-10-29): the owner's 34 dances from `clips-v2.bin`,
+  cameras in `VIEWS`, each new dance through a measured view.
