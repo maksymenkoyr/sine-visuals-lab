@@ -9,4 +9,5 @@ export const MEDIA_MANIFEST: Readonly<Record<string, string>> = {
   "/media/alien/loop2-v1.mp4": "96430e4509ffd39bdeeb95a60a56e68c5851657855ce40104d4f9ccfa134ff1a",
   "/media/alien/mesh-v1.bin": "1d09b92a1a66433432e42772f00bf901e7e16521a6ce7d714592bea6ed2254cc",
   "/media/dancers/clips-v1.bin": "b7e3fcdfe5b10d3a25334403733da9047c29a276e3978c8a797172e249c59a27",
+  "/media/dancers/clips-v2.bin": "ae240821492619466a6103ef11189af93cc7046c8996896e286c0342c8e14d51",
 };

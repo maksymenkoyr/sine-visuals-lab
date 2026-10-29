@@ -8,15 +8,18 @@ import {
   BOUNCE_MAX,
   bounceSpring,
   chipLoop,
+  chipView,
   clipSeconds,
   createBounce,
   createReel,
   easeSpeed,
+  LOOP_VIEW,
   LOOPS,
   MIN_SHOT_SEC,
   pickOther,
   stepBounce,
   stepCut,
+  VIEWS,
   type CutInput,
 } from "../src/render/scenes/alien/reel.ts";
 import { packSkin, projectToFrame } from "../src/render/scenes/alien/renderer.ts";
@@ -334,20 +337,24 @@ describe("alien loops", () => {
     expect(new Set(LOOPS.map((l) => l.clip)).size).toBe(LOOPS.length);
   });
 
-  it("gives the Dance and View rows one chip per loop after Any and Own, each named once", () => {
+  it("gives the Dance row a chip per loop after Any and the View row a chip per view after Own, each named once", () => {
     for (const [key, first, names] of [
       ["dance", "Any", LOOPS.map((l) => l.dance)],
-      ["view", "Own", LOOPS.map((l) => l.view)],
+      ["view", "Own", VIEWS.map((v) => v.name)],
     ] as const) {
       const spec = SETTINGS.find((s) => s.key === key)!;
       expect(spec.options).toEqual([first, ...names]);
       expect(spec.max).toBe(spec.options!.length - 1);
-      expect(new Set(names).size, key).toBe(LOOPS.length);
+      expect(new Set(names).size, key).toBe(names.length);
     }
   });
 
-  it("draws every loop through its own camera while the camera sliders rest", () => {
-    for (const { camera } of LOOPS) {
+  it("sees every loop through a view VIEWS has", () => {
+    LOOPS.forEach((loop, i) => expect(LOOP_VIEW[i], loop.view).toBeGreaterThanOrEqual(0));
+  });
+
+  it("draws every view's camera unmoved while the camera sliders rest", () => {
+    for (const { camera } of VIEWS) {
       const moved = handCamera(camera, HAND_AT_REST);
       for (let i = 0; i < 3; i++) {
         expect(moved.eye[i]).toBeCloseTo(camera.eye[i], 9);
@@ -393,22 +400,29 @@ describe("alien loops", () => {
     }
   });
 
-  it("holds the loop under a Dance or View chip, and none on the first chip", () => {
+  it("holds the loop under a Dance chip and the view under a View chip, and none on the first chip", () => {
     expect(chipLoop(0)).toBeNull();
     expect(chipLoop(1)).toBe(0);
     expect(chipLoop(LOOPS.length)).toBe(LOOPS.length - 1);
     expect(chipLoop(LOOPS.length + 1)).toBeNull();
+    expect(chipView(0)).toBeNull();
+    expect(chipView(VIEWS.length)).toBe(VIEWS.length - 1);
+    expect(chipView(VIEWS.length + 1)).toBeNull();
   });
 });
 
-// The baked videos predate the loops after them: older builds still play them
-// (src/pinnedAssets.ts's header), so they must stay the first loops as LOOPS lists them.
+// Older builds still play the baked videos (src/pinnedAssets.ts's header).
+// They were baked from clips-v1.bin through the first cameras in VIEWS, so
+// they are checked against those, whatever LOOPS and the library hold now.
+const bakedFrom = readFileSync(new URL("../public/media/dancers/clips-v1.bin", import.meta.url));
+const bakedLibrary = decodeClipLibrary(bakedFrom.buffer.slice(bakedFrom.byteOffset, bakedFrom.byteOffset + bakedFrom.byteLength));
+
 describe("alien bake", () => {
-  it("has a baked video for each of the first loops, of that loop's clip, at its captured length", () => {
-    expect(BAKED.loops.length).toBeLessThanOrEqual(LOOPS.length);
-    BAKED.loops.forEach((baked, i) => {
-      const clip = library.byName.get(LOOPS[i].clip);
-      expect(baked.clip).toBe(LOOPS[i].clip);
+  it("has each baked video at its clip's captured length", () => {
+    expect(BAKED.loops.length).toBeLessThanOrEqual(VIEWS.length);
+    BAKED.loops.forEach((baked) => {
+      const clip = bakedLibrary.byName.get(baked.clip);
+      expect(clip, baked.clip).toBeDefined();
       expect(baked.frames).toBe(Math.round(clipSeconds(clip!) * BAKED.fps));
       expect(statSync(new URL(`../public${baked.file}`, import.meta.url)).size).toBeGreaterThan(10_000);
     });
@@ -416,7 +430,7 @@ describe("alien bake", () => {
 
   it("puts each baked loop's Bounce pivot where its camera sees the floor under the alien", () => {
     BAKED.loops.forEach((baked, i) => {
-      const [u, v] = projectToFrame(LOOPS[i].camera, BAKED.width / BAKED.height, [0, 0, 0]);
+      const [u, v] = projectToFrame(VIEWS[i].camera, BAKED.width / BAKED.height, [0, 0, 0]);
       // The bake averages the pelvis's floor point; the dances barely leave the origin.
       expect(Math.abs(baked.pivot[0] - u)).toBeLessThan(0.1);
       expect(Math.abs(baked.pivot[1] - v)).toBeLessThan(0.15);

@@ -2,7 +2,7 @@
 import type { PanelSection, Scene, SceneCard } from "../../scene.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
 import { STANDOUT_THRESHOLD_DEFAULT } from "../../standout.ts";
-import { LOOPS } from "./reel.ts";
+import { LOOPS, VIEWS } from "./reel.ts";
 
 // This scene's gallery section and the day it was added (scenes/sceneModules.ts).
 export const gallery = { stage: "development", added: "2026-10-05" } as const;
@@ -66,9 +66,9 @@ export const SETTINGS: SceneSetting[] = [
     description: "Own: each dance through the camera it was framed for. A view: every dance through that camera",
     group: "Camera",
     type: "enum",
-    options: ["Own", ...LOOPS.map((l) => l.view)],
+    options: ["Own", ...VIEWS.map((v) => v.name)],
     min: 0,
-    max: LOOPS.length,
+    max: VIEWS.length,
     step: 1,
     default: 0,
   },

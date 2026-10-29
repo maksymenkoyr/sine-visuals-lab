@@ -3,7 +3,8 @@
  *
  * A loop is one captured dance (a clip from the dancers' library,
  * ../dancers/clipFormat.ts) seen through one fixed camera — LOOPS pairs
- * them, each from its own angle. The scene (index.ts) draws them live.
+ * each dance with one of the cameras in VIEWS. The scene (index.ts) draws
+ * them live.
  *
  * **Move: music pays for frames.** The loop on screen plays at `speed` × its
  * captured speed, where the target speed is the Move setting times what its wire
@@ -18,8 +19,8 @@
  * the reel cuts to another loop, picked at random among the others, unless
  * the shot on screen is younger than MIN_SHOT_SEC. Nothing else changes the
  * loop but the Dance setting: while it holds one dance (`chipLoop`), the
- * scene skips the cut. The View setting can hold one loop's camera for every
- * dance. Each loop keeps its own place, so cutting back finds the alien
+ * scene skips the cut. The View setting can hold one camera (`chipView`) for
+ * every dance. Each loop keeps its own place, so cutting back finds the alien
  * where it was left. (Before that, a cut was the signal rising over a fixed
  * line: on a hit signal nearly every hit cleared it, and a hysteresis band
  * either cut every beat or, under a sustained bassline, never; the scene
@@ -48,57 +49,111 @@ export interface LoopCamera {
   focal: number;
 }
 
+export interface LoopView {
+  /** Its chip on the View row (card.ts). */
+  name: string;
+  camera: LoopCamera;
+}
+
+// Saved looks store the View chip by index (sceneLooks.ts), so a new view
+// goes at the end and none leaves, even when no dance uses it any more.
+export const VIEWS: readonly LoopView[] = [
+  // Front, a little below the face, close: head and torso fill the frame,
+  // arms reaching out of it — the reference's hero framing.
+  { name: "Close front", camera: { eye: [0, 1.3, 1.75], target: [0, 1.62, 0], focal: 3.2 } },
+  // Three-quarter from his right and above: knees up.
+  { name: "High right", camera: { eye: [-1.6, 1.95, 1.85], target: [0, 1.35, 0.1], focal: 3.0 } },
+  // From the floor at his left front, close, looking up: he looms over the lens.
+  { name: "Floor up", camera: { eye: [0.7, 0.2, 1.6], target: [0, 1.0, 0.05], focal: 1.7 } },
+  // The views below frame the Blender model's height, so his head stays in;
+  // the views above still frame the old, shorter model (the scene record's
+  // Known issues). Wider than those: most dances are in the legs.
+  // Front, knees up, a little to his left: made for an arm routine.
+  { name: "Front knees", camera: { eye: [0.55, 1.6, 2.5], target: [0, 1.6, 0], focal: 2.3 } },
+  // Three-quarter from his left and above, knees up.
+  { name: "High left", camera: { eye: [1.6, 1.7, 2.0], target: [0, 1.25, 0.1], focal: 2.0 } },
+  // Side on, full body: a glide reads only in profile.
+  { name: "Side", camera: { eye: [3.0, 1.0, 0.3], target: [0, 1.15, 0], focal: 1.95 } },
+  // Front from low, full body, for kicks.
+  { name: "Low front", camera: { eye: [0, 0.6, 3.1], target: [0, 1.0, 0.1], focal: 2.6 } },
+  // Three-quarter from his right, full body at hip height.
+  { name: "Right", camera: { eye: [-2.1, 1.1, 2.3], target: [0, 1.15, 0.1], focal: 2.1 } },
+  // High above his left front, looking down past the head at the feet.
+  { name: "Above", camera: { eye: [0.8, 2.7, 2.4], target: [0, 1.05, 0], focal: 1.9 } },
+  // Front from a little above, full body.
+  { name: "Front", camera: { eye: [0, 1.8, 3.5], target: [0, 1.15, 0], focal: 2.4 } },
+  // Close from his left at hip height, knees up.
+  { name: "Close left", camera: { eye: [1.3, 1.0, 1.8], target: [0, 1.4, 0], focal: 1.9 } },
+  // Front, a little to his right, low: made for a drop to the floor.
+  { name: "Low right", camera: { eye: [-0.6, 0.9, 2.7], target: [0, 1.0, 0.2], focal: 2.0 } },
+  // Low at his left front, full body.
+  { name: "Low left", camera: { eye: [0.9, 0.4, 2.5], target: [0, 1.05, 0.2], focal: 1.9 } },
+];
+
 export interface LoopSpec {
   /** A clip name in the dancers' library (tools/clip-cuts.json). */
   clip: string;
   /** The loop's chip on the Dance row (card.ts). */
   dance: string;
-  /** Its camera's chip on the View row. */
+  /** The name of the view in VIEWS the loop is seen through. */
   view: string;
-  camera: LoopCamera;
 }
 
-// Saved looks store the Dance and View chips by index (sceneLooks.ts), so a
-// new loop goes at the end.
+// Saved looks store the Dance chip by index (sceneLooks.ts), so a new loop
+// goes at the end. The dances after the first four came in on 2026-10-29,
+// each through the view where the measured model fills the most of the
+// frame without touching its edges, a view used less often winning a near
+// tie (the scene record's Measurements).
 export const LOOPS: readonly LoopSpec[] = [
-  // Front, a little below the face, close: head and torso fill the frame,
-  // arms reaching out of it — the reference's hero framing.
-  { clip: "expressive", dance: "Expressive", view: "Close front", camera: { eye: [0, 1.3, 1.75], target: [0, 1.62, 0], focal: 3.2 } },
-  // Three-quarter from his right and above: knees up.
-  { clip: "twist", dance: "Twist", view: "High right", camera: { eye: [-1.6, 1.95, 1.85], target: [0, 1.35, 0.1], focal: 3.0 } },
-  // From the floor at his left front, close, looking up: he looms over the lens.
-  { clip: "toprock2", dance: "Toprock 2", view: "Floor up", camera: { eye: [0.7, 0.2, 1.6], target: [0, 1.0, 0.05], focal: 1.7 } },
-  // The loops below frame the Blender model's height, so his head stays in
-  // through every dance; the loops above still frame the old, shorter model
-  // (the scene record's Known issues). Wider than those: most of these dances
-  // are in the legs. The library's stillest clips are left out.
-  // Front, knees up, a little to his left: the arm routine.
-  { clip: "macarena", dance: "Macarena", view: "Front knees", camera: { eye: [0.55, 1.6, 2.5], target: [0, 1.6, 0], focal: 2.3 } },
-  // Three-quarter from his left and above, knees up.
-  { clip: "chicken", dance: "Chicken", view: "High left", camera: { eye: [1.6, 1.7, 2.0], target: [0, 1.25, 0.1], focal: 2.0 } },
-  // Side on, full body: the glide reads only in profile.
-  { clip: "moonwalk", dance: "Moonwalk", view: "Side", camera: { eye: [3.0, 1.0, 0.3], target: [0, 1.15, 0], focal: 1.95 } },
-  // Front from low, full body, for the kicks.
-  { clip: "russian", dance: "Russian", view: "Low front", camera: { eye: [0, 0.6, 3.1], target: [0, 1.0, 0.1], focal: 2.6 } },
-  // Three-quarter from his right, full body at hip height.
-  { clip: "charleston", dance: "Charleston", view: "Right", camera: { eye: [-2.1, 1.1, 2.3], target: [0, 1.15, 0.1], focal: 2.1 } },
-  // High above his left front, looking down past the head at the feet.
-  { clip: "charleston2", dance: "Charleston 2", view: "Above", camera: { eye: [0.8, 2.7, 2.4], target: [0, 1.05, 0], focal: 1.9 } },
-  // Front from a little above, full body.
-  { clip: "salsa", dance: "Salsa", view: "Front", camera: { eye: [0, 1.8, 3.5], target: [0, 1.15, 0], focal: 2.4 } },
-  // Close from his left at hip height, knees up: hands on the head, hips swaying.
-  { clip: "lambada", dance: "Lambada", view: "Close left", camera: { eye: [1.3, 1.0, 1.8], target: [0, 1.4, 0], focal: 1.9 } },
-  // Front, a little to his right, low: he drops to the floor and comes back up.
-  { clip: "armup", dance: "Arm up", view: "Low right", camera: { eye: [-0.6, 0.9, 2.7], target: [0, 1.0, 0.2], focal: 2.0 } },
-  // Low at his left front, full body: a second toprock, from further back than toprock2's.
-  { clip: "toprock3", dance: "Toprock 3", view: "Low left", camera: { eye: [0.9, 0.4, 2.5], target: [0, 1.05, 0.2], focal: 1.9 } },
+  { clip: "toprock2", dance: "Toprock 2", view: "Floor up" },
+  { clip: "charleston", dance: "Charleston", view: "Right" },
+  { clip: "charleston2", dance: "Charleston 2", view: "Above" },
+  { clip: "toprock3", dance: "Toprock 3", view: "Low left" },
+  { clip: "break-flips", dance: "Break flips", view: "Front" },
+  { clip: "egyptian-twist", dance: "Egyptian", view: "High left" },
+  { clip: "egyptian-twist2", dance: "Egyptian 2", view: "High left" },
+  { clip: "egyptian-twist3", dance: "Egyptian 3", view: "High left" },
+  { clip: "chicken-a", dance: "Chicken", view: "Low left" },
+  { clip: "chicken-b", dance: "Chicken 2", view: "Low left" },
+  { clip: "dance-111", dance: "Freestyle", view: "Side" },
+  { clip: "mickey", dance: "Mickey", view: "Right" },
+  { clip: "mickey2", dance: "Mickey 2", view: "Side" },
+  { clip: "mickey3", dance: "Mickey 3", view: "Low left" },
+  { clip: "salsa-a07", dance: "Salsa", view: "Front" },
+  { clip: "salsa-a08", dance: "Salsa 2", view: "Front" },
+  { clip: "salsa-a09", dance: "Salsa 3", view: "Front" },
+  { clip: "salsa-a12", dance: "Salsa 4", view: "Above" },
+  { clip: "salsa-a13", dance: "Salsa 5", view: "Right" },
+  { clip: "salsa-b01", dance: "Salsa 6", view: "Low left" },
+  { clip: "salsa-b02", dance: "Salsa 7", view: "Right" },
+  { clip: "salsa-b03", dance: "Salsa 8", view: "Low left" },
+  { clip: "salsa-b04", dance: "Salsa 9", view: "Right" },
+  { clip: "salsa-b05", dance: "Salsa 10", view: "Right" },
+  { clip: "salsa-b06", dance: "Salsa 11", view: "Front" },
+  { clip: "salsa-b07", dance: "Salsa 12", view: "Right" },
+  { clip: "salsa-b13", dance: "Salsa 13", view: "Side" },
+  { clip: "salsa-b15", dance: "Salsa 14", view: "Front" },
+  { clip: "lindy-hop", dance: "Lindy hop", view: "Above" },
+  { clip: "ballet-cartwheel", dance: "Cartwheel", view: "Side" },
+  { clip: "ballet-side-steps", dance: "Side steps", view: "Side" },
+  { clip: "ballet-grand-jete", dance: "Grand jeté", view: "Low left" },
+  { clip: "modern-fold-in3", dance: "Fold in", view: "Low left" },
+  { clip: "modern-lean-back", dance: "Lean back", view: "Above" },
 ];
 
-/** The loop a Dance or View chip holds, or null for the row's first chip
- *  (Any, Own), which leaves it to the reel. */
+/** Index into VIEWS of each loop's own view. */
+export const LOOP_VIEW: readonly number[] = LOOPS.map((l) => VIEWS.findIndex((v) => v.name === l.view));
+
+/** The loop a Dance chip holds, or null for Any, which leaves it to the reel. */
 export function chipLoop(value: number): number | null {
   const i = Math.round(value) - 1;
   return i >= 0 && i < LOOPS.length ? i : null;
+}
+
+/** The view a View chip holds, or null for Own, the loop's own view. */
+export function chipView(value: number): number | null {
+  const i = Math.round(value) - 1;
+  return i >= 0 && i < VIEWS.length ? i : null;
 }
 
 /** Seconds a clip's loop lasts as it was captured. */
