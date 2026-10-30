@@ -144,6 +144,15 @@ beat and a drop inverts the picture for a few bars. Draft scene.
     median 12.78 → 13.06, p95 26.54 → 26.97; hits a minute on the song 408
     → 402, in silence 0 → 0; main's bass / mid / treble lanes 154 / 126 /
     242 a minute against kick / clap / hats / chord 112 / 40 / 284 / 120.
+- 2026-10-30, #803: the scene's drop reaction now fires when audio v6's
+  drop level crosses its mark (`DROP_MARK`, `src/render/animClock.ts`), not
+  on the Section trend's old drop detector.
+  - tune-real on a real song (around-the-world, 60 s) then silence, the
+    commit before → this change, one run each: song change median
+    12.40 → 12.38, p95 34.23 → 34.23; silence median
+    10.47 → 10.42, p95 25.47 → 25.23; hits a minute on the song
+    361 → 369, in silence 0 → 0; drops a minute on the song
+    0 → 1, in silence 0 → 0.
 
 ## Tuning notes
 

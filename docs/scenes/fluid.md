@@ -179,6 +179,15 @@ All rounds below landed in the single PR #76 (opened as a draft, merged
     median 1.15 → 1.05, p95 2.43 → 2.43; hits a minute on the song 402 →
     408, in silence 0 → 0; main's bass / mid / treble lanes 154 / 128 /
     242 a minute against kick / clap / hats / chord 112 / 44 / 272 / 128.
+- 2026-10-30, #803: the scene's drop reaction now fires when audio v6's
+  drop level crosses its mark (`DROP_MARK`, `src/render/animClock.ts`), not
+  on the Section trend's old drop detector.
+  - tune-real on a real song (around-the-world, 60 s) then silence, the
+    commit before → this change, one run each: song change median
+    50.41 → 50.49, p95 59.24 → 58.87; silence median
+    1.24 → 1.25, p95 2.46 → 2.40; hits a minute on the song
+    354 → 371, in silence 0 → 0; drops a minute on the song
+    0 → 2, in silence 0 → 0.
 
 ## Tuning notes
 

@@ -206,6 +206,15 @@ and `ours-chaikin/cells-ours.json`):
     median 16.01 → 16.02, p95 17.36 → 17.36; hits a minute on the song 420
     → 424, in silence 0 → 0; main's bass / mid / treble lanes 152 / 128 /
     242 a minute against kick / clap / hats / chord 116 / 40 / 272 / 124.
+- 2026-10-30, #803: the scene's drop reaction now fires when audio v6's
+  drop level crosses its mark (`DROP_MARK`, `src/render/animClock.ts`), not
+  on the Section trend's old drop detector.
+  - tune-real on a real song (around-the-world, 60 s) then silence, the
+    commit before → this change, one run each: song change median
+    18.64 → 18.30, p95 20.03 → 19.92; silence median
+    16.34 → 16.38, p95 17.43 → 17.53; hits a minute on the song
+    368 → 371, in silence 0 → 0; drops a minute on the song
+    0 → 2, in silence 0 → 0.
 
 ## Tuning notes
 
