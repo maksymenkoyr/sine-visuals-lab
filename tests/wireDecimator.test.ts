@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { WireDecimator } from "../src/net/wireDecimator.ts";
 import { engineReading } from "./engineReading.ts";
+import { songFrame } from "./songFrame.ts";
 
 const INTERVAL = 1000 / 30;
 
@@ -67,7 +68,7 @@ describe("WireDecimator", () => {
     const d = new WireDecimator(INTERVAL);
     d.offer(0, false, false);
     d.offer(16, false, false);
-    expect(d.offer(33, true, true)).toEqual({ send: true, onset: true, pulseOnset: true, wave: null, engine: null, hitLevel: 0 });
+    expect(d.offer(33, true, true)).toEqual({ send: true, onset: true, pulseOnset: true, wave: null, engine: null, hitLevel: 0, song: null });
   });
 
   it("after a long gap sends once, with no burst of catch-up sends", () => {
@@ -100,5 +101,22 @@ describe("WireDecimator", () => {
     d.offer(0, false, false, { min: -0.5, max: 0.5 });
     d.offer(16, false, false, null);
     expect(d.offer(33, false, false, null).wave).toBeNull();
+  });
+
+  it("sends a song edge from a dropped tick once, on the next frame, with the sending tick's levels", () => {
+    const d = new WireDecimator(INTERVAL);
+    d.offer(0, false, false);
+    expect(d.offer(16, false, false, null, null, 0, songFrame({ clap: true, keys: 0.9 })).send).toBe(false);
+    const next = d.offer(33, false, false, null, null, 0, songFrame({ hat: true, keys: 0.2 }));
+    expect(next.song).toEqual(songFrame({ clap: true, hat: true, keys: 0.2 }));
+    d.offer(50, false, false, null, null, 0, songFrame());
+    expect(d.offer(67, false, false, null, null, 0, songFrame()).song).toEqual(songFrame());
+  });
+
+  it("sends no song when the sending tick has none", () => {
+    const d = new WireDecimator(INTERVAL);
+    d.offer(0, false, false);
+    d.offer(16, false, false, null, null, 0, songFrame({ kick: true }));
+    expect(d.offer(33, false, false).song).toBeNull();
   });
 });

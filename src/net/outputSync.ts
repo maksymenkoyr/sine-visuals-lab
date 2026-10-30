@@ -320,8 +320,8 @@ export function createCueController(
 
 /** The output's frame mailbox: frames arrive at the main window's tick rate,
  *  the output renders at its own, so the latest frame is kept and the
- *  one-shot edges (onset, pulseOnset, and the engine reading's hits, surge
- *  and blocked flag, as their strongest) are latched until a render consumes
+ *  one-shot edges (onset, pulseOnset, the engine reading's hits, surge
+ *  and blocked flag, as their strongest, and the song reading's four edges) are latched until a render consumes
  *  them — a hit between two output ticks isn't lost, and one isn't fired
  *  twice when the output ticks faster than the main window. A latched hit
  *  keeps the level of the frame it came in (EngineReading.hitLevel). */
@@ -341,6 +341,7 @@ export function createFrameInbox(): FrameInbox {
   let lastMs = -Infinity;
   let onset = false;
   let pulse = false;
+  const songEdges = { kick: false, clap: false, hat: false, chord: false };
   const hits: Pick<EngineReading, "kick" | "snare" | "hat" | "hitLevel" | "surge" | "surgeKind" | "blocked"> = {
     kick: 0,
     snare: 0,
@@ -357,6 +358,13 @@ export function createFrameInbox(): FrameInbox {
       lastMs = nowMs;
       onset = onset || f.onset;
       pulse = pulse || f.pulseOnset;
+      const s = f.song;
+      if (s) {
+        songEdges.kick = songEdges.kick || s.kick;
+        songEdges.clap = songEdges.clap || s.clap;
+        songEdges.hat = songEdges.hat || s.hat;
+        songEdges.chord = songEdges.chord || s.chord;
+      }
       const e = f.engine;
       if (e) {
         hits.kick = Math.max(hits.kick, e.kick);
@@ -375,9 +383,10 @@ export function createFrameInbox(): FrameInbox {
       if (!latest) return null;
       const e = latest.engine;
       const engine = e ? { ...e, ...hits } : null;
-      const out: WireFrame = { ...latest, onset, pulseOnset: pulse, engine };
+      const out: WireFrame = { ...latest, onset, pulseOnset: pulse, engine, song: latest.song ? { ...latest.song, ...songEdges } : null };
       onset = false;
       pulse = false;
+      songEdges.kick = songEdges.clap = songEdges.hat = songEdges.chord = false;
       hits.kick = hits.snare = hits.hat = hits.surge = 0;
       hits.hitLevel = undefined;
       hits.blocked = false;

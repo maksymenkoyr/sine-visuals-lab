@@ -152,7 +152,7 @@ export function createSyntheticFeed(opts: SyntheticOpts = {}): SyntheticFeed {
       engine.beatTime = beatIndex * period - phaseOffset;
       engine.downbeatTime = bar * BEATS_PER_BAR * period - phaseOffset;
       engine.updates = beatIndex;
-      return { time: timeSec, bands, energy, onset: beat, pulseOnset: beat, bpm, onsetPhase: beatPhase, level, hats, lead, engine };
+      return { time: timeSec, bands, energy, onset: beat, pulseOnset: beat, bpm, onsetPhase: beatPhase, level, hats, lead, engine, song: null };
     },
   };
 }

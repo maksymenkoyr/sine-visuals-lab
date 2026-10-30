@@ -326,6 +326,34 @@ same levels, hits and beat from the reading its frames carry.
    rooms. The pop-out's inbox (`src/net/outputSync.ts`) keeps the same level for
    the hits it latches.
 
+The song layer's reading (audio v6, #798; `SongFrame` in `src/audio/types.ts`)
+rides the same road in a song tail after the engine tail (`SONG_FRAME_BYTES` in
+`src/net/protocol.ts`): four edges (kick, clap, hat, chord) and a handful of
+levels. The device that hears the music fills it; a frame from a device that
+does not hear it, or from a sender that predates the layer, has no tail and
+followers read `song` as null. Its edges are latched
+like the engine's hits: `WireDecimator` ORs them across skipped ticks,
+`JitterBuffer` queues each edge and hands it out once when it comes due, and the
+pop-out's inbox keeps it until a render takes it. `animClock` eases the levels
+and turns the edges into `AnimFrame.song`, and `renderLatch` keeps the edges for
+a render-capped scene.
+
+`SongLayer` (`src/audio/song/songLayer.ts`) fills it. It runs on the main
+thread beside the engine, in `src/audio/engineSource.ts`: both get every capture
+quantum, then each is read once per frame with the same `dt`, the layer after the
+engine because its kick level and its `music` gate are the engine's low band and
+`music`. The code under `src/audio/song/` is audio v6's, copied (each file's
+header says from where and what was changed), and the bench holds it equal: the
+`app-song` probe in audio-subsystem's `bench-signals` drives the app's engine and
+layer over the rich song's 24 cases, and `v6-check --app-song` finds every field
+equal to v6's own trace (the four edges exactly, the levels to the last bit).
+Rerun it when `src/audio/song/` or the engine changes. The layer's copied v4 code
+keeps state at module level, so only one layer may run at a time; a new one
+resets that state. Cost, measured 2026-10-30 in Node on the first minute of the
+rich song, fed in 128-sample quanta with a read every 1/60 s: the engine alone
+takes 547 ms of CPU per minute of audio (about 0.9% of a core), the engine with
+the layer 2298 ms (about 3.8%), so the layer adds about 1750 ms (2.9%).
+
 The silence gate's marks are not part of a room's look. Only the device that
 hears the room moves them; a paired TV holds `SILENCE_GATE_SEED`, and gates
 nothing on a frame whose gate-off bit is set (`src/net/protocol.ts`).

@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { createOutputBridge, OUTPUT_OPEN_GRACE_MS, type Transport } from "../src/net/outputBridge.ts";
 import { NO_EFFECTS } from "../src/render/heldEffects.ts";
 import { OUTPUT_PRESENCE_TIMEOUT_MS, type OutputPower, type OutputRenderStatus, type ToMain, type ToOutput } from "../src/net/outputSync.ts";
+import { songFrame } from "./songFrame.ts";
 
 function fakeTransport() {
   const posted: ToOutput[] = [];
@@ -181,7 +182,7 @@ describe("outputBridge status and power", () => {
 });
 
 describe("outputBridge frames carry the controller's gate marks", () => {
-  const FRAME = { time: 1, bands: new Float32Array(4), energy: 0.5, level: 0.4, hats: 0, lead: 0, onset: false, pulseOnset: false, bpm: 120, onsetPhase: 0, engine: null };
+  const FRAME = { time: 1, bands: new Float32Array(4), energy: 0.5, level: 0.4, hats: 0, lead: 0, onset: false, pulseOnset: false, bpm: 120, onsetPhase: 0, engine: null, song: null };
   const PARAMS = { sens: 1, exp: 1, smoothing: 1 };
   const GATE = { closed: 0.2, open: 0.3 };
   const frames = (posted: ToOutput[]) => posted.filter((m): m is Extract<ToOutput, { t: "frame" }> => m.t === "frame");
@@ -194,6 +195,15 @@ describe("outputBridge frames carry the controller's gate marks", () => {
     const [m] = frames(posted);
     expect(m.f.gate).toEqual(GATE);
     expect(m.f.p).toEqual(PARAMS);
+  });
+
+  it("carries the song reading with the frame", () => {
+    const { bridge, posted, receive } = setup();
+    receive({ t: "hello", haveState: false });
+    posted.length = 0;
+    const song = songFrame({ kick: true, keys: 0.5 });
+    bridge.pushFrame({ ...FRAME, song }, { gate: GATE }, PARAMS);
+    expect(frames(posted)[0].f.song).toEqual(song);
   });
 
   it("still sends gate while the output holds its own look and p is left off", () => {

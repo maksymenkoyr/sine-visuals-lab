@@ -1,15 +1,19 @@
 import workletUrl from "./engineWorklet.ts?worker&url";
 import { pinAsset } from "../pinnedAssets.ts";
 import { AudioEngine } from "./engine/engine.ts";
-import type { EngineReading } from "./types.ts";
+import { type SongMarks, SongLayer } from "./song/songLayer.ts";
+import type { EngineReading, SongFrame } from "./types.ts";
 
 /**
- * Feeds the audio engine (src/audio/engine/engine.ts) from a capture.
+ * Feeds the audio engine (src/audio/engine/engine.ts) and the song layer
+ * (src/audio/song/songLayer.ts) from a capture.
  * engineWorklet.ts posts every render quantum with its audio-clock time, and
  * the engine analyses it here on the main thread, the way it was measured: a
  * frame's band levels are the RMS over exactly the audio since the frame
  * before, and only the frame knows when that is. A stalled main thread delays
  * nothing but the reading itself; the queued quanta keep their own times.
+ * The song layer gets the same quanta and is stepped right after the engine
+ * with the same dt: its triggers read the engine's low band and `music`.
  *
  * The node is wired source -> node -> a zero-gain sink -> destination: some
  * browsers throttle or stop a node whose output reaches no destination, and
@@ -26,6 +30,10 @@ export interface EngineSource {
   read(now: number): EngineReading;
   /** The engine's tempo, 0 while it hears no steady pulse. */
   readonly bpm: number;
+  /** The song layer's reading from the last read(); the object is reused. */
+  readonly song: SongFrame;
+  /** Where each of the song layer's triggers fires, for the panel; the object is reused. */
+  readonly marks: SongMarks;
   dispose(): void;
 }
 
@@ -34,6 +42,11 @@ const SCRIPT_BLOCK = 1024;
 // Pinned (src/pinnedAssets.ts): addModule() runs when the mic first starts,
 // which can be long after load and after a deploy has replaced dist/.
 const engineWorklet = pinAsset(workletUrl);
+
+/** What a tap hands every block of audio to. */
+interface Taps {
+  push(samples: Float32Array, time: number): void;
+}
 
 /** Connects `node` into the graph through a silent sink; returns the teardown. */
 function attach(context: AudioContext, sourceNode: AudioNode, node: AudioNode): () => void {
@@ -49,7 +62,7 @@ function attach(context: AudioContext, sourceNode: AudioNode, node: AudioNode): 
   };
 }
 
-async function workletTap(context: AudioContext, sourceNode: AudioNode, engine: AudioEngine): Promise<(() => void) | null> {
+async function workletTap(context: AudioContext, sourceNode: AudioNode, taps: Taps): Promise<(() => void) | null> {
   if (!context.audioWorklet) return null;
   let node: AudioWorkletNode;
   try {
@@ -59,7 +72,7 @@ async function workletTap(context: AudioContext, sourceNode: AudioNode, engine: 
     if (import.meta.env.DEV) console.warn("engineSource: no AudioWorklet, tapping with a ScriptProcessorNode", err);
     return null;
   }
-  node.port.onmessage = (e: MessageEvent<{ samples: Float32Array; time: number }>) => engine.push(e.data.samples, e.data.time);
+  node.port.onmessage = (e: MessageEvent<{ samples: Float32Array; time: number }>) => taps.push(e.data.samples, e.data.time);
   const detach = attach(context, sourceNode, node);
   return () => {
     node.port.onmessage = null;
@@ -67,7 +80,7 @@ async function workletTap(context: AudioContext, sourceNode: AudioNode, engine: 
   };
 }
 
-function scriptTap(context: AudioContext, sourceNode: AudioNode, engine: AudioEngine): (() => void) | null {
+function scriptTap(context: AudioContext, sourceNode: AudioNode, taps: Taps): (() => void) | null {
   if (typeof context.createScriptProcessor !== "function") return null;
   const node = context.createScriptProcessor(SCRIPT_BLOCK, 2, 1);
   node.onaudioprocess = (e) => {
@@ -78,7 +91,7 @@ function scriptTap(context: AudioContext, sourceNode: AudioNode, engine: AudioEn
       const ch = input.getChannelData(c);
       for (let i = 0; i < n; i++) mono[i] += ch[i] / input.numberOfChannels;
     }
-    engine.push(mono, context.currentTime - n / context.sampleRate);
+    taps.push(mono, context.currentTime - n / context.sampleRate);
   };
   const detach = attach(context, sourceNode, node);
   return () => {
@@ -90,18 +103,31 @@ function scriptTap(context: AudioContext, sourceNode: AudioNode, engine: AudioEn
 /** Starts feeding a fresh engine from `sourceNode`; null where neither tap can be built. */
 export async function createEngineSource(context: AudioContext, sourceNode: AudioNode): Promise<EngineSource | null> {
   const engine = new AudioEngine(context.sampleRate);
-  const detach = (await workletTap(context, sourceNode, engine)) ?? scriptTap(context, sourceNode, engine);
+  const layer = new SongLayer(context.sampleRate);
+  const taps: Taps = {
+    push(samples, time) {
+      engine.push(samples, time);
+      layer.push(samples, time);
+    },
+  };
+  const detach = (await workletTap(context, sourceNode, taps)) ?? scriptTap(context, sourceNode, taps);
   if (!detach) return null;
   let last = context.currentTime;
   return {
     read(now: number): EngineReading {
       const dt = Math.max(1e-3, now - last);
       last = now;
-      return engine.read(dt);
+      const reading = engine.read(dt);
+      layer.read(now, dt, reading);
+      return reading;
     },
     get bpm(): number {
       return engine.bpm;
     },
+    get song(): SongFrame {
+      return layer.reading;
+    },
+    marks: layer.marks,
     dispose: detach,
   };
 }

@@ -56,6 +56,41 @@ export interface EngineReading {
 }
 
 /**
+ * What the song layer (audio v6, #798) heard over the audio since the frame
+ * before: edges that are true on the read the layer fired, and levels in
+ * [0,1]. Made by the device that hears the sound and carried with its frames
+ * like EngineReading; animClock eases it into AnimFrame.song.
+ */
+export interface SongFrame {
+  /** Kick hits. */
+  kick: boolean;
+  /** Clap hits. */
+  clap: boolean;
+  /** Closed hats. */
+  hat: boolean;
+  /** Chord changes. */
+  chord: boolean;
+  /** Clap hits' loudness. */
+  clapLevel: number;
+  /** Closed hats, as a level: it rises on each. */
+  hatLevel: number;
+  /** Chord changes, as a level: it rises on each. */
+  chordLevel: number;
+  /** The keys' loudness. */
+  keys: number;
+  /** The song's overall loudness. */
+  loudness: number;
+  /** Rises at a drop's start. */
+  dropLevel: number;
+  /** Music is playing. */
+  playing: number;
+}
+
+/** The song layer's edges, and its levels in the order they travel (src/net/protocol.ts). */
+export const SONG_EDGES = ["kick", "clap", "hat", "chord"] as const;
+export const SONG_LEVELS = ["clapLevel", "hatLevel", "chordLevel", "keys", "loudness", "dropLevel", "playing"] as const;
+
+/**
  * The single interface every renderer consumes, regardless of whether the
  * data came from a local mic, tab-audio capture, or a remote room feed.
  */
@@ -102,6 +137,10 @@ export interface FeatureFrame {
    *  no capture, or a sender that predates the engine (src/net/protocol.ts).
    *  animClock treats null as nothing heard. */
   engine: EngineReading | null;
+  /** The song layer's reading behind this frame (src/net/protocol.ts's song
+   *  tail); null where none was measured: no engine, or a
+   *  sender that predates it. animClock treats null as nothing heard. */
+  song: SongFrame | null;
 }
 
 export type CaptureSourceKind = "mic" | "display";
