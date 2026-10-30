@@ -821,3 +821,6 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   hand: five Camera sliders and the arrow keys.
 - #788 (draft, 2026-10-29): the owner's 34 dances from `clips-v2.bin`,
   cameras in `VIEWS`, each new dance through a measured view.
+- #805 (draft, 2026-10-30): Dance cut and Camera cut on their own wires,
+  Shortest dance and Shortest view, and the chip on screen outlined on the
+  Dance and View rows.
