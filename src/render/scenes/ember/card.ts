@@ -36,7 +36,7 @@ export const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 1,
     description: "How hard each kick throws the fire up.",
-    drive: { default: "anim.lowOnset", hit: { reactionLabel: "lift" } },
+    drive: { default: "anim.kickOnset", hit: { reactionLabel: "lift" } },
   },
   {
     key: "churn",

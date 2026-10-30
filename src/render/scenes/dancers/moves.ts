@@ -23,7 +23,7 @@ export interface MoveClocks {
   barPhase: number;
   tempoLock: number;
   beatPulse: number;
-  lowPulse: number;
+  kickPulse: number;
   sectionIntensity: number;
   dropPulse: number;
   flowPhase: number;

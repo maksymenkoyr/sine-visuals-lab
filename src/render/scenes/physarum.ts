@@ -275,7 +275,7 @@ const EVAP_FLOOR_RATE = 0.04;
 const EVAP_DITHER = 1.0;
 
 // --- Attractors: gaussian pull radius in field units, and how much harder
-// the low group's attractor pulls right on a bass hit (see Band pull's
+// the low group's attractor pulls right on a kick (see Band pull's
 // `reads` in SETTINGS below — this is what makes that claim true). ---
 const ATTRACTOR_SIGMA = 0.12;
 const LOW_PULSE_BOOST = 1.5;
@@ -444,7 +444,7 @@ void main() {
     float level = i == 0 ? uLow : (i == 1 ? uMid : uHigh);
     // Band pull's Scene default pulses the low attractor harder on a bass
     // hit — this is what makes that literally true.
-    float lowBoost = i == 0 ? (1.0 + LOW_PULSE_BOOST * uLowPulse) : 1.0;
+    float lowBoost = i == 0 ? (1.0 + LOW_PULSE_BOOST * uKickPulse) : 1.0;
     trail[i] += reachDrive(level * lowBoost) * uReach * g * uDiffuseDt;
   }
 

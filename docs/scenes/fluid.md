@@ -171,6 +171,14 @@ All rounds below landed in the single PR #76 (opened as a draft, merged
   | #682 | 50.17 | 58.33 | 1.16 | 1.87 |
 
   On #683 the fluid barely moved between peaks. With the change it moves as it did on the old lanes, which it was tuned on. No hit fired on silence.
+- 2026-10-30, #802: Beat puffs and Kick shockwave moved from the bass hit to
+  the Kick, and Style's Lightning (with the treble sparks) from the treble
+  hit to the Hats.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 50.94 → 46.49, p95 58.72 → 59.68; silence
+    median 1.15 → 1.05, p95 2.43 → 2.43; hits a minute on the song 402 →
+    408, in silence 0 → 0; main's bass / mid / treble lanes 154 / 128 /
+    242 a minute against kick / clap / hats / chord 112 / 44 / 272 / 128.
 
 ## Tuning notes
 

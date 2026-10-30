@@ -19,7 +19,7 @@
 // are design choices on top of its measured motion:
 // - Speed: the zoom rate rides the overall level (All level), over a floor
 //   so a quiet passage still drifts (launch.ts's SPEED_FLOOR).
-// - Births: a bass hit stamps a band of extra seeds near the centre that
+// - Births: a kick stamps a band of extra seeds near the centre that
 //   grow in, ride outward with the zoom and merge back within about a
 //   second (launch.ts's KICK_LIFE_SEC).
 // - Relaunch: a drop pulls the birth front back out, swallowing the inner
@@ -124,10 +124,10 @@ function deltaFor(cells: number): number {
 
 function step(frame: Frame, anim: Anim, get: (key: string) => number, drives: Drives): void {
   const births = get("births");
-  const birthsFired = drives.fired("births", anim.lowOnset);
+  const birthsFired = drives.fired("births", anim.song.kickOnset);
   const kick =
     births > 0 && birthsFired
-      ? births * (0.5 + 0.5 * Math.min(1, drives.value("births", anim.lowPulse))) * drives.hitSize("births")
+      ? births * (0.5 + 0.5 * Math.min(1, drives.value("births", anim.song.kickPulse))) * drives.hitSize("births")
       : null;
   const relaunch = get("relaunch");
   const relaunchFired = drives.fired("relaunch", anim.dropOnset);

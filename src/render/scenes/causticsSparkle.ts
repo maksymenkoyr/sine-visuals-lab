@@ -1,5 +1,5 @@
 /**
- * Caustics' Sparkle: what a treble hit does to the pool (the Effect) and how
+ * Caustics' Sparkle: what a hat hit does to the pool (the Effect) and how
  * that moves over time after the hit (the shape). Pure, no GL and no DOM:
  * caustics.ts runs the hits through this every frame and uploads the sum.
  *
@@ -14,8 +14,8 @@
  * fixed curve per hit: the dev-only Basic shape pick (`SPARKLE_SHAPES`,
  * Pluck unless the dev server changed it) and its dials. Adaptive decides
  * each hit from the music, `ADAPT_*` below:
- * - its size comes from how far the hit stood out (the treble lane's
- *   stand-out, hitStrength.ts) against the recent hits', so accents flare
+ * - its size comes from how high the hat level stood at the hit
+ *   (AnimFrame.song.hatLevel) against the recent hits', so accents flare
  *   and ghost notes almost vanish, where Basic plays every hit the same;
  * - its length follows the gap between hits, so every flash ends before the
  *   next lands, and a bigger hit lasts longer;
@@ -92,7 +92,7 @@ const ATTACK_SWELL_MAX = 0.6;
 /** How steep every exponential swell is (Attack's and Swell's rise). */
 const SWELL_CURVE = 4;
 /** Pluck's fade time constant as a fraction of `length`. At the default
- *  length this is the treble pulse's own decay (animClock.ts's
+ *  length this is the hats pulse's own decay (animClock.ts's
  *  BEAT_PULSE_DECAY_PER_SEC), so Grain + Pluck reads as the sparkle did
  *  before the picks existed. */
 export const PLUCK_TAU = 0.28;

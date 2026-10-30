@@ -240,7 +240,7 @@ void main() {
   vec2 here = vec2(pathX(0.0), pathY(0.0));
 
   float th = mix(0.69, 0.55, uGas);
-  float hot = 1.0 + ${f(FLARE_GAIN)} * uFlare * flareDrive(uLowPulse);
+  float hot = 1.0 + ${f(FLARE_GAIN)} * uFlare * flareDrive(uKickPulse);
   float bright = uGlow * (1.0 + ${f(GLOW_GAIN)} * glowDrive(uEnergy));
   float innerLit = uInner * uInnerLevel;
   float innerK = 1.0 + ${f(INNER_GAIN)} * innerLit;

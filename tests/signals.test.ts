@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { BAND_SIGNALS, DIAL_SIGNALS, SIGNALS, bandSignalId, dialSignalId, type SignalId } from "../src/render/signals.ts";
+import { BAND_SIGNALS, DIAL_SIGNALS, RETIRED_SIGNALS, SIGNALS, bandSignalId, dialSignalId, type SignalId } from "../src/render/signals.ts";
 import { NUM_BANDS } from "../src/audio/types.ts";
 import { MUSIC_DIALS } from "../src/render/musicProfile.ts";
 import type { AnimFrame } from "../src/render/animClock.ts";
@@ -31,9 +31,10 @@ describe("signals registry", () => {
       "section",
       "tempo",
       "hitAny",
-      "hitLow",
-      "hitMid",
-      "hitHigh",
+      "hitKick",
+      "hitClap",
+      "hitHats",
+      "hitChord",
       "surge",
       "wave",
       "lock",
@@ -42,9 +43,7 @@ describe("signals registry", () => {
       "low",
       "mid",
       "high",
-      "kick",
       "lead",
-      "hats",
       ...DIAL_SIGNALS,
       ...BAND_SIGNALS,
     ]);
@@ -52,6 +51,39 @@ describe("signals registry", () => {
       if (!spec.monitor) continue;
       expect(knownCards.has(spec.monitor.card)).toBe(true);
       expect(knownRows.has(spec.monitor.row)).toBe(true);
+    }
+  });
+
+  it("each instrument is a hit reading its song pulse, with its level on the same Sound row", () => {
+    const song = {
+      kickPulse: 0.1, clapPulse: 0.2, hatPulse: 0.3, chordPulse: 0.4,
+      kickOnset: true, clapOnset: false, hatOnset: true, chordOnset: false,
+      clapLevel: 0.5, hatLevel: 0.6, chordLevel: 0.7,
+    };
+    const anim = { song, low: 0.8 } as unknown as AnimFrame;
+    const tracks = [
+      { hit: "anim.kickOnset", level: "anim.kickLevel", row: "hitKick", pulse: 0.1, edge: true, value: 0.8 },
+      { hit: "anim.clapOnset", level: "anim.clapLevel", row: "hitClap", pulse: 0.2, edge: false, value: 0.5 },
+      { hit: "anim.hats", level: "anim.hatsLevel", row: "hitHats", pulse: 0.3, edge: true, value: 0.6 },
+      { hit: "anim.chordOnset", level: "anim.chordLevel", row: "hitChord", pulse: 0.4, edge: false, value: 0.7 },
+    ] as const;
+    for (const t of tracks) {
+      const hit = SIGNALS[t.hit];
+      const level = SIGNALS[t.level];
+      expect(hit.kind).toBe("edge");
+      expect(hit.read({} as never, anim)).toBe(t.pulse);
+      expect(hit.edge!(anim)).toBe(t.edge);
+      expect(level.kind).toBe("level");
+      expect(level.read({} as never, anim)).toBe(t.value);
+      expect(hit.monitor).toEqual({ card: "sound", row: t.row });
+      expect(level.monitor).toEqual({ card: "sound", row: t.row });
+    }
+  });
+
+  it("the retired band hits and Kick band are gone from the catalogue", () => {
+    for (const id of ["anim.lowOnset", "anim.midOnset", "anim.highOnset", "anim.kickBand"]) {
+      expect(Object.keys(SIGNALS)).not.toContain(id);
+      expect(SIGNALS[RETIRED_SIGNALS[id]!]).toBeDefined();
     }
   });
 
@@ -125,7 +157,7 @@ describe("signals registry", () => {
     expect(links.length).toBe(2);
 
     const idsOf = links.map((l) => (typeof l === "string" ? l : l.signal));
-    expect(idsOf.sort()).toEqual(["anim.lowOnset", "feature.onset"].sort());
+    expect(idsOf.sort()).toEqual(["anim.kickOnset", "feature.onset"].sort());
 
     // Bass hit (CUT_MODE.BASS) switches which signal is "active"; the two
     // links must disagree at every mode, not just report both as live.

@@ -766,6 +766,13 @@ hexagon and decagon.
   | #682 | 13.49 | 17.07 | 2.07 | 2.57 |
 
   A little livelier than either older build. The silence rows are the scene's own motion: no hit fires on silence in any build. No hit fired on silence.
+- 2026-10-30, #802: The shake moved from the bass hit to the Kick, and
+  Glow's hit part from the treble hit to the Hats.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 12.28 → 12.17, p95 16.44 → 16.72; silence
+    median 3.96 → 2.12, p95 4.79 → 2.71; hits a minute on the song 418 →
+    414, in silence 0 → 0; main's bass / mid / treble lanes 150 / 138 /
+    242 a minute against kick / clap / hats / chord 114 / 48 / 280 / 122.
 
 ## Tuning notes
 

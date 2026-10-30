@@ -27,7 +27,7 @@ import {
   setDriveLineStrength,
   resetDriveLineStrength,
 } from "../src/render/driveStore.ts";
-import { freshWireMod, type LegacyNode } from "../src/render/wireMod.ts";
+import { freshWireMod, legacyNodeFrom, type LegacyNode } from "../src/render/wireMod.ts";
 import { normalizeDriveSetting } from "../src/render/drives.ts";
 import { driveSettingFromChoice, type DrivePatch } from "../src/render/drives.ts";
 import { LINE_HEIGHT_DEFAULT, LINE_STRENGTH_DEFAULT, LINE_STRENGTH_MAX, LINE_STRENGTH_MIN } from "../src/audio/bandLine.ts";
@@ -67,8 +67,8 @@ describe("driveStore: getDriveSetting/setDriveSetting — one-source patches", (
   });
 
   it("round-trips a plain catalogue choice", () => {
-    setDriveSetting("choice-scene-2", FLASH, driveSettingFromChoice("anim.lowOnset"));
-    expect(getDriveSetting("choice-scene-2", FLASH)).toEqual(driveSettingFromChoice("anim.lowOnset"));
+    setDriveSetting("choice-scene-2", FLASH, driveSettingFromChoice("anim.kickOnset"));
+    expect(getDriveSetting("choice-scene-2", FLASH)).toEqual(driveSettingFromChoice("anim.kickOnset"));
   });
 
   it("round-trips a grid choice", () => {
@@ -95,10 +95,10 @@ describe("driveStore: getDriveSetting/setDriveSetting — one-source patches", (
   });
 
   it("doesn't leak between scenes", () => {
-    setDriveSetting("choice-scene-7a", FLASH, driveSettingFromChoice("anim.lowOnset"));
-    setDriveSetting("choice-scene-7b", FLASH, driveSettingFromChoice("anim.highOnset"));
-    expect(getDriveSetting("choice-scene-7a", FLASH)).toEqual(driveSettingFromChoice("anim.lowOnset"));
-    expect(getDriveSetting("choice-scene-7b", FLASH)).toEqual(driveSettingFromChoice("anim.highOnset"));
+    setDriveSetting("choice-scene-7a", FLASH, driveSettingFromChoice("anim.kickOnset"));
+    setDriveSetting("choice-scene-7b", FLASH, driveSettingFromChoice("anim.hats"));
+    expect(getDriveSetting("choice-scene-7a", FLASH)).toEqual(driveSettingFromChoice("anim.kickOnset"));
+    expect(getDriveSetting("choice-scene-7b", FLASH)).toEqual(driveSettingFromChoice("anim.hats"));
   });
 });
 
@@ -112,7 +112,7 @@ describe("driveStore: getDriveSetting/setDriveSetting — the patch API", () => 
     const patch: DrivePatch = {
       mix: "gate",
       sources: [
-        { choice: "anim.lowOnset", weight: 1.5, height: "graded" },
+        { choice: "anim.kickOnset", weight: 1.5, height: "graded" },
         { choice: "anim.mid", weight: 0.6 },
       ],
     };
@@ -129,7 +129,7 @@ describe("driveStore: getDriveSetting/setDriveSetting — the patch API", () => 
 
 describe("driveStore: sanitizeDriveSetting / encodeDriveSetting", () => {
   it("accepts a bare DriveChoice, including scene", () => {
-    expect(sanitizeDriveSetting("anim.lowOnset")).toEqual(driveSettingFromChoice("anim.lowOnset"));
+    expect(sanitizeDriveSetting("anim.kickOnset")).toEqual(driveSettingFromChoice("anim.kickOnset"));
     expect(sanitizeDriveSetting("scene")).toBe("scene");
     expect(sanitizeDriveSetting({ source: "beat", grid: 3 })).toEqual(driveSettingFromChoice({ source: "beat", grid: 3 }));
   });
@@ -145,6 +145,29 @@ describe("driveStore: sanitizeDriveSetting / encodeDriveSetting", () => {
       mix: "add",
       sources: [{ choice: "feature.level", weight: 0.5 }],
     });
+  });
+
+  it("reads each retired band hit and the Kick band as the instrument that replaced it", () => {
+    const ids = [
+      ["anim.lowOnset", "anim.kickOnset"],
+      ["anim.midOnset", "anim.chordOnset"],
+      ["anim.highOnset", "anim.hats"],
+      ["anim.kickBand", "anim.kickLevel"],
+    ] as const;
+    for (const [old, now] of ids) {
+      expect(sanitizeDriveSetting(old)).toEqual(driveSettingFromChoice(now));
+      expect(sanitizeDriveSetting({ m: "add", s: [{ c: old, w: 0.5, h: "graded" }] })).toEqual({
+        mix: "add",
+        sources: [{ choice: now, weight: 0.5, height: "graded" }],
+      });
+    }
+  });
+
+  it("a retired node's input signal lands on its successor", () => {
+    const node = { src: "anim.lowOnset", windowOn: false, min: 0.4, max: 0.9, smoothOn: false, smoothness: 0.02, height: "graded", length: 0.5 };
+    expect(legacyNodeFrom(node)?.src).toBe("anim.kickOnset");
+    expect(legacyNodeFrom({ ...node, src: "anim.kickBand" })?.src).toBe("anim.kickLevel");
+    expect(legacyNodeFrom({ ...node, src: "constructor" })).toBeNull();
   });
 
   // SIGNALS is a plain object, so an `in` check would let these through and
@@ -166,15 +189,15 @@ describe("driveStore: sanitizeDriveSetting / encodeDriveSetting", () => {
   });
 
   it("a saved wire's retired \"loud\" height loads as Graded, and Fixed is the omitted default", () => {
-    expect(sanitizeDriveSetting({ m: "add", s: [{ c: "anim.lowOnset", h: "loud" }] })).toEqual({ mix: "add", sources: [{ choice: "anim.lowOnset", weight: 1, height: "graded" }] });
-    expect(sanitizeDriveSetting({ m: "add", s: [{ c: "anim.lowOnset", h: "fixed" }] })).toEqual(driveSettingFromChoice("anim.lowOnset"));
+    expect(sanitizeDriveSetting({ m: "add", s: [{ c: "anim.kickOnset", h: "loud" }] })).toEqual({ mix: "add", sources: [{ choice: "anim.kickOnset", weight: 1, height: "graded" }] });
+    expect(sanitizeDriveSetting({ m: "add", s: [{ c: "anim.kickOnset", h: "fixed" }] })).toEqual(driveSettingFromChoice("anim.kickOnset"));
   });
 
   it("encodeDriveSetting/sanitizeDriveSetting round-trip through the compact wire shape", () => {
     const patch: DrivePatch = {
       mix: "max",
       sources: [
-        { choice: "anim.lowOnset", weight: 0.5, height: "graded" },
+        { choice: "anim.kickOnset", weight: 0.5, height: "graded" },
         { choice: { source: "beat", grid: 2 }, weight: 1 },
       ],
     };
@@ -182,7 +205,7 @@ describe("driveStore: sanitizeDriveSetting / encodeDriveSetting", () => {
   });
 
   it("encodeDriveSetting prefers the bare-choice form for the identity one-source/weight-1/Graded shape", () => {
-    expect(encodeDriveSetting(driveSettingFromChoice("anim.lowOnset"))).toBe("anim.lowOnset");
+    expect(encodeDriveSetting(driveSettingFromChoice("anim.kickOnset"))).toBe("anim.kickOnset");
     expect(encodeDriveSetting("scene")).toBe("scene");
   });
 
@@ -257,9 +280,9 @@ describe("driveStore: patch-editing helpers (togglePatchSource, setSourceWeight,
   // adding alongside FLASH's own already-present Beat default.
   it("togglePatchSource adds then removes a source, leaving nothing plugged in (not the scene's mix)", () => {
     const sceneId = "patch-helper-1";
-    togglePatchSource(sceneId, SPARKLE, "anim.lowOnset");
-    expect(getDriveSetting(sceneId, SPARKLE)).toEqual(driveSettingFromChoice("anim.lowOnset"));
-    togglePatchSource(sceneId, SPARKLE, "anim.lowOnset");
+    togglePatchSource(sceneId, SPARKLE, "anim.kickOnset");
+    expect(getDriveSetting(sceneId, SPARKLE)).toEqual(driveSettingFromChoice("anim.kickOnset"));
+    togglePatchSource(sceneId, SPARKLE, "anim.kickOnset");
     expect(getDriveSetting(sceneId, SPARKLE)).toEqual({ mix: "add", sources: [] });
     resetDriveSetting(sceneId, SPARKLE);
     expect(getDriveSetting(sceneId, SPARKLE)).toBe("scene");
@@ -340,10 +363,10 @@ describe("driveStore: patch-editing helpers (togglePatchSource, setSourceWeight,
 
   it("setSourceWeight/setSourceHeight edit one source in place", () => {
     const sceneId = "patch-helper-2";
-    togglePatchSource(sceneId, SPARKLE, "anim.lowOnset");
-    setSourceWeight(sceneId, SPARKLE, "anim.lowOnset", 1.5);
-    setSourceHeight(sceneId, SPARKLE, "anim.lowOnset", "graded");
-    expect(getDriveSetting(sceneId, SPARKLE)).toEqual({ mix: "add", sources: [{ choice: "anim.lowOnset", weight: 1.5, height: "graded" }] });
+    togglePatchSource(sceneId, SPARKLE, "anim.kickOnset");
+    setSourceWeight(sceneId, SPARKLE, "anim.kickOnset", 1.5);
+    setSourceHeight(sceneId, SPARKLE, "anim.kickOnset", "graded");
+    expect(getDriveSetting(sceneId, SPARKLE)).toEqual({ mix: "add", sources: [{ choice: "anim.kickOnset", weight: 1.5, height: "graded" }] });
   });
 
   it("setSourceGrid re-grids the patch's own grid source", () => {
@@ -355,7 +378,7 @@ describe("driveStore: patch-editing helpers (togglePatchSource, setSourceWeight,
 
   it("setPatchMix changes the mix without touching the sources", () => {
     const sceneId = "patch-helper-4";
-    togglePatchSource(sceneId, SPARKLE, "anim.lowOnset");
+    togglePatchSource(sceneId, SPARKLE, "anim.kickOnset");
     togglePatchSource(sceneId, SPARKLE, "anim.mid");
     setPatchMix(sceneId, SPARKLE, "max");
     const setting = getDriveSetting(sceneId, SPARKLE);
@@ -369,11 +392,11 @@ describe("driveStore: patch-editing helpers (togglePatchSource, setSourceWeight,
     const sceneId = "patch-helper-5";
     // FLASH's own default is plain Beat ("feature.onset"), not "scene" —
     // the first toggle here has to add a second source next to it.
-    togglePatchSource(sceneId, FLASH, "anim.lowOnset");
+    togglePatchSource(sceneId, FLASH, "anim.kickOnset");
     const setting = getDriveSetting(sceneId, FLASH);
     expect(setting).not.toBe("scene");
     if (setting === "scene") throw new Error("unreachable");
-    expect(setting.sources.map((s) => s.choice)).toEqual(["feature.onset", "anim.lowOnset"]);
+    expect(setting.sources.map((s) => s.choice)).toEqual(["feature.onset", "anim.kickOnset"]);
   });
 });
 
@@ -444,10 +467,10 @@ describe("driveStore: line strength", () => {
 describe("driveStore: getDriveSetting memo", () => {
   it("returns the same object until the stored value changes", () => {
     const sceneId = "ds-memo";
-    setDriveSetting(sceneId, FLASH, driveSettingFromChoice("anim.lowOnset"));
+    setDriveSetting(sceneId, FLASH, driveSettingFromChoice("anim.kickOnset"));
     const a = getDriveSetting(sceneId, FLASH);
     expect(getDriveSetting(sceneId, FLASH)).toBe(a);
-    setSourceWeight(sceneId, FLASH, "anim.lowOnset", 0.5);
+    setSourceWeight(sceneId, FLASH, "anim.kickOnset", 0.5);
     const b = getDriveSetting(sceneId, FLASH);
     expect(b).not.toBe(a);
     expect((b as DrivePatch).sources[0]!.weight).toBe(0.5);
@@ -571,13 +594,13 @@ describe("driveStore with a stubbed localStorage", () => {
   it("an explicitly stored choice always wins over the legacy migration", async () => {
     const fake = makeFakeLocalStorage();
     fake.setItem("vibe.beatGrid", JSON.stringify({ caustics: 3 }));
-    fake.setItem("vibe.drives", JSON.stringify({ caustics: { flash: { choice: "anim.highOnset" } } }));
+    fake.setItem("vibe.drives", JSON.stringify({ caustics: { flash: { choice: "anim.hats" } } }));
     (globalThis as { localStorage?: unknown }).localStorage = fake;
 
     vi.resetModules();
     const fresh = await import("../src/render/driveStore.ts");
 
-    expect(fresh.getDriveSetting("caustics", FLASH)).toEqual(driveSettingFromChoice("anim.highOnset"));
+    expect(fresh.getDriveSetting("caustics", FLASH)).toEqual(driveSettingFromChoice("anim.hats"));
   });
 
   it("a garbage stored choice (foreign shape) falls back to the migration or the default rather than throwing", async () => {
@@ -593,13 +616,13 @@ describe("driveStore with a stubbed localStorage", () => {
 
   it("an entry written before this store had patches (bare `choice`, no `patch`) still reads back as its one-source patch", async () => {
     const fake = makeFakeLocalStorage();
-    fake.setItem("vibe.drives", JSON.stringify({ "legacy-choice-scene": { flash: { choice: "anim.highOnset" } } }));
+    fake.setItem("vibe.drives", JSON.stringify({ "legacy-choice-scene": { flash: { choice: "anim.hats" } } }));
     (globalThis as { localStorage?: unknown }).localStorage = fake;
 
     vi.resetModules();
     const fresh = await import("../src/render/driveStore.ts");
 
-    expect(fresh.getDriveSetting("legacy-choice-scene", FLASH)).toEqual(driveSettingFromChoice("anim.highOnset"));
+    expect(fresh.getDriveSetting("legacy-choice-scene", FLASH)).toEqual(driveSettingFromChoice("anim.hats"));
 
     // A fresh write supersedes the legacy field — it never reappears once
     // `patch` exists.
@@ -607,6 +630,35 @@ describe("driveStore with a stubbed localStorage", () => {
     const persisted = JSON.parse(fake.raw.get("vibe.drives") ?? "{}");
     expect(persisted["legacy-choice-scene"].flash.choice).toBeUndefined();
     expect(persisted["legacy-choice-scene"].flash.patch).toBe("anim.mid");
+  });
+
+  it("stored wires on a retired signal id load as the instrument that replaced it", async () => {
+    const spec = (key: string): SceneSetting => ({ key, label: key, min: 0, max: 1, step: 0.05, default: 0, drive: { default: "scene" } });
+    const fake = makeFakeLocalStorage();
+    fake.setItem(
+      "vibe.drives",
+      JSON.stringify({
+        "retired-scene": {
+          a: { choice: "anim.lowOnset" },
+          b: { patch: "anim.midOnset" },
+          c: { patch: { m: "add", s: [{ c: "anim.highOnset" }, { c: "anim.kickBand", w: 0.5 }] } },
+        },
+      }),
+    );
+    (globalThis as { localStorage?: unknown }).localStorage = fake;
+
+    vi.resetModules();
+    const fresh = await import("../src/render/driveStore.ts");
+
+    expect(fresh.getDriveSetting("retired-scene", spec("a"))).toEqual(driveSettingFromChoice("anim.kickOnset"));
+    expect(fresh.getDriveSetting("retired-scene", spec("b"))).toEqual(driveSettingFromChoice("anim.chordOnset"));
+    expect(fresh.getDriveSetting("retired-scene", spec("c"))).toEqual({
+      mix: "add",
+      sources: [
+        { choice: "anim.hats", weight: 1 },
+        { choice: "anim.kickLevel", weight: 0.5 },
+      ],
+    });
   });
 
   it("a garbage stored line falls back to the undrawn default", async () => {

@@ -14,8 +14,8 @@
 // changing the grid mid-track (the first grid tick after a change is just
 // the next boundary crossed).
 //
-// Band edges (lowOnset/midOnset/highOnset) are deliberately not gridded —
-// they *are* hits by definition (a low onset is a kick), and a scene reads
+// The instrument hits (the song layer's Kick, Clap, Hats and Chord) are deliberately not gridded —
+// they *are* hits by definition, and a scene reads
 // them for that.
 //
 // This module's own fallback is deliberate, not a gap to close: "the

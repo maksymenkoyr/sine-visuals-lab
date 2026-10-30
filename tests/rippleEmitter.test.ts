@@ -17,7 +17,7 @@ import {
 } from "../src/render/scenes/rippleEmitter.ts";
 import { advanceStandoutAmount, createStandoutState } from "../src/render/standout.ts";
 
-// anim.beatPulse/lowPulse's own real shape (animClock.ts's BEAT_PULSE_DECAY_PER_SEC):
+// anim.beatPulse/song.kickPulse's own real shape (animClock.ts's BEAT_PULSE_DECAY_PER_SEC):
 // a step to 1 in a single tick, then exponential decay at 6/sec.
 const BEAT_PULSE_DECAY = 6;
 const DT = 1 / 60;

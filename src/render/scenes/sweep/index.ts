@@ -20,7 +20,7 @@
 //   absolute loudness, 0 in a silent room, where the auto-gained levels lift
 //   mic hiss): no signal, no movement.
 // - Colour flow scrolls the palette through the stack by the same Level.
-// - Morph moves every copy on through the shapes by Bass hit's decaying
+// - Morph moves every copy on through the shapes by Kick's decaying
 //   pulse, so each kick pushes the shapes on and they coast between kicks.
 // - New path re-rolls the path on the beat grid's coarsest stop, counting
 //   NEW_PATH_GRID_DIVISOR ticks per path in JS (beatGrid.ts has no phrase
@@ -60,8 +60,8 @@ const SPEED_GAIN = 0.4;
 /** Palette cycles per second at Colour flow 1 with its drive reading 1. */
 const FLOW_GAIN = 0.5;
 
-/** Shapes per second at Morph 1 with its drive reading 1: Bass hit's own
- *  pulse decay rate, so one full-height bass hit integrates to one shape. */
+/** Shapes per second at Morph 1 with its drive reading 1: Kick's own
+ *  pulse decay rate, so one full-height kick integrates to one shape. */
 const MORPH_GAIN = GROUP_TUNING.low.pulseDecayRate;
 
 /** Two-bar grid ticks per path at New path's default amount: a phrase. */
@@ -143,7 +143,7 @@ const base = createFullscreenScene(card.id, card.name, SWEEP_FRAG_BODY, {
     progress += SPEED_GAIN * get("speed") * clamp01(drives.value("speed", frame.level, 0)) * dt;
     phase += FLOW_GAIN * get("colourFlow") * clamp01(drives.value("colourFlow", frame.level, 0)) * dt;
     phase -= Math.floor(phase);
-    morphPhase += MORPH_GAIN * get("morph") * clamp01(drives.value("morph", anim.lowPulse, 0)) * dt;
+    morphPhase += MORPH_GAIN * get("morph") * clamp01(drives.value("morph", anim.song.kickPulse, 0)) * dt;
     morphPhase %= SHAPES.length;
 
     const k: Knobs = {

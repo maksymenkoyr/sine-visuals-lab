@@ -110,7 +110,7 @@ const ID = card.id;
 export interface EmitterInputs {
   flowPhase: number;
   energy: number;
-  lowPulse: number;
+  kickPulse: number;
   beatPulse: number;
   emitStrength: number;
   beatKick: number;
@@ -192,7 +192,7 @@ export function createPuffState(): PuffState {
 }
 
 /** Advances the puff clock in place by one frame and returns whether a puff
- *  fired this frame. `fired` is the caller's onset edge (anim.lowOnset ||
+ *  fired this frame. `fired` is the caller's onset edge (anim.song.kickOnset ||
  *  anim.onset). Firing order: PUFF_TRIGGER === "beatPhase" and tempo-locked
  *  fires on the beatPhase wrap; otherwise (or as a fallback when tempo isn't
  *  locked) an onset edge fires; failing both, a silence fallback fires once
@@ -433,7 +433,7 @@ export function emitterState(inp: EmitterInputs, out: Splat[]): Splat[] {
   const force =
     emitterPushScale(inp.mirror) *
     (inp.emitStrength * (EMIT_FORCE_BASE + EMIT_FORCE_ENERGY * inp.energy) +
-      inp.beatKick * (EMIT_KICK_LOW * inp.lowPulse + EMIT_KICK_BEAT * inp.beatPulse) +
+      inp.beatKick * (EMIT_KICK_LOW * inp.kickPulse + EMIT_KICK_BEAT * inp.beatPulse) +
       inp.beatKick * (PUFF_FORCE * inp.puff + DROP_FORCE * inp.dropPulse));
   const dye = inp.dyeFlow * (DYE_BASE_CONT + DYE_ENERGY_CONT * inp.energy + PUFF_DYE * inp.puff * (0.5 + inp.beatKick));
 
@@ -989,7 +989,7 @@ void main() {
   // Treble drive: how hard hats/cymbals are hitting right now, feeding both
   // the plain line-gain boost (Glow) and the spark mask's threshold
   // (Currents / Grain).
-  float treble = clamp(0.2 + 0.5 * uHigh + 0.7 * uHighPulse, 0.0, 1.5);
+  float treble = clamp(0.2 + 0.5 * uHigh + 0.7 * uHatPulse, 0.0, 1.5);
   int sparkleStyleI = int(uSparkleStyle + 0.5);
 
   float sparkle = 1.0;
@@ -1121,7 +1121,7 @@ void main() {
   // Top-bottom's two emitter copies share the folded uvEmit (see the
   // shockwave above).
   vec2 d = (uvEmit - uEmitScreen) * vec2(uDomainAspect, 1.0);
-  col += NEON_PURPLE * exp(-dot(d, d) / (${EMIT_BLOB_RADIUS.toFixed(3)} * ${EMIT_BLOB_RADIUS.toFixed(3)})) * (${EMIT_BLOB_BASE.toFixed(2)} + ${EMIT_BLOB_PULSE.toFixed(2)} * uLowPulse);
+  col += NEON_PURPLE * exp(-dot(d, d) / (${EMIT_BLOB_RADIUS.toFixed(3)} * ${EMIT_BLOB_RADIUS.toFixed(3)})) * (${EMIT_BLOB_BASE.toFixed(2)} + ${EMIT_BLOB_PULSE.toFixed(2)} * uKickPulse);
 
   // Hue-preserving tone map (Look group): the old per-channel
   // 1.0 - exp(-col) desaturates a bright pixel toward white on its own;
@@ -1264,14 +1264,14 @@ function createFluidScene(): Scene {
       // unused here.
       // Bass onsets only: the broadband onset stream fires on every hi-hat
       // with real music and turned the plume into a strobe.
-      advancePuff(puff, dt, anim.lowOnset, anim.beatPhase, anim.tempoLock, anim.flowPhase);
+      advancePuff(puff, dt, anim.song.kickOnset, anim.beatPhase, anim.tempoLock, anim.flowPhase);
       const puffVal = puffEnv(puff.age);
 
       emitterState(
         {
           flowPhase: anim.flowPhase,
           energy: frame.energy,
-          lowPulse: anim.lowPulse,
+          kickPulse: anim.song.kickPulse,
           beatPulse: anim.beatPulse,
           emitStrength,
           beatKick,
@@ -1312,13 +1312,13 @@ function createFluidScene(): Scene {
           count = BOLT_DROP_COUNT;
           amp = BOLT_DROP_AMP;
           strobeAmp = 1;
-        } else if (lightning && anim.highOnset && anim.highPulse > 0.35) {
+        } else if (lightning && anim.song.hatOnset && anim.song.hatPulse > 0.35) {
           // One bolt per hit at the default Sparkle, a second one at the top
           // of the range — each is multiplied by the fold's copies, and a
           // screen of a dozen bolts stops reading as a strike.
           count = 1 + Math.round(Math.max(0, sparkle - 0.5) * 2);
-          amp = (0.6 + 0.6 * anim.highPulse) * (0.5 + sparkle);
-          strobeAmp = 0.5 + 0.5 * anim.highPulse;
+          amp = (0.6 + 0.6 * anim.song.hatPulse) * (0.5 + sparkle);
+          strobeAmp = 0.5 + 0.5 * anim.song.hatPulse;
         }
         if (count > 0) {
           const len = BOLT_LEN_MIN + (BOLT_LEN_MAX - BOLT_LEN_MIN) * sparkleSize;
@@ -1378,7 +1378,7 @@ function createFluidScene(): Scene {
       // rather than through uploadCommonUniforms.
       advanceShocks(shock, dt);
       if (anim.dropOnset) triggerShock(shock, 1.6);
-      else if (anim.lowOnset) triggerShock(shock, 0.4 + 0.6 * anim.low);
+      else if (anim.song.kickOnset) triggerShock(shock, 0.4 + 0.6 * anim.low);
       displayProg.setFv("uShockAge", shock.age);
       displayProg.setFv("uShockAmp", shock.amp);
 

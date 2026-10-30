@@ -363,9 +363,9 @@ function createTangleScene(): Scene {
 
       // Edges are consumed once a render, not once a step; the pull they
       // ask for runs over the next INFLATE_STEPS steps.
-      const inflateFired = drives.fired("inflate", anim.lowOnset);
+      const inflateFired = drives.fired("inflate", anim.song.kickOnset);
       if (inflate > 0.02 && inflateFired) {
-        const pullHome = clamp01(inflate * drives.value("inflate", anim.lowPulse) * drives.hitSize("inflate"));
+        const pullHome = clamp01(inflate * drives.value("inflate", anim.song.kickPulse) * drives.hitSize("inflate"));
         startGlide(glide, pullHome, INFLATE_STEPS);
         crinkle = Math.max(crinkle, clamp01(pullHome * CRINKLE_PER_PULL));
       }

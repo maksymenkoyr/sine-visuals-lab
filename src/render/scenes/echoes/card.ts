@@ -127,7 +127,7 @@ export const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.15,
-    drive: { default: "anim.lowOnset" },
+    drive: { default: "anim.kickOnset" },
   },
   {
     key: "shock",
@@ -138,7 +138,7 @@ export const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.5,
-    drive: { default: "anim.lowOnset", hit: { reactionLabel: "ring" } },
+    drive: { default: "anim.kickOnset", hit: { reactionLabel: "ring" } },
   },
   {
     key: "spin",

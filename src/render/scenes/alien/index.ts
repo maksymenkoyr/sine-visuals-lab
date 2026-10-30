@@ -7,10 +7,10 @@
  *   - Dance cut: a dance repeats until its wire (Drop by default) makes a
  *     climb that stands out from its everyday ones (the dotted line on its
  *     graph, src/render/standout.ts), then the scene cuts to another dance,
- *     through its own camera; Camera cut does the same on its own wire (Bass
- *     hit by default) but changes only the camera. Shortest dance and
+ *     through its own camera; Camera cut does the same on its own wire
+ *     (Kick by default) but changes only the camera. Shortest dance and
  *     Shortest view are how long each must stay on screen first;
- *   - Bounce: its wire (Bass hit by default) squashes the alien toward the
+ *   - Bounce: its wire (Kick by default) squashes the alien toward the
  *     floor under him and springs him back, on top of the dance (MESH_VERT
  *     in glsl.ts); Bounce smoothness turns that spring from a snap and a
  *     wobble into an ease and a glide;
@@ -192,7 +192,7 @@ export const alienScene: Scene = (() => {
       last.speed = speed;
       last.rate = speed < HELD_BELOW ? 0 : Math.min(MAX_RATE, speed);
       last.cutSignal = drives.value("cut", anim.dropPulse, 0);
-      last.cameraSignal = drives.value("cameraCut", anim.lowPulse, 0);
+      last.cameraSignal = drives.value("cameraCut", anim.song.kickPulse, 0);
       const heldDance = chipLoop(get("dance"));
       if (heldDance !== null) showLoop(reel, heldDance);
       const heldView = chipView(get("view"));
@@ -224,7 +224,7 @@ export const alienScene: Scene = (() => {
         { lines: standoutLine(reel.cameraCut.detector, "reach to cut"), reactionLabel: "cut" },
         cut === "camera" ? 1 : 0,
       );
-      const hit = Math.max(0, Math.min(1, drives.value("bounce", anim.lowPulse, 0)));
+      const hit = Math.max(0, Math.min(1, drives.value("bounce", anim.song.kickPulse, 0)));
       stepBounce(bounce, get("bounce") * BOUNCE_MAX * hit, dt, get("bounceSmooth"));
       last.squash = Math.max(-SQUASH_LIMIT, Math.min(SQUASH_LIMIT, bounce.squash));
 

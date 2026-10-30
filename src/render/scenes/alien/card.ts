@@ -34,7 +34,7 @@ export const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.5,
-    drive: { default: "anim.lowOnset" },
+    drive: { default: "anim.kickOnset" },
   },
   {
     key: "bounceSmooth",
@@ -130,7 +130,7 @@ export const SETTINGS: SceneSetting[] = [
     step: 1,
     default: 1,
     drive: {
-      default: "anim.lowOnset",
+      default: "anim.kickOnset",
       hit: { ownDetector: true, flatOnly: "A cut either happens or it doesn't, so it can't be sized." },
       threshold: {
         default: STANDOUT_THRESHOLD_DEFAULT,

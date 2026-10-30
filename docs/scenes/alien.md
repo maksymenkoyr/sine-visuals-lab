@@ -676,6 +676,13 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
     chip, Own, is now Any, as on the Dance row; saved looks keep it, since
     they store the chip's place. Any scene's chip row can do the same
     (`onScreen`, Where the code is).
+- 2026-10-30, #802: Bounce's wire moved from the bass hit to the Kick.
+  On 11-04, rebased onto #805, Camera cut's default wire moved with it.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 0.71 → 0.67, p95 1.22 → 1.24; silence
+    median 0.00 → 0.00, p95 0.00 → 0.00; hits a minute on the song 424 →
+    410, in silence 0 → 0; main's bass / mid / treble lanes 160 / 128 /
+    242 a minute against kick / clap / hats / chord 112 / 32 / 272 / 118.
 
 ## Tuning notes
 
@@ -687,9 +694,9 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   too low on fast music, the damping is the knob that matters.
 - Dance cut on Drop: every drop stands out (drops are rare, so nothing
   else on that signal teaches the floor). For regular dance changes wire it
-  to Bass hit: it cuts on a standout hit once each dance has lasted Shortest
+  to Kick: it cuts on a standout hit once each dance has lasted Shortest
   dance, and Dance cut threshold thins those out (see Measurements).
-- Camera cut on Bass hit: there are enough standout hits that Shortest view
+- Camera cut on Kick: there are enough standout hits that Shortest view
   sets the pace (a cut every 3–4 s at 3 s). Raise Camera cut threshold to cut
   only on the clearest hits, or Shortest view for longer shots.
 - Judge the look in loop 0 (`?loop=0`), whose framing is the closest to the

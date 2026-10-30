@@ -40,7 +40,7 @@ wheel over most of an hour. In development.
 - `tests/nebulaFlight.test.ts` — bounded uniforms, an orthonormal view, no
   jump at the camera's wrap, deterministic stars.
 - Drives (src/render/drives.ts): `glow` on `anim.energy`, `flare` on
-  `anim.lowOnset` (read as a level in GLSL), `surge` on
+  `anim.kickOnset` (read as a level in GLSL), `surge` on
   `anim.sectionIntensity` (read in JS through `drives.value`), `inner` on
   `anim.lead` and `tilt` on `anim.centroid` (both read in JS through
   `drives.value`), `shock` on `anim.dropOnset` and `twinkle` on `anim.hats`
@@ -323,6 +323,14 @@ from 4 s, and an in-page probe of the reactions' state over 90 s).
   the stars don't flow, so the gas slides across them. On by default at a
   gentle pace under the flight's own; my call, not yet confirmed by the
   owner.
+- 2026-10-30, #802: Flare's wire moved from the bass hit to the Kick.
+  On 11-04, rebased onto #810, Twinkle (on Hats) fires on v6's hat edge
+  too, like every Hats driver.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 5.06 → 5.04, p95 6.74 → 6.74; silence
+    median 1.97 → 1.94, p95 2.96 → 2.97; hits a minute on the song 412 →
+    418, in silence 0 → 0; main's bass / mid / treble lanes 154 / 128 /
+    244 a minute against kick / clap / hats / chord 108 / 44 / 278 / 120.
 
 - 2026-10-30 — The owner asked for new audio reactions. Four were
   prototyped in a live page running a copy of the scene's march, glare and

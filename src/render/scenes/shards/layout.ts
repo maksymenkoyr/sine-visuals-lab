@@ -349,7 +349,7 @@ export function pickCut(rng: Rng, recolour: number): CutKind {
   return pickWeighted(rng, w) as CutKind;
 }
 
-export const CUT_MODE_NAMES = ["Every beat", "Bass hit", "Bars"] as const;
+export const CUT_MODE_NAMES = ["Every beat", "Kick", "Bars"] as const;
 export const CUT_MODE = { BEAT: 0, BASS: 1, BARS: 2 } as const;
 
 /** Two cuts inside this window are one cut: the reference's only
@@ -371,7 +371,7 @@ export const CUT_LISTENER: BeatListenerSpec = {
 
 /** What the Cut mode setting listens to — "Every beat"/"Bars" both start
  *  from the broadband beat (bar falls back to it without a tempo lock — see
- *  beatListener.ts's sourceEdge); "Bass hit" listens to the low band
+ *  beatListener.ts's sourceEdge); "Kick" cuts on each kick
  *  instead, for a track whose broadband onset is too busy. */
 export function cutSource(mode: number): BeatSource {
   if (mode === CUT_MODE.BASS) return "bass";
@@ -585,7 +585,7 @@ export function advanceShards(
 
   // Between cuts: shards extend along their axis, faster on bass; the
   // camera rolls clockwise and recedes a little. Growth and recede stop at
-  // a cap, so a long cut-free stretch (silence, or Cut on = Bass hit on a
+  // a cap, so a long cut-free stretch (silence, or Cut on = Kick on a
   // track with no kick) settles into a hold instead of the cluster shrinking
   // to a speck and the blades running on for minutes. Roll is a rotation and
   // harmless, so it is left to turn.

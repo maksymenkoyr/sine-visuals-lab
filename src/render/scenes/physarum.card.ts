@@ -127,12 +127,12 @@ export const SETTINGS: SceneSetting[] = [
     default: 0.5,
     auto: { density: 0.2 },
     // Three signals across three channels (each group pulls toward its own
-    // uLow/uMid/uHigh), plus a bass-hit boost on the low group alone — see
+    // uLow/uMid/uHigh), plus a kick boost on the low group alone — see
     // the DIFFUSE_FRAG loop — so the default is Scene.
     drive: {
       default: "scene",
-      sceneLabel: "Scene: each band's own level (bass boosted on a hit)",
-      sceneSources: ["anim.low", "anim.mid", "anim.high", "anim.lowOnset"],
+      sceneLabel: "Scene: each band's own level (bass boosted on a kick)",
+      sceneSources: ["anim.low", "anim.mid", "anim.high", "anim.kickOnset"],
     },
   },
   // --- Look ---

@@ -48,9 +48,9 @@ export const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.15,
-    // Bass hits, not every onset: a DJ track fires onsets several times a
+    // Kick hits, not every onset: a DJ track fires onsets several times a
     // beat, and the lines would never get to fold (swarm measured the same).
-    drive: { default: "anim.lowOnset", hit: { reactionLabel: "inflate" } },
+    drive: { default: "anim.kickOnset", hit: { reactionLabel: "inflate" } },
   },
   {
     key: "reset",
