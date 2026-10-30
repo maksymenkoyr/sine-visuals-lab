@@ -15,6 +15,20 @@ describe("add groups", () => {
   });
 });
 
+describe("the Stems and Song groups", () => {
+  const choices = (label: string) => DRIVE_ADD_GROUPS.find((g) => g.label === label)!.choices;
+
+  it("Keys follows Lead under Levels", () => {
+    const levels = choices("Levels");
+    expect(levels.indexOf("anim.keys")).toBe(levels.indexOf("anim.lead") + 1);
+  });
+
+  it("Song opens with Playing, Section, Drop and Drop level, then the dials; Drop stays under Hits too", () => {
+    expect(choices("Song").slice(0, 4)).toEqual(["anim.playing", "anim.sectionIntensity", "anim.dropOnset", "anim.dropLevel"]);
+    expect(choices("Hits")).toContain("anim.dropOnset");
+  });
+});
+
 describe("the instruments", () => {
   it("every catalogue entry has a label, a description and a colour", () => {
     for (const id of Object.keys(SIGNALS) as (keyof typeof SIGNALS)[]) {

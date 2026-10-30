@@ -27,6 +27,10 @@
 //   not just the beat), counted every frame; kick, clap, hats and chord/min
 //   the same for each instrument's own edge (the probe's beat.hits, the song
 //   layer's edges as a scene sees them).
+// - drops/min: jumps of the probe's drop (AnimFrame.dropPulse, which is set
+//   to its peak on the tick the drop edge fires and only decays after) by
+//   more than DROP_JUMP in one frame. A decay never rises, so a slow frame
+//   rate can't miss the edge or count it twice.
 // - energy: mean of the probe's bands.energy, to confirm the song arrived.
 // Thresholds differ per scene, so nothing passes or fails here: on silence,
 // any change should be motion the scene has by design, and no hit should
@@ -41,6 +45,7 @@ import { join } from "node:path";
 import { launchWithMic, openScene } from "./ref-browser.mjs";
 
 const SAMPLE_MS = 100;
+const DROP_JUMP = 0.5;
 const THUMB_W = 64;
 const THUMB_H = 36;
 const SHEET_FRAMES = 9;
@@ -113,7 +118,7 @@ async function measure(source, file) {
   try {
     const page = await openScene(ctx, { port, scene });
     const r = await page.evaluate(
-      ({ fromMs, untilMs, sampleMs, w, h }) =>
+      ({ fromMs, untilMs, sampleMs, w, h, dropJump }) =>
         new Promise((resolve) => {
           const gl = document.getElementById("gl");
           const thumb = document.createElement("canvas");
@@ -125,6 +130,8 @@ async function measure(source, file) {
           let nextSample = fromMs;
           let hits = 0;
           let wasFired = false;
+          let drops = 0;
+          let prevDrop = 0;
           const inst = { kick: 0, clap: 0, hat: 0, chord: 0 };
           const instWas = { kick: false, clap: false, hat: false, chord: false };
           let energy = 0;
@@ -136,6 +143,8 @@ async function measure(source, file) {
               if (p) {
                 if (p.beat.fired && !wasFired) hits++;
                 wasFired = p.beat.fired;
+                if (p.drop - prevDrop > dropJump) drops++;
+                prevDrop = p.drop;
                 for (const k of Object.keys(inst)) {
                   if (p.beat.hits[k] && !instWas[k]) inst[k]++;
                   instWas[k] = p.beat.hits[k];
@@ -157,12 +166,12 @@ async function measure(source, file) {
                 nextSample = t + sampleMs;
               }
             }
-            if (t >= untilMs) resolve({ change, hits, inst, energy: energy / Math.max(1, frames), fps: frames / ((t - fromMs) / 1000) });
+            if (t >= untilMs) resolve({ change, hits, drops, inst, energy: energy / Math.max(1, frames), fps: frames / ((t - fromMs) / 1000) });
             else requestAnimationFrame(tick);
           };
           tick();
         }),
-      { fromMs: fromSec * 1000, untilMs: (fromSec + seconds) * 1000, sampleMs: SAMPLE_MS, w: THUMB_W, h: THUMB_H },
+      { fromMs: fromSec * 1000, untilMs: (fromSec + seconds) * 1000, sampleMs: SAMPLE_MS, w: THUMB_W, h: THUMB_H, dropJump: DROP_JUMP },
     );
     if (sheet) {
       const dataUrl = await page.evaluate(
@@ -176,7 +185,7 @@ async function measure(source, file) {
     const sorted = [...r.change].sort((a, b) => a - b);
     const at = (q) => sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] ?? 0;
     const perMin = (n) => (n / seconds) * 60;
-    return { source, median: at(0.5), p95: at(0.95), hitsPerMin: perMin(r.hits), inst: [r.inst.kick, r.inst.clap, r.inst.hat, r.inst.chord].map(perMin), energy: r.energy, fps: r.fps };
+    return { source, median: at(0.5), p95: at(0.95), hitsPerMin: perMin(r.hits), dropsPerMin: perMin(r.drops), inst: [r.inst.kick, r.inst.clap, r.inst.hat, r.inst.chord].map(perMin), energy: r.energy, fps: r.fps };
   } finally {
     await browser.close();
   }
@@ -184,11 +193,11 @@ async function measure(source, file) {
 
 const rows = [await measure("song", wav), await measure("silence", silentWav(fromSec + seconds + 5))];
 console.log(`\n${scene}: ${seconds} s from ${fromSec} s, change = % of full scale per ${SAMPLE_MS} ms`);
-console.log("source    change med  change p95  hits/min  kick/min  clap/min  hats/min  chord/min  energy  fps");
+console.log("source    change med  change p95  hits/min  kick/min  clap/min  hats/min  chord/min  drops/min  energy  fps");
 for (const r of rows) {
   const [kick, clap, hats, chord] = r.inst.map((n) => n.toFixed(0));
   console.log(
-    `${r.source.padEnd(9)} ${r.median.toFixed(2).padStart(10)}  ${r.p95.toFixed(2).padStart(10)}  ${r.hitsPerMin.toFixed(0).padStart(8)}  ${kick.padStart(8)}  ${clap.padStart(8)}  ${hats.padStart(8)}  ${chord.padStart(9)}  ${r.energy.toFixed(2).padStart(6)}  ${r.fps.toFixed(0).padStart(3)}`,
+    `${r.source.padEnd(9)} ${r.median.toFixed(2).padStart(10)}  ${r.p95.toFixed(2).padStart(10)}  ${r.hitsPerMin.toFixed(0).padStart(8)}  ${kick.padStart(8)}  ${clap.padStart(8)}  ${hats.padStart(8)}  ${chord.padStart(9)}  ${r.dropsPerMin.toFixed(0).padStart(9)}  ${r.energy.toFixed(2).padStart(6)}  ${r.fps.toFixed(0).padStart(3)}`,
   );
 }
 const [song, silence] = rows;
@@ -198,4 +207,5 @@ console.log(
     : `song p95 / silence p95 = ${(song.p95 / silence.p95).toFixed(1)}x`,
 );
 if (silence.hitsPerMin > 0) console.log(`WARNING: hits fired on silence (${silence.hitsPerMin.toFixed(0)}/min)`);
+if (silence.dropsPerMin > 0) console.log(`WARNING: drops fired on silence (${silence.dropsPerMin.toFixed(0)}/min)`);
 if (song.energy < 0.01) console.log("WARNING: the song's energy reads ~0 — did the mic start?");

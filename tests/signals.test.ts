@@ -44,6 +44,9 @@ describe("signals registry", () => {
       "mid",
       "high",
       "lead",
+      "keys",
+      "playing",
+      "drop",
       ...DIAL_SIGNALS,
       ...BAND_SIGNALS,
     ]);
@@ -78,6 +81,20 @@ describe("signals registry", () => {
       expect(hit.monitor).toEqual({ card: "sound", row: t.row });
       expect(level.monitor).toEqual({ card: "sound", row: t.row });
     }
+  });
+
+  it("Keys and Playing read the song layer's levels, Drop is an edge with its level on the same Song row", () => {
+    const anim = { song: { keys: 0.3, playing: 0.9, dropLevel: 0.6 }, dropPulse: 0.5, dropOnset: true } as unknown as AnimFrame;
+    expect(SIGNALS["anim.keys"].read({} as never, anim)).toBe(0.3);
+    expect(SIGNALS["anim.keys"].monitor).toEqual({ card: "stems", row: "keys" });
+    expect(SIGNALS["anim.playing"].read({} as never, anim)).toBe(0.9);
+    expect(SIGNALS["anim.playing"].monitor).toEqual({ card: "song", row: "playing" });
+    expect(SIGNALS["anim.dropOnset"].kind).toBe("edge");
+    expect(SIGNALS["anim.dropOnset"].read({} as never, anim)).toBe(0.5);
+    expect(SIGNALS["anim.dropOnset"].edge!(anim)).toBe(true);
+    expect(SIGNALS["anim.dropLevel"].read({} as never, anim)).toBe(0.6);
+    expect(SIGNALS["anim.dropOnset"].monitor).toEqual({ card: "song", row: "drop" });
+    expect(SIGNALS["anim.dropLevel"].monitor).toEqual({ card: "song", row: "drop" });
   });
 
   it("the retired band hits and Kick band are gone from the catalogue", () => {

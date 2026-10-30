@@ -163,6 +163,15 @@ and had to be re-fetched).
   to `advanceBeatSurge` by how far the hit stood out; Flat, the default, is
   unchanged.
 - 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/kaleido/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #803: the scene's drop reaction now fires when audio v6's
+  drop level crosses its mark (`DROP_MARK`, `src/render/animClock.ts`), not
+  on the Section trend's old drop detector.
+  - tune-real on a real song (around-the-world, 60 s) then silence, the
+    commit before → this change, one run each: song change median
+    19.78 → 19.73, p95 24.62 → 24.16; silence median
+    13.49 → 13.54, p95 15.56 → 15.62; hits a minute on the song
+    369 → 361, in silence 0 → 0; drops a minute on the song
+    0 → 2, in silence 0 → 0.
 
 ## Tuning notes
 

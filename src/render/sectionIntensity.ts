@@ -34,7 +34,10 @@ export interface SectionIntensity {
    *  than easing. For the meters panel's RAW chip (src/ui/audioMeters.ts). */
   readonly rawIntensity: number;
   /** One-shot edge (like FeatureFrame.onset), true only on the tick intensity
-   *  is rising fast enough to read as a drop/section change. */
+   *  is rising fast enough to read as a drop/section change. Only the song
+   *  layer's frozen v4 copy of animClock (src/audio/song/v4/app/render/) still
+   *  reads this and `dropPulse`; the app's Drop edge is animClock.ts's own, off
+   *  the song layer's drop level. */
   readonly dropOnset: boolean;
   /** Decaying [0,1] flash that jumps to 1 on dropOnset — smoother to animate
    *  against than the raw boolean, same shape as beatPulse. */

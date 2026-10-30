@@ -987,6 +987,15 @@ reference-measurement workflow used by later scenes.
   - Sparkle's Adaptive mode (`ADAPT_*` in `causticsSparkle.ts`) was tuned
     on the old treble stand-out and now reads the hats level at the edge,
     so it wants the owner's look.
+- 2026-10-30, #803: the scene's drop reaction now fires when audio v6's
+  drop level crosses its mark (`DROP_MARK`, `src/render/animClock.ts`), not
+  on the Section trend's old drop detector.
+  - tune-real on a real song (around-the-world, 60 s) then silence, the
+    commit before → this change, one run each: song change median
+    19.49 → 19.74, p95 36.92 → 36.49; silence median
+    0.74 → 0.73, p95 0.96 → 0.97; hits a minute on the song
+    360 → 362, in silence 0 → 0; drops a minute on the song
+    0 → 2, in silence 0 → 0.
 
 ## Tuning notes
 

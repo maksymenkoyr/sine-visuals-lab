@@ -114,6 +114,15 @@ frames were pulled directly with `yt-dlp` and `ffmpeg` rather than through a
     median 2.52 → 2.47, p95 6.32 → 6.15; hits a minute on the song 410 →
     406, in silence 0 → 0; main's bass / mid / treble lanes 144 / 138 /
     242 a minute against kick / clap / hats / chord 110 / 40 / 278 / 130.
+- 2026-10-30, #803: the scene's drop reaction now fires when audio v6's
+  drop level crosses its mark (`DROP_MARK`, `src/render/animClock.ts`), not
+  on the Section trend's old drop detector.
+  - tune-real on a real song (around-the-world, 60 s) then silence, the
+    commit before → this change, one run each: song change median
+    8.99 → 8.23, p95 14.10 → 15.56; silence median
+    2.92 → 2.48, p95 7.61 → 6.10; hits a minute on the song
+    366 → 356, in silence 0 → 0; drops a minute on the song
+    0 → 1, in silence 0 → 0.
 
 ## Tuning notes
 

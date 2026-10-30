@@ -1,4 +1,4 @@
-import type { AnimFrame } from "../render/animClock.ts";
+import { DROP_MARK, type AnimFrame } from "../render/animClock.ts";
 import { getTapRun } from "../render/tapTempo.ts";
 import {
   BAND_SIGNALS,
@@ -113,9 +113,11 @@ import { isBandPicked, toggleBandPick } from "./bandPicks.ts";
  *    a faint guide wherever Any fired, every track a faint line on each
  *    metronome beat, and the Surge track Onset surge's trace instead of
  *    notes. Its readouts count hits over the card's span.
- *  - Stems: Lead (stemReaders.ts) as a line row. It is measured only on the
- *    device with the mic and draws a gap where it wasn't. app.ts runs the
- *    split while this card is unfolded and on screen (stemRowsOnScreen).
+ *  - Stems: Lead (stemReaders.ts) then Keys, each a line row. Lead is
+ *    measured only on the device with the mic and draws a gap where it
+ *    wasn't; app.ts runs the split while this card is unfolded and on screen
+ *    (stemRowsOnScreen). Keys is the song layer's reading (AnimFrame.song), so
+ *    every device has it.
  *  - Beat: a welded row, Lock (how sure the tracker is of the tempo)
  *    beside the BPM block — bpm under a beat dot whose resting tint
  *    follows tempoLock, so an unlocked guess reads as
@@ -127,9 +129,12 @@ import { isBandPicked, toggleBandPick } from "./bandPicks.ts";
  *    own smooth swing, for a setting that wants to sway in time rather than
  *    pulse on a hit. The header carries tap tempo's Tap chip and how many
  *    taps it still needs (tapStatusStyle's comment).
- *  - Song: first, Section: sectionIntensity traced over the card's span
- *    (createSectionTrace), with a red mark and DROP where a drop fired, the
- *    phrase-level trend. Then one strip of every entry in MUSIC_DIALS (never a
+ *  - Song: first, Playing, a line row on the song layer's reading. Then
+ *    Section: sectionIntensity traced over the card's span
+ *    (createSectionTrace), the phrase-level trend. Then Drop (createDropTrack):
+ *    a Hits-roll instrument track on the song layer's drop level, a note where
+ *    anim.dropOnset fired and the dashed line at DROP_MARK, a constant every
+ *    device knows; its two jacks are the Drop hit and the Drop level. Then one strip of every entry in MUSIC_DIALS (never a
  *    hardcoded list, so a new dial can't ship without a cell), each a small
  *    vertical bar marking NEUTRAL with a tick (what autoTune.ts resolves every
  *    "A" chip against, otherwise invisible), its label from DIAL_LABELS, and
@@ -373,10 +378,6 @@ const TEMPO_TITLE =
 const tapStatusStyle = `font: 400 9.5px/1.2 ${FONT_MONO}; letter-spacing: 0.04em; color: rgba(255,255,255,0.7); white-space: nowrap;`;
 const tapRightStyle = `display: flex; align-items: center; gap: 8px;`;
 const SECTION_TRACE_HEIGHT_CSS_PX = 34;
-const DROP_MARK_COLOR = HOT_RED;
-const DROP_LABEL_FONT = `9px ${FONT_MONO}`;
-// Room the DROP label needs before the right edge, so a drop at "now" stays readable.
-const DROP_LABEL_PX = 24;
 const DIAL_BAR_HEIGHT_CSS_PX = 44;
 const DIAL_BAR_WIDTH_CSS_PX = 10;
 const SOUND_SPECTRUM_HEIGHT_CSS_PX = 30;
@@ -1461,6 +1462,45 @@ function createHitsRoll(getSilenceGate: () => SilenceGateMarks, getMarks: () => 
   };
 }
 
+// The Song card's Drop track: the Hits roll's instrument track on the drop
+// level. Its firing mark is DROP_MARK, a constant, so unlike the Hits roll's it
+// shows on every device.
+const DROP_TRACK: HitTrackSpec = { name: "Drop", choice: "anim.dropOnset", row: "drop", lane: "song", level: "anim.dropLevel" };
+
+function createDropTrack(mountJack: MountJack, span: TraceSpan) {
+  // Index 1 for the background: the Section row above it is the plain one.
+  const t = createHitTrack(DROP_TRACK, 1, mountJack, span);
+  t.setHint(songTrackHint(t, 0, span.sec(), null, DROP_MARK));
+  return {
+    el: t.el,
+    /** The strip under the lane where the caller puts the signal's heat. */
+    floor: t.floor,
+    /** Every tick, on screen or not. */
+    record(frame: FeatureFrame | null, anim: AnimFrame | null, nowMs: number): void {
+      if (!anim) {
+        t.push(null, null, null, null, null, nowMs);
+        return;
+      }
+      const fired = anim.dropOnset;
+      const level = frame ? SIGNALS["anim.dropLevel"].read(frame, anim) : null;
+      t.push(fired ? CODE_OF_VERDICT.fired : CODE_OF_VERDICT.miss, fired ? level : null, null, null, level, nowMs);
+      if (fired) {
+        t.counted.add(nowMs);
+        t.lastFireMs = nowMs;
+        t.lastStandout = level;
+      }
+    },
+    /** Only while Song is unfolded and on screen, after record(). */
+    render(frame: FeatureFrame | null, anim: AnimFrame | null, nowMs: number, text: boolean): void {
+      drawHitTrack(t, nowMs, DROP_MARK);
+      if (!text) return;
+      const sec = span.sec();
+      t.setReadout(String(t.counted.countSince(nowMs, sec)), { unit: `/${formatHistorySpan(sec)}` });
+      t.setHint(songTrackHint(t, nowMs, sec, frame && anim ? SIGNALS["anim.dropLevel"].read(frame, anim) : null, DROP_MARK));
+    },
+  };
+}
+
 // The Beat card's bar ruler: one cell per beat of the metronome's bar, the
 // current one lit and fading over its beat, the downbeat in the Wave row's
 // bar colour (both metronome jacks are white), and a playhead at the exact
@@ -1520,20 +1560,16 @@ function createBarRuler() {
   };
 }
 
-// The Song card's Section row: sectionIntensity traced over the card's span,
-// with a red mark and DROP where anim.dropOnset fired. The drop is its own
-// series, recorded as 1 on the tick it fires: the column store's max-hold
-// keeps a one-tick edge visible at any span.
+// The Song card's Section row: sectionIntensity traced over the card's span.
 function createSectionTrace(span: TraceSpan) {
   const row = createMeterRow({
     label: "Section",
     accent: driveSourceColor("anim.sectionIntensity"),
     unit: "%",
-    description: "How intense this part of the track is against the last while, traced over the card's span. A red mark with DROP is where a drop landed.",
-    hintColors: { red: DROP_MARK_COLOR },
+    description: "How intense this part of the track is against the last while, traced over the card's span.",
   });
   const h = SECTION_TRACE_HEIGHT_CSS_PX;
-  const ring = createColumnRing(2, h, "History of Section, with a mark at each drop", span.sec, span.max);
+  const ring = createColumnRing(1, h, "History of Section", span.sec, span.max);
   row.el.children[1].replaceWith(ring.canvas);
   const { ctx } = ring;
   const color = driveSourceColor("anim.sectionIntensity");
@@ -1541,10 +1577,10 @@ function createSectionTrace(span: TraceSpan) {
 
   return {
     el: row.el,
-    /** The anim.sectionIntensity and anim.dropOnset jacks mount here. */
+    /** The anim.sectionIntensity jack mounts here. */
     right: row.right,
     setReadout: row.setReadout,
-    /** [Section, 1 on a drop tick else 0]; null for no reading. */
+    /** [Section]; null for no reading. */
     push: ring.push,
     /** Only while on screen. */
     draw(): void {
@@ -1554,19 +1590,6 @@ function createSectionTrace(span: TraceSpan) {
       ctx.clearRect(0, 0, w, h);
       ctx.fillStyle = "rgba(255,255,255,0.18)";
       ctx.fillRect(0, h - 1, w, 1);
-      ctx.fillStyle = DROP_MARK_COLOR;
-      ctx.font = DROP_LABEL_FONT;
-      ctx.textBaseline = "top";
-      let prevDrop = false;
-      for (let x = 0; x <= len; x++) {
-        const isDrop = (x === len ? ring.live(1) : ring.at(x, 1)) >= 1;
-        if (isDrop) {
-          const px = x === len ? w - 1 : x;
-          ctx.fillRect(px - 1, 0, 2, h);
-          if (!prevDrop) ctx.fillText("DROP", Math.min(px + 3, w - DROP_LABEL_PX), 1);
-        }
-        prevDrop = isDrop;
-      }
       ctx.strokeStyle = color;
       ctx.lineWidth = 1.5;
       ctx.beginPath();
@@ -1836,7 +1859,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   });
   soundCard.body.append(soundSpectrum.el, soundBass.el, soundMid.el, soundTreble.el, bandsLabel, bandsBlock, soundLevel.el, hitsRoll.el);
 
-  // ---- Stems: Lead ----
+  // ---- Stems: Lead, Keys ----
   const stemLead = lineRow({
     label: driveSourceLabel("anim.lead"),
     description: capitalise(driveSourceDescription("anim.lead")),
@@ -1844,16 +1867,27 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     span: stemsSpan,
   });
   const stemRows: readonly { row: LineRow; id: SignalId }[] = [{ row: stemLead, id: "anim.lead" }];
+  // Rows on the song layer's readings: every device has them, so no gap where
+  // the stem split isn't running.
+  const songLevelRow = (id: SignalId, span: TraceSpan): LineRow =>
+    lineRow({ label: driveSourceLabel(id), description: capitalise(driveSourceDescription(id)), choice: id, span });
+  const stemKeys = songLevelRow("anim.keys", stemsSpan);
+  const songPlaying = songLevelRow("anim.playing", songSpan);
+  const songLevelRows: readonly { row: LineRow; id: SignalId }[] = [
+    { row: stemKeys, id: "anim.keys" },
+    { row: songPlaying, id: "anim.playing" },
+  ];
   const stemsCard = createCard({
     title: "Stems",
     accent: STEM_LEAD,
     foldId: "stems",
     right: createSpanChip("stems", () => {}),
   });
-  stemsCard.body.append(stemLead.el);
+  stemsCard.body.append(stemLead.el, stemKeys.el);
   // Preallocated: update() records every tick.
   const soundLevelVals: (number | null)[] = [null, null];
   const oneVal: (number | null)[] = [null];
+  const sectionVal: (number | null)[] = [null];
 
   // ---- Beat ----
   const tempo = createTempoBlock(NEUTRAL_ACCENT);
@@ -1931,7 +1965,8 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   // ---- Song ----
   const section = createSectionTrace(songSpan);
   mountJack("anim.sectionIntensity", section.right, section.el);
-  mountJack("anim.dropOnset", section.right, section.el);
+  const dropTrack = createDropTrack(mountJack, songSpan);
+  heatFloorHosts.set(dropTrack.el, dropTrack.floor);
   // Every MUSIC_DIALS entry, so a new dial gets a cell by construction.
   const dialCells = MUSIC_DIALS.map((dial) => ({ dial, cell: createDialCell(dial) }));
   const dialStrip = document.createElement("div");
@@ -1947,7 +1982,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     foldId: "song",
     right: createSpanChip("song", () => {}),
   });
-  songCard.body.append(section.el, spacer(), dialStrip);
+  songCard.body.append(songPlaying.el, section.el, dropTrack.el, spacer(), dialStrip);
 
   // The Heat history card (heat.ts): a strip per wired setting and per signal
   // jack, one cell per second over this card's span. Folded by default.
@@ -2120,7 +2155,9 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     song: songCard.el,
   };
   const rowElements = new Map<MeterRowId, HTMLElement>([
+    ["playing", songPlaying.el],
     ["section", section.el],
+    ["drop", dropTrack.el],
     ["tempo", tempo.el],
     ...hitsRoll.tracks.map((t): [MeterRowId, HTMLElement] => [t.spec.row, t.el]),
     ...dialCells.map(({ dial, cell }): [MeterRowId, HTMLElement] => [dialSignalId(dial), cell.el]),
@@ -2132,6 +2169,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     ["mid", soundMid.el],
     ["high", soundTreble.el],
     ["lead", stemLead.el],
+    ["keys", stemKeys.el],
     ...bandRows.map(({ id, row }): [MeterRowId, HTMLElement] => [id, row.el]),
   ]);
 
@@ -2211,7 +2249,9 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
           : [null, null],
         nowMs,
       );
-      section.push(anim ? [raw ? anim.raw.sectionIntensity : anim.sectionIntensity, anim.dropOnset ? 1 : 0] : [null, null], nowMs);
+      dropTrack.record(frame, anim, nowMs);
+      sectionVal[0] = anim ? (raw ? anim.raw.sectionIntensity : anim.sectionIntensity) : null;
+      section.push(sectionVal, nowMs);
       if (frame && anim) {
         const recordSec = nowMs / 1000;
         const stemsOff = !deps.stemsMeasured();
@@ -2233,6 +2273,10 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
           oneVal[0] = stemsOff ? null : SIGNALS[id].read(frame, anim);
           row.push(oneVal, nowMs);
         }
+        for (const { row, id } of songLevelRows) {
+          oneVal[0] = SIGNALS[id].read(frame, anim);
+          row.push(oneVal, nowMs);
+        }
         for (let i = 0; i < heatIds.length; i++) {
           const x = SIGNALS[heatIds[i]!].read(frame, anim);
           heatLive[i] = x;
@@ -2245,6 +2289,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         for (const { row } of soundRows) row.push(oneVal, nowMs);
         for (const { row } of bandRows) row.push(oneVal, nowMs);
         for (const { row } of stemRows) row.push(oneVal, nowMs);
+        for (const { row } of songLevelRows) row.push(oneVal, nowMs);
       }
       soundLevel.push(soundLevelVals, nowMs);
       if (anim?.metronomeBeat) beatAtMs = nowMs;
@@ -2336,15 +2381,18 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         }
       }
 
-      // ---- Stems: Lead ----
+      // ---- Stems: Lead, Keys ----
       if (!stemsCard.fold?.isFolded() && stemsOnScreen()) {
         for (const { row } of stemRows) row.draw();
+        stemKeys.draw();
         if (text) {
           const measured = deps.stemsMeasured();
           for (const { row, id } of stemRows) {
             const v = frame && anim && measured ? SIGNALS[id].read(frame, anim) : null;
             row.setReadout(v === null ? "--" : pct(v), v === null ? IDLE : {});
           }
+          const keys = frame && anim ? SIGNALS["anim.keys"].read(frame, anim) : null;
+          stemKeys.setReadout(keys === null ? "--" : pct(keys), keys === null ? IDLE : {});
         }
       }
 
@@ -2387,6 +2435,12 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
           section.setReadout(v === null ? "--" : pct(v), v === null ? IDLE : {});
         }
         section.draw();
+        songPlaying.draw();
+        dropTrack.render(frame, anim, nowMs, text);
+        if (text) {
+          const playing = frame && anim ? SIGNALS["anim.playing"].read(frame, anim) : null;
+          songPlaying.setReadout(playing === null ? "--" : pct(playing), playing === null ? IDLE : {});
+        }
         for (const { dial, cell } of dialCells) cell.setValue(anim ? (raw ? anim.raw.profile[dial] : anim.profile[dial]) : null);
       }
     },
