@@ -9,6 +9,7 @@ import {
 } from "../src/net/outputSync.ts";
 import { applySyncedStorage, captureSyncedStorage, registerSyncedStore } from "../src/net/syncedStores.ts";
 import { engineReading } from "./engineReading.ts";
+import { songFrame } from "./songFrame.ts";
 
 const params = { sens: 1, exp: 1, smoothing: 1 };
 const state = (scene: string, storage: Record<string, string> = {}, palette = "neon"): OutputState => ({
@@ -265,6 +266,7 @@ const frame = (over: Partial<WireFrame> = {}): WireFrame => ({
   bpm: 0,
   onsetPhase: 0,
   engine: null,
+  song: null,
   ...over,
 });
 
@@ -296,6 +298,22 @@ describe("createFrameInbox", () => {
     expect(out.engine!.hitLevel).toBe(0.6);
     i.push(frame({ level: 0.05, engine: engineReading() }), 10);
     expect(i.take()!.engine!.hitLevel).toBeUndefined();
+  });
+
+  it("keeps a song edge that lands between two output ticks, and fires it once", () => {
+    const i = createFrameInbox();
+    i.push(frame({ song: songFrame({ chord: true, keys: 0.9 }) }), 0);
+    i.push(frame({ song: songFrame({ hat: true, keys: 0.4 }) }), 5);
+    const first = i.take()!.song!;
+    expect(first).toMatchObject({ chord: true, hat: true, kick: false, keys: 0.4 });
+    i.push(frame({ song: songFrame({ keys: 0.4 }) }), 10);
+    expect(i.take()!.song).toMatchObject({ chord: false, hat: false });
+  });
+
+  it("passes on a frame with no song as none", () => {
+    const i = createFrameInbox();
+    i.push(frame(), 0);
+    expect(i.take()!.song).toBeNull();
   });
 
   it("holds the last params across frames that omit them", () => {

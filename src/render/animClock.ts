@@ -1,4 +1,4 @@
-import { type FeatureFrame } from "../audio/types.ts";
+import { type FeatureFrame, SONG_LEVELS } from "../audio/types.ts";
 import type { OnsetDiag } from "../audio/onsetDiag.ts";
 import { createFlowClock, type FlowClock } from "./flowClock.ts";
 import { BeatClock } from "../audio/engine/clock.ts";
@@ -30,6 +30,42 @@ import { hitStrength, pulseDecayScales, UNIT_TAILS, type HitShape, type HitParts
 // solo capture's AudioContext times both work. Lock (`tempoLock`) is one of
 // lockMeaning.ts's meanings, picked per clock. metronome.ts sits on top of the
 // beat clock, advanced right after it off its bpm/beats and Lock.
+/**
+ * FeatureFrame.song as a scene reads it (audio v6, #798). One object per clock,
+ * mutated in place each tick, so a reader that wants a past value copies it.
+ * The levels ease like `hats` and `lead` but without the silence gate's
+ * dimmer: the song layer's figures (#798) were measured undimmed, and its
+ * edges carry their own gates. Each pulse is 1 on its edge, then
+ * decays as the matching lane's pulse does in bandEnergy.ts. With no song
+ * reading, no edge fires and every level eases down to 0.
+ */
+export interface AnimSong {
+  /** True only on the tick the song layer fired the edge. */
+  kickOnset: boolean;
+  clapOnset: boolean;
+  hatOnset: boolean;
+  chordOnset: boolean;
+  /** Decays as the Bass lane's pulse. */
+  kickPulse: number;
+  /** Decays as the Mid lane's pulse; so does `chordPulse`. */
+  clapPulse: number;
+  /** Decays as the Treble lane's pulse. */
+  hatPulse: number;
+  chordPulse: number;
+  clapLevel: number;
+  hatLevel: number;
+  chordLevel: number;
+  keys: number;
+  loudness: number;
+  dropLevel: number;
+  playing: number;
+}
+
+/** A pulse after `dtSec` of the decay bandEnergy.ts gives the lane's own pulse. */
+function decayLanePulse(pulse: number, lane: "low" | "mid" | "high", dtSec: number, rateScale: number, tails: HitTails): number {
+  return pulse * Math.exp(-dtSec * GROUP_TUNING[lane].pulseDecayRate * rateScale * tails[lane]);
+}
+
 export interface AnimFrame {
   dtSec: number;
   timeSec: number;
@@ -107,6 +143,8 @@ export interface AnimFrame {
   hatsPulse: number;
   hatsHit: number;
   hatsPeak: number;
+  /** The song layer's edges, pulses and levels; see AnimSong. */
+  song: AnimSong;
   /** One-shot edges, true only on the tick each group's onset fired. JS-side
    *  only (not uploaded as uniforms) — for scenes that want to trigger a
    *  discrete JS-side effect (e.g. a ripple) rather than read a continuous
@@ -321,6 +359,23 @@ export function createAnimClock(opts: { lockMeaning?: LockMeaning } = {}): AnimC
   let hatsPulse = 0;
   let hatsHit = 0;
   let lead = 0;
+  const song: AnimSong = {
+    kickOnset: false,
+    clapOnset: false,
+    hatOnset: false,
+    chordOnset: false,
+    kickPulse: 0,
+    clapPulse: 0,
+    hatPulse: 0,
+    chordPulse: 0,
+    clapLevel: 0,
+    hatLevel: 0,
+    chordLevel: 0,
+    keys: 0,
+    loudness: 0,
+    dropLevel: 0,
+    playing: 0,
+  };
   let metronomePulse = 0;
   let metronomeBarPulse = 0;
   // The "Any hit" lane's last graded hit — mutated in place by
@@ -363,6 +418,16 @@ export function createAnimClock(opts: { lockMeaning?: LockMeaning } = {}): AnimC
         hatsHit = hatsPeak;
       }
       lead = slewLevel(lead, frame.lead * dimmer, dtSec, rateScale);
+      const heard = frame.song;
+      song.kickOnset = !!heard?.kick;
+      song.clapOnset = !!heard?.clap;
+      song.hatOnset = !!heard?.hat;
+      song.chordOnset = !!heard?.chord;
+      song.kickPulse = song.kickOnset ? 1 : decayLanePulse(song.kickPulse, "low", dtSec, rateScale, hitTail);
+      song.clapPulse = song.clapOnset ? 1 : decayLanePulse(song.clapPulse, "mid", dtSec, rateScale, hitTail);
+      song.hatPulse = song.hatOnset ? 1 : decayLanePulse(song.hatPulse, "high", dtSec, rateScale, hitTail);
+      song.chordPulse = song.chordOnset ? 1 : decayLanePulse(song.chordPulse, "mid", dtSec, rateScale, hitTail);
+      for (const key of SONG_LEVELS) song[key] = slewLevel(song[key], heard ? heard[key] : 0, dtSec, rateScale);
       const beatRatio = frame.engine?.surge ?? 0;
       // Tap tempo (tapTempo.ts's header). The seed lands before either
       // clock advances, so its phase is the tapped beat's at the previous
@@ -460,6 +525,7 @@ export function createAnimClock(opts: { lockMeaning?: LockMeaning } = {}): AnimC
         hatsPulse,
         hatsHit,
         hatsPeak,
+        song,
         lowOnset: bandEnergy.lowOnset,
         midOnset: bandEnergy.midOnset,
         highOnset: bandEnergy.highOnset,

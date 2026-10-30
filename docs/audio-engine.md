@@ -326,6 +326,17 @@ same levels, hits and beat from the reading its frames carry.
    rooms. The pop-out's inbox (`src/net/outputSync.ts`) keeps the same level for
    the hits it latches.
 
+The song layer's reading (audio v6, #798; `SongFrame` in `src/audio/types.ts`)
+rides the same road in a song tail after the engine tail (`SONG_FRAME_BYTES` in
+`src/net/protocol.ts`): four edges (kick, clap, hat, chord) and a handful of
+levels. The device that hears the music fills it; nothing does yet, so frames go
+out without the tail and followers read `song` as null. Its edges are latched
+like the engine's hits: `WireDecimator` ORs them across skipped ticks,
+`JitterBuffer` queues each edge and hands it out once when it comes due, and the
+pop-out's inbox keeps it until a render takes it. `animClock` eases the levels
+and turns the edges into `AnimFrame.song`, and `renderLatch` keeps the edges for
+a render-capped scene.
+
 The silence gate's marks are not part of a room's look. Only the device that
 hears the room moves them; a paired TV holds `SILENCE_GATE_SEED`, and gates
 nothing on a frame whose gate-off bit is set (`src/net/protocol.ts`).

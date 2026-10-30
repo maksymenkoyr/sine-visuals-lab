@@ -211,6 +211,6 @@ export class FeatureExtractor {
     // sees (only the bands), so app.ts writes them in from stemSplit.ts before
     // the frame leaves currentVisual(). The engine's fields are app.ts's to
     // fill from src/audio/engineSource.ts, the same way.
-    return { time, bands, energy, onset: false, pulseOnset: false, bpm: 0, onsetPhase: 0, level, hats: 0, lead: 0, engine: null };
+    return { time, bands, energy, onset: false, pulseOnset: false, bpm: 0, onsetPhase: 0, level, hats: 0, lead: 0, engine: null, song: null };
   }
 }

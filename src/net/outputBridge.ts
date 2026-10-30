@@ -332,6 +332,7 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
           bpm: frame.bpm,
           onsetPhase: frame.onsetPhase,
           engine: frame.engine,
+          song: frame.song,
           gate: extras.gate,
           ...(cue.following() ? { p: params } : {}),
         },

@@ -921,6 +921,7 @@ const driveFrameScratch: FeatureFrame = {
   hats: 0,
   lead: 0,
   engine: null,
+  song: null,
 };
 
 // forScene()'s key -> spec lookup, built once per `settings` array (called

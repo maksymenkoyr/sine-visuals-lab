@@ -256,7 +256,7 @@ describe("the seeds", () => {
 });
 
 function frame(bpm: number): FeatureFrame {
-  return { time: 0, bands: new Float32Array(NUM_BANDS), energy: 0, level: 1, hats: 0, lead: 0, onset: false, pulseOnset: false, bpm, onsetPhase: 0, engine: null };
+  return { time: 0, bands: new Float32Array(NUM_BANDS), energy: 0, level: 1, hats: 0, lead: 0, onset: false, pulseOnset: false, bpm, onsetPhase: 0, engine: null, song: null };
 }
 
 describe("animClock with a tap", () => {

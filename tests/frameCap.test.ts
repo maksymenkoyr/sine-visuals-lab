@@ -3,6 +3,8 @@ import { LOOK_LIMITS } from "../server/lookDoc.ts";
 import { RoomCore, type Attachment, type CoreHost, type CoreSocket } from "../server/roomCore.ts";
 import { NUM_BANDS } from "../src/audio/types.ts";
 import { decodeFeatureFrame, encodeFeatureFrame } from "../src/net/protocol.ts";
+import { engineReading } from "./engineReading.ts";
+import { songFrame } from "./songFrame.ts";
 
 // The relay never parses a feature frame, but it drops one longer than
 // LOOK_LIMITS.maxBinaryBytes (server/roomCore.ts relayFrame) — in every room,
@@ -27,10 +29,14 @@ const fullFrame = {
   lead: 0,
 };
 
+/** The longest frame a sender makes: every tail on. */
+const longestFrame = { ...fullFrame, engine: engineReading(), song: songFrame() };
+const WAVE = { min: -1, max: 1 };
+
 describe("the feature frame and the relay's binary cap", () => {
   it("fits the cap, whatever the values", () => {
-    for (const frame of [fullFrame, { ...fullFrame, bands: new Float32Array(NUM_BANDS) }]) {
-      const bytes = encodeFeatureFrame(frame, 1_755_000_123_456.789).byteLength;
+    for (const frame of [fullFrame, { ...fullFrame, bands: new Float32Array(NUM_BANDS) }, longestFrame]) {
+      const bytes = encodeFeatureFrame(frame, 1_755_000_123_456.789, WAVE).byteLength;
       expect(bytes, "raise LOOK_LIMITS.maxBinaryBytes (server/lookDoc.ts) in the same change that grows the frame").toBeLessThanOrEqual(
         LOOK_LIMITS.maxBinaryBytes,
       );
@@ -38,7 +44,7 @@ describe("the feature frame and the relay's binary cap", () => {
   });
 
   it("leaves headroom under the cap", () => {
-    const bytes = encodeFeatureFrame(fullFrame, 0).byteLength;
+    const bytes = encodeFeatureFrame(longestFrame, 0, WAVE).byteLength;
     expect(LOOK_LIMITS.maxBinaryBytes - bytes).toBeGreaterThanOrEqual(HEADROOM_BYTES);
   });
 
@@ -76,7 +82,7 @@ describe("the feature frame and the relay's binary cap", () => {
     };
     const core = new RoomCore(host, new Map());
 
-    core.message(hostSocket, encodeFeatureFrame(fullFrame, 42));
+    core.message(hostSocket, encodeFeatureFrame(longestFrame, 42, WAVE));
 
     expect(sent.length).toBe(1);
     expect(decodeFeatureFrame(sent[0] as ArrayBuffer)?.roomTimeMs).toBe(42);

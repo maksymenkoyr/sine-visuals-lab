@@ -1,4 +1,4 @@
-import type { EngineReading } from "../audio/types.ts";
+import type { EngineReading, SongFrame } from "../audio/types.ts";
 import type { WaveEnvelope } from "./protocol.ts";
 
 /** Broadcast rate over the wire; local (own-screen) rendering stays at full framerate. */
@@ -34,6 +34,9 @@ export const BROADCAST_INTERVAL_MS = 1000 / 30;
  * (EngineReading.hitLevel), so the loudest level a carried hit was heard at
  * goes out too (`hitLevel`): a short sound's level has often fallen by the
  * next tick, and the follower would gate a hit the host let through.
+ *
+ * The song reading's edges (SongFrame.kick and the rest) are latched the same
+ * way, ORed into the next frame sent; its levels are the sending tick's own.
  */
 export class WireDecimator {
   private lastSentMs = -Infinity;
@@ -41,6 +44,7 @@ export class WireDecimator {
   private pendingPulse = false;
   private pendingWave: WaveEnvelope | null = null;
   private pendingHitLevel = 0;
+  private readonly pendingSong = { kick: false, clap: false, hat: false, chord: false };
   private readonly pendingHits: Pick<EngineReading, "kick" | "snare" | "hat" | "surge" | "surgeKind" | "blocked"> = {
     kick: 0,
     snare: 0,
@@ -61,7 +65,9 @@ export class WireDecimator {
    *  samples; the sent one is null only if no tick since the last send had
    *  one. The sent `engine` is a copy, null when this tick has none.
    *  `hitLevel` is the highest `level` a tick with a hit had since the last
-   *  send, 0 with no hit; the frame sent carries at least that level. */
+   *  send, 0 with no hit; the frame sent carries at least that level. The
+   *  sent `song` is a copy with the edges of every tick since the last send,
+   *  null when this tick has none. */
   offer(
     nowMs: number,
     onset: boolean,
@@ -69,7 +75,16 @@ export class WireDecimator {
     wave: WaveEnvelope | null = null,
     engine: EngineReading | null = null,
     level = 0,
-  ): { send: boolean; onset: boolean; pulseOnset: boolean; wave: WaveEnvelope | null; engine: EngineReading | null; hitLevel: number } {
+    song: SongFrame | null = null,
+  ): {
+    send: boolean;
+    onset: boolean;
+    pulseOnset: boolean;
+    wave: WaveEnvelope | null;
+    engine: EngineReading | null;
+    hitLevel: number;
+    song: SongFrame | null;
+  } {
     this.pendingOnset = this.pendingOnset || onset;
     this.pendingPulse = this.pendingPulse || pulseOnset;
     if (wave) {
@@ -88,19 +103,28 @@ export class WireDecimator {
       h.blocked = h.blocked || engine.blocked;
       if (engine.kick > 0 || engine.snare > 0 || engine.hat > 0) this.pendingHitLevel = Math.max(this.pendingHitLevel, level);
     }
+    const edges = this.pendingSong;
+    if (song) {
+      edges.kick = edges.kick || song.kick;
+      edges.clap = edges.clap || song.clap;
+      edges.hat = edges.hat || song.hat;
+      edges.chord = edges.chord || song.chord;
+    }
     const since = nowMs - this.lastSentMs;
     // `since < 0`: the room clock was corrected backwards (a fresh offset
     // estimate) — restart the schedule rather than going quiet until it
     // catches up.
-    if (since >= 0 && since < this.intervalMs - this.toleranceMs) return { send: false, onset: false, pulseOnset: false, wave: null, engine: null, hitLevel: 0 };
+    if (since >= 0 && since < this.intervalMs - this.toleranceMs) return { send: false, onset: false, pulseOnset: false, wave: null, engine: null, hitLevel: 0, song: null };
     const sent = engine ? { ...engine, kick: h.kick, snare: h.snare, hat: h.hat, surge: h.surge, surgeKind: h.surgeKind, blocked: h.blocked } : null;
-    const out = { send: true, onset: this.pendingOnset, pulseOnset: this.pendingPulse, wave: this.pendingWave, engine: sent, hitLevel: this.pendingHitLevel };
+    const sentSong = song ? { ...song, kick: edges.kick, clap: edges.clap, hat: edges.hat, chord: edges.chord } : null;
+    const out = { send: true, onset: this.pendingOnset, pulseOnset: this.pendingPulse, wave: this.pendingWave, engine: sent, hitLevel: this.pendingHitLevel, song: sentSong };
     this.pendingOnset = false;
     this.pendingPulse = false;
     this.pendingWave = null;
     this.pendingHitLevel = 0;
     h.kick = h.snare = h.hat = h.surge = 0;
     h.blocked = false;
+    edges.kick = edges.clap = edges.hat = edges.chord = false;
     this.lastSentMs = since < 0 || since > 2 * this.intervalMs ? nowMs : this.lastSentMs + this.intervalMs;
     return out;
   }

@@ -910,6 +910,7 @@ async function main(): Promise<void> {
       hats: s.hats,
       lead: s.lead,
       engine: s.engine,
+      song: s.song,
       gateOff: s.gateOff,
     };
 
