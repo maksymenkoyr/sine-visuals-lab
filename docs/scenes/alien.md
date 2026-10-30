@@ -5,17 +5,21 @@ loops: each loop is one captured dance seen from its own angle, drawn live
 every frame. The music pays for the frames: the Move setting's wire sets how
 fast the dance on screen plays, and silence holds him still. Bounce squashes him toward
 the floor and springs him back on its wire's hits; Bounce smoothness turns
-that spring from a snap and a wobble into an ease and a glide. A loop repeats
-until the Cut setting's wire makes a hit that stands out from its everyday
-ones (the dotted line on its graph). Dance holds one dance, and Cut then
-waits; View shows every dance through one loop's camera, and the camera
-sliders under it (the arrow keys too) move that camera by hand. In
-development, on main since #374.
+that spring from a snap and a wobble into an ease and a glide. A dance
+repeats until Dance cut's wire makes a hit that stands out from its everyday
+ones (the dotted line on its graph), then another dance comes on through its
+own camera; Camera cut does the same on its own wire but changes only the
+camera. Shortest dance and Shortest view set how long each stays on screen
+first. Dance holds one dance, and Dance cut then waits; View shows every
+dance through one camera, and Camera cut then waits. On Any, each row
+outlines the chip on screen. The camera sliders (the arrow keys too) move
+the camera by hand. In development, on main since #374.
 
 ## Where the code is
 
 - `src/render/scenes/alien/card.ts`: the scene's card, loaded with the page: id,
-  name, `SETTINGS`, the Motion section in `PANEL`, `MOVE_GAIN`, the `gallery`
+  name, `SETTINGS`, the Motion section in `PANEL` (Move with its readout,
+  Bounce, Bounce smoothness, Dance, Dance cut and Shortest dance), `MOVE_GAIN`, the `gallery`
   record and `loadBody`, and `arrows`: which camera sliders the arrow keys
   move (`src/ui/sceneArrows.ts` handles the keys for any scene). The body
   spreads the card, so the registered settings are the body's own objects.
@@ -25,7 +29,8 @@ development, on main since #374.
   loads the model and the dancers' clip library (`sceneMedia`, both fetched
   on the first mount and decoded once per page; black until both land), keeps
   each loop's place in its clip, samples the pose and has `renderer.ts` draw
-  it. Also the `?loop=<n>` DEV pin and the
+  it. Its `probe()` feeds the Move readout and names the Dance and View
+  chips on screen (`dance`, `view`). Also the `?loop=<n>` DEV pin and the
   `window.__alien` DEV hook (reel, last wire readings, each loop's place).
 - `meshFile.ts`: `MESH_URL`, the model the scene draws
   (`public/media/alien/mesh-v1.bin`, ALM1 from `tools/alien-model/build.py`),
@@ -35,10 +40,12 @@ development, on main since #374.
   loop's camera, into this device's slice of the room, with Bounce's squash;
   `floorPivot()` finds the floor point the squash pulls toward.
 - `reel.ts`: the `VIEWS` table (the cameras, each with its View chip's
-  name), the `LOOPS` table (per loop: clip, Dance chip name and the view it
-  is seen through; `LOOP_VIEW` resolves those), `chipLoop()` and
-  `chipView()` (which loop or view a chip holds) and the rules:
-  `easeSpeed()` (Move), `stepCut()` (Cut), `stepBounce()` (Bounce) and
+  name; `headOff` marks the ones that lose his head), the `LOOPS` table (per
+  loop: clip, Dance chip name and the view it is seen through; `LOOP_VIEW`
+  resolves those), `CUT_VIEWS` (the views Camera cut picks from),
+  `chipLoop()` and `chipView()` (which loop or view a chip holds) and the
+  rules: `easeSpeed()` (Move), `stepCuts()` (Dance cut and Camera cut, with
+  `showLoop()` and `pickView()`), `stepBounce()` (Bounce) and
   `bounceSpring()` (Bounce smoothness). Its header has them in words.
 - `glsl.ts`: the look: GPU skinning, Bounce's squash on the skinned figure,
   the barycentric wireframe, the fresnel rim and outline, the eyeballs drawn
@@ -61,6 +68,10 @@ development, on main since #374.
 - `src/ui/widgets/alienPlay.ts`: the Move readout under the Move row: speed,
   frames bought per second, the loop on screen, and the loop as a strip of
   its frames with the playhead. Fed by the scene's `probe()`.
+- The outline on the chip on screen is shared, not Alien's own: a setting
+  with `onScreen` (`src/render/sceneSettings.ts`) gets it from the device
+  menu, which reads the scene's `probe()` every tick and calls the chip
+  row's `setOnScreen()` (`createPickerRow`, `src/ui/controlsKit.ts`).
 - `tools/alien-model/`: the alien the scene draws, built headless in Blender
   (#772). `exportRig.ts` writes the rig's bind pose for Blender, `build.py`
   builds the model and writes `alien.bin` and the renders, `check.ts` reads
@@ -69,8 +80,9 @@ development, on main since #374.
 - Reused, not copied: the dancers' rig, clip format and clip library
   (`../dancers/`, `CLIP_LIBRARY_URL`); the drive system (`drives.value`, `drives.threshold`);
   the Level signal (`feature.level`, #368); the standout detector
-  (`src/render/standout.ts`, a `StandoutTrigger` held in the reel as `cut`),
-  shared with Caustics' Beat ripple and Physarum 2's Dose.
+  (`src/render/standout.ts`, a `StandoutTrigger` per cut, held in the reel
+  as `cut` and `cameraCut`), shared with Caustics' Beat ripple and Physarum
+  2's Dose.
 - Tests: `tests/alien.test.ts`.
 
 ## References
@@ -365,6 +377,26 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
     on the song because Expressive's close-up, the loop the reel opens on
     before, left with the dances the owner dropped: every kept dance is a
     full-body shot. The rules for Move, Bounce and Cut are unchanged.
+- 2026-10-30, Dance cut and Camera cut, headless Chromium on Metal, the
+  defaults (Dance cut on Drop with Shortest dance 2 s, Camera cut on Bass
+  hit with Shortest view 3 s):
+  - `cutprobe.mjs` on `deTJ513J07Y`, 40 s: one dance cut, at 0.49 s as the
+    music came in, then 11 camera cuts 3.01–3.80 s apart; the dance stayed
+    on. Each cut landed on a view of `CUT_VIEWS`. The Dance and View rows
+    outlined the chip the reel had on screen, before and after a camera cut.
+  - `tune-real` on `deTJ513J07Y`, then silence, 30 s from 4 s, main (before)
+    and this branch (after) served side by side:
+
+    | source | change med | change p95 | hits/min | energy | fps |
+    | --- | --- | --- | --- | --- | --- |
+    | song, before | 0.90 | 1.41 | 464 | 0.48 | 120 |
+    | silence, before | 0.00 | 0.00 | 0 | 0.00 | 119 |
+    | song, after | 0.79 | 1.37 | 462 | 0.48 | 119 |
+    | silence, after | 0.00 | 0.00 | 0 | 0.00 | 119 |
+
+    Silence: "the picture holds still" on both, so no cut fires without
+    music. The camera cuts don't move the song's numbers: about one 100 ms
+    sample in 30 holds a cut, under the p95's reach.
 
 ## Decisions and pivots
 
@@ -616,6 +648,34 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
     most a day of saved looks lands on a different dance.
   - The bake test now checks the old videos against `clips-v1.bin` and the
     first three views, the library and cameras they were baked from.
+- 2026-10-30, the owner: "fixes in alien. 1. two drivers for cut for move
+  and for camera 2. when move changes or camera make it highlight which one
+  is active rn from section where u can choose them manually. add to this
+  params couple more setting like to trigger not earlier then certain taime.
+  like after 1s or 3s". My calls, not asked:
+  - "move" read as the dance (the Dance row), not Move, the speed.
+  - **Dance cut** is the old Cut: same key (`cut`), so saved looks and
+    wires keep it, and the same Drop wire. It moved from Camera to Motion,
+    under the Dance row it changes. A dance cut still shows the new dance
+    through its own camera.
+  - **Camera cut** is new, under the View row: on its own wire (Bass hit by
+    default, on by default) it moves the camera to another view while the
+    dance goes on. It picks among `CUT_VIEWS`, every view but the three that
+    lose his head (`headOff`, Known issues). A dance cut moves the camera too,
+    so Camera cut's wait starts over, and the two never land on one tick.
+  - **Shortest dance** and **Shortest view**, one per cut, 0 to 10 s: the
+    least time a dance or a view stays on screen before its cut may fire.
+    Shortest dance starts at 2 s, the old fixed minimum; Shortest view at
+    3 s, since at 2 s a Bass hit wire cut every 2–3 s (Measurements,
+    2026-10-06), busier than a camera should be by default. Master Scale leaves
+    both alone. I read "couple more settings" as these two. No timer that
+    cuts without a hit: the owner asked earlier for cuts on a trigger only.
+  - **The highlight**: on the Dance and View rows, the chip on screen gets
+    an outline in the row's colour, and "now <name>" stands beside the
+    readout, since one outlined chip among 35 is hard to find. View's first
+    chip, Own, is now Any, as on the Dance row; saved looks keep it, since
+    they store the chip's place. Any scene's chip row can do the same
+    (`onScreen`, Where the code is).
 
 ## Tuning notes
 
@@ -625,10 +685,13 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   sets how snappy it is and how far it overshoots. Bounce smoothness eases
   that spring toward `SMOOTH_HZ`, `SMOOTH_DAMPING`; if its smooth end sits
   too low on fast music, the damping is the knob that matters.
-- Cut on Drop: every drop stands out (drops are rare, so nothing else on
-  that signal teaches the floor). For regular cuts wire it to Bass hit: it
-  cuts on a standout hit once each shot has lasted `MIN_SHOT_SEC`, and
-  Cut threshold thins those out (see Measurements).
+- Dance cut on Drop: every drop stands out (drops are rare, so nothing
+  else on that signal teaches the floor). For regular dance changes wire it
+  to Bass hit: it cuts on a standout hit once each dance has lasted Shortest
+  dance, and Dance cut threshold thins those out (see Measurements).
+- Camera cut on Bass hit: there are enough standout hits that Shortest view
+  sets the pace (a cut every 3–4 s at 3 s). Raise Camera cut threshold to cut
+  only on the clearest hits, or Shortest view for longer shots.
 - Judge the look in loop 0 (`?loop=0`), whose framing is the closest to the
   reference.
 - To polish one dance, hold it on Dance and step through View; the strip's
@@ -645,7 +708,8 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   (those with baked videos) still frame the old height, so his head runs
   off the top in each of them. Toprock 2, the dance the reel opens on, is
   seen through Floor up. The owner's call on pulling them back is open
-  (Decisions). The views after them frame the new height.
+  (Decisions). The views after them frame the new height. Camera cut skips
+  the three (`headOff`); pulled back, they can join it.
 - Every dance is a full-body shot now, so he is smaller on screen than in
   the old opening close-up and less of the picture changes on a song
   (Measurements, 2026-10-29). Which dance opens the reel, and whether one
@@ -669,6 +733,8 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   `node --experimental-strip-types`, and `tile.py` makes contact sheets.
   `glide.mjs` logs the dance's place on every render at a low Move and
   `readout.mjs` reads the Move readout (Resume here has both).
+  `cutprobe.mjs` plays a song as the mic, logs every dance and camera cut,
+  and shoots the Dance and View rows with the chip outlined on screen.
   `bakeframes.mjs` saves the bake page's frames at given loops and phases,
   for before and after pictures of the same moment; `loadcheck.mjs` logs what
   opening the scene fetches, times the model's decode, and shoots the scene

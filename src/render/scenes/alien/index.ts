@@ -4,16 +4,21 @@
  * reel.ts), drawn live every frame by renderer.ts. The music decides how:
  *   - Move: its wire (Level by default) times the slider is the dance's
  *     speed, eased so it glides; silence buys no frames and the alien holds;
- *   - Cut: a loop repeats until its wire (Drop by default) makes a climb
- *     that stands out from its everyday ones (the dotted line on its graph,
- *     src/render/standout.ts), then the scene cuts to another loop;
+ *   - Dance cut: a dance repeats until its wire (Drop by default) makes a
+ *     climb that stands out from its everyday ones (the dotted line on its
+ *     graph, src/render/standout.ts), then the scene cuts to another dance,
+ *     through its own camera; Camera cut does the same on its own wire (Bass
+ *     hit by default) but changes only the camera. Shortest dance and
+ *     Shortest view are how long each must stay on screen first;
  *   - Bounce: its wire (Bass hit by default) squashes the alien toward the
  *     floor under him and springs him back, on top of the dance (MESH_VERT
  *     in glsl.ts); Bounce smoothness turns that spring from a snap and a
  *     wobble into an ease and a glide;
- *   - Dance and View, not wired to the music: hold one dance (Cut then
- *     waits) or one loop's camera for every dance; the camera sliders under
- *     View, and the arrow keys, move that camera by hand (camera.ts).
+ *   - Dance and View, not wired to the music: hold one dance (Dance cut
+ *     then waits) or one camera for every dance (Camera cut waits); on Any,
+ *     each row outlines the chip on screen (probe()'s `dance` and `view`,
+ *     SceneSetting.onScreen). The camera sliders, and the arrow keys, move
+ *     that camera by hand (camera.ts).
  * reel.ts owns those rules and the LOOPS table; under the Move row a readout
  * shows what the music is buying (src/ui/widgets/alienPlay.ts, fed by
  * probe()).
@@ -42,7 +47,7 @@ import { CLIP_LIBRARY_URL, decodeClipLibrary, sampleClip, type Clip, type ClipLi
 import { createPose } from "../dancers/rig.ts";
 import { createAlienRenderer, floorPivot, type AlienRenderer, type Squash } from "./renderer.ts";
 import { decodeAlienMesh, MESH_URL, type AlienModel } from "./meshFile.ts";
-import { BOUNCE_MAX, chipLoop, chipView, clipSeconds, createBounce, createReel, easeSpeed, LOOP_VIEW, LOOPS, stepBounce, stepCut, VIEWS, type Reel } from "./reel.ts";
+import { BOUNCE_MAX, chipLoop, chipView, clipSeconds, createBounce, createReel, easeSpeed, LOOPS, showLoop, stepBounce, stepCuts, VIEWS, type Reel } from "./reel.ts";
 import { card, MOVE_GAIN, SETTINGS } from "./card.ts";
 import { easeHand, HAND_AT_REST, handCamera, type CameraHand } from "./camera.ts";
 
@@ -108,9 +113,11 @@ export const alienScene: Scene = (() => {
     const n = raw === null ? NaN : Number(raw);
     return Number.isInteger(n) && n >= 0 && n < LOOPS.length ? n : null;
   })();
-  if (pinnedLoop !== null) reel.loop = pinnedLoop;
+  if (pinnedLoop !== null) showLoop(reel, pinnedLoop);
+  /** Index into VIEWS of the camera the last render drew through. */
+  let shownView = reel.view;
   // What the last render read off the wires, for probe() and the DEV hook.
-  const last = { target: 0, speed: 0, rate: 0, cutSignal: 0, cutLine: 0, squash: 0 };
+  const last = { target: 0, speed: 0, rate: 0, cutSignal: 0, cutLine: 0, cameraSignal: 0, cameraLine: 0, squash: 0 };
   if (import.meta.env.DEV && typeof window !== "undefined") (window as unknown as { __alien: unknown }).__alien = { reel, last, phase };
 
   return {
@@ -118,6 +125,8 @@ export const alienScene: Scene = (() => {
 
     // For the Move readout (src/ui/widgets/alienPlay.ts): the loop on screen,
     // where the alien is in its clip, and what the music is buying right now.
+    // `dance` and `view` are the Dance and View chips on screen (onScreen in
+    // card.ts), chip 0 being Any.
     probe() {
       const live = loops?.[reel.loop];
       const frames = live?.clip.frames ?? 0;
@@ -129,6 +138,9 @@ export const alienScene: Scene = (() => {
         bought: live && live.seconds > 0 ? (last.rate * frames) / live.seconds : 0,
         squash: last.squash,
         cuts: reel.cuts,
+        cameraCuts: reel.cameraCuts,
+        dance: reel.loop + 1,
+        view: shownView + 1,
       };
     },
 
@@ -173,25 +185,45 @@ export const alienScene: Scene = (() => {
       const dt = lastTime === null ? 1 / 60 : Math.max(0, Math.min(0.25, anim.timeSec - lastTime));
       lastTime = anim.timeSec;
 
-      // The three settings (reel.ts's header has the rules). Unplugged, each
+      // The wired settings (reel.ts's header has the rules). Unplugged, each
       // reads 0: no frames bought, nothing to cut on, no bounce.
       last.target = get("move") * Math.max(0, drives.value("move", frame.level * MOVE_GAIN, 0));
       speed = easeSpeed(speed, last.target, dt);
       last.speed = speed;
       last.rate = speed < HELD_BELOW ? 0 : Math.min(MAX_RATE, speed);
       last.cutSignal = drives.value("cut", anim.dropPulse, 0);
+      last.cameraSignal = drives.value("cameraCut", anim.lowPulse, 0);
       const heldDance = chipLoop(get("dance"));
-      if (heldDance !== null) reel.loop = heldDance;
-      const cut = stepCut(reel, {
-        dtSec: dt,
-        cutOn: pinnedLoop === null && heldDance === null && get("cut") >= 0.5,
-        cutSignal: last.cutSignal,
-        cutThreshold: standoutThreshold(drives, "cut"),
-      });
+      if (heldDance !== null) showLoop(reel, heldDance);
+      const heldView = chipView(get("view"));
+      const cut = stepCuts(
+        reel,
+        dt,
+        {
+          on: pinnedLoop === null && heldDance === null && get("cut") >= 0.5,
+          signal: last.cutSignal,
+          threshold: standoutThreshold(drives, "cut"),
+          holdSec: get("cutHold"),
+        },
+        {
+          on: pinnedLoop === null && heldView === null && get("cameraCut") >= 0.5,
+          signal: last.cameraSignal,
+          threshold: standoutThreshold(drives, "cameraCut"),
+          holdSec: get("cameraHold"),
+        },
+      );
+      shownView = heldView ?? reel.view;
       // The panel draws the line a climb has to reach, and a dot per cut
       // (settingMarks.ts); no line while the threshold is off.
       last.cutLine = standoutMarks(reel.cut.detector)?.reach ?? 0;
-      publishSettingMarks(ALIEN_ID, "cut", { lines: standoutLine(reel.cut.detector, "reach to cut"), reactionLabel: "cut" }, cut ? 1 : 0);
+      last.cameraLine = standoutMarks(reel.cameraCut.detector)?.reach ?? 0;
+      publishSettingMarks(ALIEN_ID, "cut", { lines: standoutLine(reel.cut.detector, "reach to cut"), reactionLabel: "cut" }, cut === "dance" ? 1 : 0);
+      publishSettingMarks(
+        ALIEN_ID,
+        "cameraCut",
+        { lines: standoutLine(reel.cameraCut.detector, "reach to cut"), reactionLabel: "cut" },
+        cut === "camera" ? 1 : 0,
+      );
       const hit = Math.max(0, Math.min(1, drives.value("bounce", anim.lowPulse, 0)));
       stepBounce(bounce, get("bounce") * BOUNCE_MAX * hit, dt, get("bounceSmooth"));
       last.squash = Math.max(-SQUASH_LIMIT, Math.min(SQUASH_LIMIT, bounce.squash));
@@ -217,8 +249,7 @@ export const alienScene: Scene = (() => {
       if (handFresh) Object.assign(hand, handTarget);
       else easeHand(hand, handTarget, dt);
       handFresh = false;
-      const view = VIEWS[chipView(get("view")) ?? LOOP_VIEW[reel.loop]].camera;
-      renderer.draw(pose, handCamera(view, hand), ctx.quality.bloomPasses, viewport, squash);
+      renderer.draw(pose, handCamera(VIEWS[shownView].camera, hand), ctx.quality.bloomPasses, viewport, squash);
     },
 
     dispose() {
