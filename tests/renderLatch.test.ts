@@ -18,10 +18,6 @@ function frame(overrides: Partial<AnimFrame> = {}): AnimFrame {
     beatPulse: 0,
     hats: 0,
     lead: 0,
-    hatsOnset: false,
-    hatsPulse: 0,
-    hatsHit: 0,
-    hatsPeak: 0,
     song: animSong(),
     onset: false,
     beatRatio: 0,
@@ -39,8 +35,6 @@ function frame(overrides: Partial<AnimFrame> = {}): AnimFrame {
     lowOnset: false,
     midOnset: false,
     highOnset: false,
-    kickBand: 0,
-    kickBandIndex: 0,
     sectionIntensity: 0,
     dropPulse: 0,
     dropOnset: false,
@@ -82,9 +76,9 @@ describe("createRenderLatch", () => {
     latch.accumulate(frame({ lowOnset: true }));
     latch.accumulate(frame({ dropOnset: true }));
     latch.accumulate(frame({ highOnset: true }));
-    latch.accumulate(frame({ hatsOnset: true }));
+    latch.accumulate(frame({ song: animSong({ hatOnset: true }) }));
     const rendered = latch.consume(frame(), 20);
-    expect(rendered.hatsOnset).toBe(true);
+    expect(rendered.song.hatOnset).toBe(true);
     expect(rendered.lowOnset).toBe(true);
     expect(rendered.dropOnset).toBe(true);
     expect(rendered.highOnset).toBe(true);

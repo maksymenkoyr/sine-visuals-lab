@@ -16,7 +16,7 @@
 //   wave, once every two beats by default (a Scene source:
 //   DriveSource.every can't be set from a setting's own default, and one
 //   swing a beat is too fast for the swarm to follow). Scatter knocks a small
-//   share of the particles out of step on a bass hit; they fly out to the rim
+//   share of the particles out of step on a kick; they fly out to the rim
 //   and fall back in as they re-sync, which also keeps the core loose enough
 //   to breathe (with no hits it packs tight and still, the reference's
 //   settled state). Heat is the phase noise, riding the overall level.
@@ -24,7 +24,7 @@
 //   the scene also collapses once on start.
 // - Drawn, on the hit: Thump swells the whole swarm on screen (THUMP_SCALE)
 //   and Beat flash lifts the lines and dots (FLASH_GAIN), both riding the
-//   hit's own decaying pulse. Bass hits by default for all three hit
+//   hit's own decaying pulse. Kick hits by default for all three hit
 //   settings: a DJ track fires onsets several times a beat, which dissolved
 //   the core (Scatter) and blurred the flash into flicker.
 //
@@ -236,8 +236,8 @@ function createSwarmScene(): Scene {
       const size = resolveSceneSetting(ID, settingFor("size"));
       const flash = resolveSceneSetting(ID, settingFor("flash"));
       const thump = resolveSceneSetting(ID, settingFor("thump"));
-      const flashPulse = flash > 0.02 ? clamp01(drives.value("flash", anim.lowPulse)) : 0;
-      const thumpPulse = thump > 0.02 ? clamp01(drives.value("thump", anim.lowPulse)) : 0;
+      const flashPulse = flash > 0.02 ? clamp01(drives.value("flash", anim.song.kickPulse)) : 0;
+      const thumpPulse = thump > 0.02 ? clamp01(drives.value("thump", anim.song.kickPulse)) : 0;
 
       // The Scene breath: the Beat wave slowed to one swing every two beats --
       // 1 on every other beat, 0 on the ones between, fading with the
@@ -250,10 +250,10 @@ function createSwarmScene(): Scene {
       lastWave = clamp01(drives.value("breath", halfWave, 0.5));
 
       // Edges (a hit, a drop) are consumed once a render, not once a step.
-      const scatterFired = drives.fired("scatter", anim.lowOnset);
+      const scatterFired = drives.fired("scatter", anim.song.kickOnset);
       const collapseFired = drives.fired("collapse", anim.dropOnset);
       if (scatter > 0.02 && scatterFired) {
-        scatterPhases(s, Math.min(1, scatter * drives.value("scatter", anim.lowPulse) * drives.hitSize("scatter")));
+        scatterPhases(s, Math.min(1, scatter * drives.value("scatter", anim.song.kickPulse) * drives.hitSize("scatter")));
       }
       if (collapse > 0.02 && collapseFired) {
         rescatter(s, rng, spawnHalfW);

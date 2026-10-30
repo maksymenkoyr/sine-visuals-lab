@@ -34,7 +34,7 @@ export const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.5,
-    drive: { default: "anim.lowOnset" },
+    drive: { default: "anim.kickOnset" },
   },
   {
     key: "bounceSmooth",

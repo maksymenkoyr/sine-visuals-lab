@@ -87,7 +87,7 @@ export const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 1,
     description: "How hard the cloud's edges flare white on each hit.",
-    drive: { default: "anim.lowOnset" },
+    drive: { default: "anim.kickOnset" },
   },
   {
     key: "hue",

@@ -90,8 +90,10 @@ export interface ProbeSnapshot {
     metronomeBpm: number;
     metronomePhase: number;
     tapGuided: boolean;
-    /** This tick's Bass, Mid and Treble hits (AnimFrame.lowOnset/midOnset/highOnset). */
+    /** This tick's Bass, Mid and Treble hits, the band lanes (AnimFrame.lowOnset/midOnset/highOnset). */
     lanes: { low: boolean; mid: boolean; high: boolean };
+    /** This tick's Kick, Clap, Hats and Chord hits as a scene sees them (AnimFrame.song's edges, after the silence gate). */
+    hits: { kick: boolean; clap: boolean; hat: boolean; chord: boolean };
     /** Each lane's last hit's stand-out (AnimFrame.hitStrength, hitStrength.ts): how far it cleared its firing line, 0..1. */
     standout: { low: number; mid: number; high: number };
   };
@@ -149,6 +151,12 @@ export function buildProbeSnapshot(input: ProbeInput): ProbeSnapshot {
       metronomePhase: anim?.metronomePhase ?? 0,
       tapGuided: anim?.tapGuided ?? false,
       lanes: { low: anim?.lowOnset ?? false, mid: anim?.midOnset ?? false, high: anim?.highOnset ?? false },
+      hits: {
+        kick: anim?.song.kickOnset ?? false,
+        clap: anim?.song.clapOnset ?? false,
+        hat: anim?.song.hatOnset ?? false,
+        chord: anim?.song.chordOnset ?? false,
+      },
       standout: {
         low: anim?.hitStrength.low.standout ?? 0,
         mid: anim?.hitStrength.mid.standout ?? 0,

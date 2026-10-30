@@ -50,7 +50,7 @@ export const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.25,
-    drive: { default: "anim.lowOnset", hit: { reactionLabel: "step" } },
+    drive: { default: "anim.kickOnset", hit: { reactionLabel: "step" } },
   },
   {
     key: "fold",

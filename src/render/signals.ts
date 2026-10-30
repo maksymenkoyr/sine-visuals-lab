@@ -19,7 +19,7 @@ import { DIAL_LABELS, MUSIC_DIALS, type MusicDial } from "./musicProfile.ts";
  * is also why `read()` stays pure and side-effect-free: drives.ts calls it
  * every tick for every setting whose choice names a SignalId. `kind: "edge"`
  * entries pair with the one-shot boolean noted in each entry's own comment
- * (AnimFrame.lowOnset, …) — drives.ts's `fired()` reads that boolean
+ * (AnimFrame.song.kickOnset, …) — drives.ts's `fired()` reads that boolean
  * straight off the render-latched AnimFrame it's handed (see renderLatch.ts
  * and drives.ts's own header), never through `read()` here, which always
  * returns the decaying envelope instead (see the next paragraph). `kind:
@@ -59,12 +59,12 @@ import { DIAL_LABELS, MUSIC_DIALS, type MusicDial } from "./musicProfile.ts";
  * A note on `kind: "edge"`: deviceMenu.ts's DeviceMenu.update() is called
  * every rAF tick (src/app.ts:904), ahead of the render-rate cap
  * (shouldRenderFrame, framePace.ts) that gates scene.render() itself. So a
- * one-shot boolean like AnimFrame.lowOnset can fire on a tick the meters see
+ * one-shot boolean like AnimFrame.song.kickOnset can fire on a tick the meters see
  * but a rate-capped scene's render() never does — reading the raw boolean
  * here would make a signal pill blink on triggers the scene silently
  * dropped, which is confusing without context. Every `read()` below returns
  * the matching *pulse envelope* instead (already decaying 0..1 on its own,
- * e.g. bandEnergy's lowPulse) so a pill stays visibly accurate regardless of
+ * e.g. AnimFrame.song.kickPulse) so a pill stays visibly accurate regardless of
  * the render cap, and its blink is just that decay made visible — see each
  * entry's own comment for the field it stands in for. drives.ts's GLSL/JS
  * *value* uploads (u<Key>Drive, drives.value()) go through this same
@@ -94,7 +94,7 @@ import { DIAL_LABELS, MUSIC_DIALS, type MusicDial } from "./musicProfile.ts";
  * them static rather than added when one is picked: heat tracks, jacks and
  * saved-wire validation are all built once from SIGNALS. Each reads that
  * band's auto-gained level (FeatureFrame.bands, what the spectrum strip
- * draws) dimmed by the silence gate the way Kick band is. The id is the
+ * draws) dimmed by the silence gate the way the song levels are (animClock.ts). The id is the
  * band number, not its Hz: the ladder's ceiling is capped below Nyquist at
  * the usual sample rates (bandScale.ts's MAX_HZ_CAP), so band n is the same
  * Hz everywhere and the Hz is only its label. The Sound card shows a band's
@@ -104,7 +104,7 @@ import { DIAL_LABELS, MUSIC_DIALS, type MusicDial } from "./musicProfile.ts";
 /** Every card src/ui/audioMeters.ts mounts, keyed by its own `foldId`.
  *  Populated on demand: add an id here only once some SignalSpec below
  *  actually points at that card. "sound" is the first meter, the Sound card,
- *  hits included; "stems" follows it with Lead, Hats and the Kick band. */
+ *  hits included; "stems" follows it with Lead. */
 export type MeterCardId = "sound" | "stems" | "beat" | "song";
 
 /** A row within a card, for the same anchor — only rows a SignalSpec
@@ -115,17 +115,19 @@ export type MeterCardId = "sound" | "stems" | "beat" | "song";
  *  and `anim.metronomeBar`. "wave"/"lock" are the plain meter rows
  *  `anim.beatWave`/`anim.barWave`/`anim.tempoLock` point at instead.
  *  "energy", "low", "mid" and "high" are the Sound card's Level, Bass, Mid and
- *  Treble rows; "hitAny", "hitLow", "hitMid", "hitHigh" and "surge" are the
- *  tracks of its Hits drum roll (audioMeters.ts's HIT_TRACKS). "lead", "hats"
- *  and "kick" (the Kick band) are the Stems card's own rows. Each dial's own
+ *  Treble rows; "hitAny", "hitKick", "hitClap", "hitHats", "hitChord" and "surge"
+ *  are the tracks of its Hits drum roll (audioMeters.ts's HIT_TRACKS); an
+ *  instrument track carries its hits' jack and its level's. "lead" is the Stems
+ *  card's own row. Each dial's own
  *  cell in the Song card's strip is its DialSignalId. */
 export type MeterRowId =
   | "section"
   | "tempo"
   | "hitAny"
-  | "hitLow"
-  | "hitMid"
-  | "hitHigh"
+  | "hitKick"
+  | "hitClap"
+  | "hitHats"
+  | "hitChord"
   | "surge"
   | "wave"
   | "lock"
@@ -134,9 +136,7 @@ export type MeterRowId =
   | "low"
   | "mid"
   | "high"
-  | "kick"
   | "lead"
-  | "hats"
   | DialSignalId
   | BandSignalId;
 
@@ -166,15 +166,18 @@ export type SignalId =
   | "feature.onset"
   | "feature.flux"
   | "feature.level"
-  | "anim.lowOnset"
-  | "anim.kickBand"
-  | "anim.midOnset"
-  | "anim.highOnset"
+  | "anim.kickOnset"
+  | "anim.clapOnset"
+  | "anim.chordOnset"
   | "anim.dropOnset"
   | "anim.low"
   | "anim.mid"
   | "anim.high"
   | "anim.hats"
+  | "anim.kickLevel"
+  | "anim.clapLevel"
+  | "anim.hatsLevel"
+  | "anim.chordLevel"
   | "anim.lead"
   | "anim.energy"
   | "anim.sectionIntensity"
@@ -197,7 +200,7 @@ export interface SignalSpec {
   kind: "level" | "edge";
   read(frame: FeatureFrame, anim: AnimFrame): number;
   /** For a `kind: "edge"` entry, the render-latched one-shot boolean
-   *  `read()`'s own envelope decays from (AnimFrame.onset, .lowOnset, …) —
+   *  `read()`'s own envelope decays from (AnimFrame.onset, .song.kickOnset, …) —
    *  what drives.ts's fired() reads for a plain catalogue choice. Required
    *  for every `kind: "edge"` entry (tests/signals.test.ts checks this);
    *  absent for `kind: "level"` entries, which have no natural edge —
@@ -259,6 +262,26 @@ export type SignalLink =
       activeWhen: (get: (key: string) => number) => boolean;
     };
 
+/** Signals taken out of the catalogue, each to the one that reads closest:
+ *  saved wires, saved Looks and share codes in the wild still name them.
+ *  Here rather than in driveStore.ts because wireMod.ts's retired node store
+ *  names signals too, and driveStore.ts imports wireMod.ts. */
+export const RETIRED_SIGNALS: Readonly<Record<string, SignalId>> = {
+  "anim.wavePeak": "feature.level",
+  "anim.lowOnset": "anim.kickOnset",
+  "anim.midOnset": "anim.chordOnset",
+  "anim.highOnset": "anim.hats",
+  "anim.kickBand": "anim.kickLevel",
+};
+
+const RETIRED_SUCCESSOR: ReadonlyMap<string, SignalId> = new Map(Object.entries(RETIRED_SIGNALS) as [string, SignalId][]);
+
+/** `id` as the catalogue spells it now: a retired id's successor, any other
+ *  string unchanged. A Map, so "constructor" or "__proto__" find nothing. */
+export function currentSignalId(id: string): string {
+  return RETIRED_SUCCESSOR.get(id) ?? id;
+}
+
 export const SIGNALS: Record<SignalId, SignalSpec> = {
   "feature.onset": signal({
     id: "feature.onset",
@@ -281,53 +304,43 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     monitor: { card: "sound", row: "surge" },
     bandRange: "all",
   }),
-  "anim.lowOnset": signal({
-    id: "anim.lowOnset",
-    label: "Bass hit",
+  "anim.kickOnset": signal({
+    id: "anim.kickOnset",
+    label: "Kick",
     description:
-      "The low-band (kick) onset edge (AnimFrame.lowOnset), read here as bandEnergy's lowPulse — its decaying envelope, so the pill stays accurate even on a render-capped tick the edge itself never reaches a scene through.",
+      "A hit on each kick drum: audio v6's song layer fires it when the low band climbs past a mark kept from the song's last minute or two (AnimFrame.song.kickOnset), read here as its decaying pulse (AnimFrame.song.kickPulse), so the pill stays accurate even on a render-capped tick the edge itself never reaches a scene through.",
     kind: "edge",
-    read: (_frame, anim) => anim.lowPulse,
-    edge: (anim) => anim.lowOnset,
-    monitor: { card: "sound", row: "hitLow" },
+    read: (_frame, anim) => anim.song.kickPulse,
+    edge: (anim) => anim.song.kickOnset,
+    monitor: { card: "sound", row: "hitKick" },
     bandRange: "low",
   }),
-  "anim.kickBand": signal({
-    id: "anim.kickBand",
-    label: "Kick band",
+  "anim.clapOnset": signal({
+    id: "anim.clapOnset",
+    label: "Clap",
     description:
-      "The level of the single low band (below the Bands split) that has gone up and down the most over the last few seconds (AnimFrame.kickBand, bandPick.ts) — one narrow band, re-picked by itself when the music changes, unlike Bass level's average over the whole low group.",
-    kind: "level",
-    read: (_frame, anim) => anim.kickBand,
-    monitor: { card: "stems", row: "kick" },
-    bandRange: "low",
-  }),
-  "anim.midOnset": signal({
-    id: "anim.midOnset",
-    label: "Mid hit",
-    description:
-      "The mid-band onset edge (AnimFrame.midOnset), read here as bandEnergy's midPulse — same reasoning as Bass hit.",
+      "A hit on each clap or snare: the song layer's clap level climbing past its own kept mark (AnimFrame.song.clapOnset), read here as AnimFrame.song.clapPulse — same reasoning as Kick.",
     kind: "edge",
-    read: (_frame, anim) => anim.midPulse,
-    edge: (anim) => anim.midOnset,
-    monitor: { card: "sound", row: "hitMid" },
+    read: (_frame, anim) => anim.song.clapPulse,
+    edge: (anim) => anim.song.clapOnset,
+    monitor: { card: "sound", row: "hitClap" },
     bandRange: "mid",
   }),
-  "anim.highOnset": signal({
-    id: "anim.highOnset",
-    label: "Treble hit",
+  "anim.chordOnset": signal({
+    id: "anim.chordOnset",
+    label: "Chord",
     description:
-      "The high-band onset edge (AnimFrame.highOnset), read here as bandEnergy's highPulse — same reasoning as Bass hit.",
+      "A hit on each new chord or stab of the harmony: the song layer's chord level climbing past its own kept mark (AnimFrame.song.chordOnset), read here as AnimFrame.song.chordPulse — same reasoning as Kick.",
     kind: "edge",
-    read: (_frame, anim) => anim.highPulse,
-    edge: (anim) => anim.highOnset,
-    monitor: { card: "sound", row: "hitHigh" },
-    bandRange: "high",
+    read: (_frame, anim) => anim.song.chordPulse,
+    edge: (anim) => anim.song.chordOnset,
+    monitor: { card: "sound", row: "hitChord" },
+    bandRange: "mid",
   }),
   "anim.low": signal({
     id: "anim.low",
     label: "Bass level",
-    description: "The slewed low-band level (AnimFrame.low) — sustained, unlike Bass hit's onset-only pulse.",
+    description: "The slewed low-band level (AnimFrame.low) — sustained, unlike a hit's onset-only pulse.",
     kind: "level",
     read: (_frame, anim) => anim.low,
     monitor: { card: "sound", row: "low" },
@@ -336,7 +349,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
   "anim.mid": signal({
     id: "anim.mid",
     label: "Mid level",
-    description: "The slewed mid-band level (AnimFrame.mid) — sustained, unlike Mid hit's onset-only pulse.",
+    description: "The slewed mid-band level (AnimFrame.mid) — sustained, unlike a hit's onset-only pulse.",
     kind: "level",
     read: (_frame, anim) => anim.mid,
     monitor: { card: "sound", row: "mid" },
@@ -345,7 +358,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
   "anim.high": signal({
     id: "anim.high",
     label: "Treble level",
-    description: "The slewed high-band level (AnimFrame.high) — sustained, unlike Treble hit's onset-only pulse.",
+    description: "The slewed high-band level (AnimFrame.high) — sustained, unlike a hit's onset-only pulse.",
     kind: "level",
     read: (_frame, anim) => anim.high,
     monitor: { card: "sound", row: "high" },
@@ -355,12 +368,52 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "anim.hats",
     label: "Hats",
     description:
-      "A hit on each hi-hat and cymbal: a peak of the sound above the treble's own floor (AnimFrame.hats, src/audio/stemSplit.ts), counted while the engine hears music. Unlike Treble hit, it also catches a hat that lands with a kick or a snare, which the engine names as that drum. The pulse is AnimFrame.hatsPulse; the edge, hatsOnset.",
+      "A hit on each hi-hat and cymbal: the song layer's hat level climbing past its own kept mark (AnimFrame.song.hatOnset), read here as AnimFrame.song.hatPulse — same reasoning as Kick. The level it is picked from is Hats level.",
     kind: "edge",
-    read: (_frame, anim) => anim.hatsPulse,
-    edge: (anim) => anim.hatsOnset,
-    monitor: { card: "stems", row: "hats" },
+    read: (_frame, anim) => anim.song.hatPulse,
+    edge: (anim) => anim.song.hatOnset,
+    monitor: { card: "sound", row: "hitHats" },
     bandRange: "high",
+  }),
+  "anim.kickLevel": signal({
+    id: "anim.kickLevel",
+    label: "Kick level",
+    description:
+      "The level Kick is picked from: the slewed low band (AnimFrame.low), the same reading as Bass level, drawn on the Kick track as its floor.",
+    kind: "level",
+    read: (_frame, anim) => anim.low,
+    monitor: { card: "sound", row: "hitKick" },
+    bandRange: "low",
+  }),
+  "anim.clapLevel": signal({
+    id: "anim.clapLevel",
+    label: "Clap level",
+    description:
+      "The level Clap is picked from: how clap-like the sound is right now (AnimFrame.song.clapLevel, audio v6's song layer), drawn on the Clap track as its floor.",
+    kind: "level",
+    read: (_frame, anim) => anim.song.clapLevel,
+    monitor: { card: "sound", row: "hitClap" },
+    bandRange: "mid",
+  }),
+  "anim.hatsLevel": signal({
+    id: "anim.hatsLevel",
+    label: "Hats level",
+    description:
+      "The level Hats is picked from: how much hi-hat and cymbal sound there is (AnimFrame.song.hatLevel, audio v6's song layer), drawn on the Hats track as its floor.",
+    kind: "level",
+    read: (_frame, anim) => anim.song.hatLevel,
+    monitor: { card: "sound", row: "hitHats" },
+    bandRange: "high",
+  }),
+  "anim.chordLevel": signal({
+    id: "anim.chordLevel",
+    label: "Chord level",
+    description:
+      "The level Chord is picked from: how strongly a chord or stab sounds (AnimFrame.song.chordLevel, audio v6's song layer), drawn on the Chord track as its floor.",
+    kind: "level",
+    read: (_frame, anim) => anim.song.chordLevel,
+    monitor: { card: "sound", row: "hitChord" },
+    bandRange: "mid",
   }),
   "anim.lead": signal({
     id: "anim.lead",
@@ -404,7 +457,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "anim.dropOnset",
     label: "Drop",
     description:
-      "A section-level loudness drop (AnimFrame.dropOnset), read here as sectionIntensity's dropPulse — its decaying flash, the same reasoning as Bass hit.",
+      "A section-level loudness drop (AnimFrame.dropOnset), read here as sectionIntensity's dropPulse — its decaying flash, the same reasoning as Kick.",
     kind: "edge",
     read: (_frame, anim) => anim.dropPulse,
     edge: (anim) => anim.dropOnset,
@@ -501,7 +554,7 @@ function bandSignals(): Record<BandSignalId, SignalSpec> {
       id,
       label: `Band ${formatHz(bandCenterHz(edges, n))}`,
       description:
-        "One analyser band on its own (FeatureFrame.bands, the same auto-gained bands the spectrum strip draws), dimmed by the silence gate like Kick band — its row shows once picked on the Sound card's spectrum.",
+        "One analyser band on its own (FeatureFrame.bands, the same auto-gained bands the spectrum strip draws), dimmed by the silence gate like the song levels — its row shows once picked on the Sound card's spectrum.",
       kind: "level",
       read: (frame, anim) => (frame.bands[n] ?? 0) * anim.gateDimmer,
       monitor: { card: "sound", row: id },

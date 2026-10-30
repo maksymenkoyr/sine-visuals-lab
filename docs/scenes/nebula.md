@@ -281,6 +281,12 @@ vs ours.
   the stars don't flow, so the gas slides across them. On by default at a
   gentle pace under the flight's own; my call, not yet confirmed by the
   owner.
+- 2026-10-30, #802: Flare's wire moved from the bass hit to the Kick.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 5.06 → 5.04, p95 6.74 → 6.74; silence
+    median 1.97 → 1.94, p95 2.96 → 2.97; hits a minute on the song 412 →
+    418, in silence 0 → 0; main's bass / mid / treble lanes 154 / 128 /
+    244 a minute against kick / clap / hats / chord 108 / 44 / 278 / 120.
 
 ## Tuning notes
 

@@ -24,9 +24,9 @@ uniform float uBpm;
 uniform float uLow;       // slewed low/mid/high band levels — see bandEnergy.ts
 uniform float uMid;
 uniform float uHigh;
-uniform float uLowPulse;  // decaying per-group onset pulse, same shape as uBeatPulse
-uniform float uMidPulse;
-uniform float uHighPulse;
+uniform float uKickPulse;  // decaying pulse on each Kick, Chord and Hats hit (AnimFrame.song), same shape as uBeatPulse
+uniform float uChordPulse;
+uniform float uHatPulse;
 uniform float uSectionIntensity; // phrase-level loudness trend — see sectionIntensity.ts
 uniform float uDropPulse;        // decaying flash on a detected section change/drop
 uniform float uCentroid; // range-adapted spectral centroid — see spectralCentroid.ts; 0.5 is this track's own recent middle
@@ -118,9 +118,9 @@ export function uploadCommonUniforms(
   prog.setF("uLow", anim.low);
   prog.setF("uMid", anim.mid);
   prog.setF("uHigh", anim.high);
-  prog.setF("uLowPulse", anim.lowPulse);
-  prog.setF("uMidPulse", anim.midPulse);
-  prog.setF("uHighPulse", anim.highPulse);
+  prog.setF("uKickPulse", anim.song.kickPulse);
+  prog.setF("uChordPulse", anim.song.chordPulse);
+  prog.setF("uHatPulse", anim.song.hatPulse);
   prog.setF("uSectionIntensity", anim.sectionIntensity);
   prog.setF("uDropPulse", anim.dropPulse);
   prog.setF("uCentroid", anim.centroid);

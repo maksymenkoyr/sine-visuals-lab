@@ -69,7 +69,7 @@ function clamp01(x: number): number {
 // ---- Rise detection --------------------------------------------------------
 
 // How fast the smoothing chases the raw driver signal. This has to stay
-// short: anim.lowPulse/beatPulse jump to 1 in a single tick and decay at a
+// short: anim.song.kickPulse/beatPulse jump to 1 in a single tick and decay at a
 // fixed rate (BEAT_PULSE_DECAY_PER_SEC, animClock.ts) that a one-pole filter
 // is chasing at the same time it's rising — the filter's own peak response to
 // that race is what a lone hit's total amount is capped by (see

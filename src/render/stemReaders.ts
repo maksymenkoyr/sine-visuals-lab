@@ -4,20 +4,21 @@ import type { SceneSetting } from "./sceneSettings.ts";
 import type { SignalId } from "./signals.ts";
 
 /**
- * Who reads Hats and Lead, so app.ts runs the stem split
+ * Who reads Lead, so app.ts runs the stem split
  * (src/audio/stemSplit.ts) only on ticks where something does. The split is
  * the largest piece of JavaScript in a scene with the panel closed (#553), and
- * most of the time nothing reads its two levels.
+ * most of the time nothing reads its level. Hats is no longer one of its
+ * readers: the Hats hit comes from the song layer (AnimFrame.song), which
+ * runs whatever the panel shows.
  *
- * Something reads them while any of these holds (app.ts's stemsRead() asks):
- *  - a setting of the scene is wired to one, through a source that isn't
+ * Something reads it while any of these holds (app.ts's stemsRead() asks):
+ *  - a setting of the scene is wired to it, through a source that isn't
  *    muted (`wiresReadStems` below). A setting left on its built-in reaction
- *    counts when its `drive.sceneSources` names one, so a scene whose own code
- *    reads AnimFrame.lead or any of its Hats fields (hats, hatsOnset, …)
- *    must list them there.
+ *    counts when its `drive.sceneSources` names it, so a scene whose own code
+ *    reads AnimFrame.lead must list it there.
  *  - a crossfade is running: the outgoing scene still reads its own wires
  *    (compositor.ts's `drivesFor`) until the blend ends.
- *  - the panel's Stems card (Lead and Hats) is unfolded and on screen.
+ *  - the panel's Stems card (Lead) is unfolded and on screen.
  *  - a screen fed by this window may show a look other than this window's:
  *    the pop-out holding an earlier Play (the cue controller in
  *    net/outputSync.ts says it differs), or any other device online in the
@@ -31,21 +32,21 @@ import type { SignalId } from "./signals.ts";
  *
  * On a tick where none holds, the frame keeps the zeros features.ts gives it,
  * so a screen gets 0 rather than a stale reading, and the anim clock eases
- * both levels down. When reading starts again the split starts over
+ * the level down. When reading starts again the split starts over
  * (StemSplitter.reset) and settles within STEM_SETTLE_SEC, as at a fresh
  * start, instead of carrying a peak from before the pause; the anim clock
- * eases each level up from where it fell. The panel's heat (audioMeters.ts) asks the gate whether
- * the levels were measured, and records a gap rather than a cold stretch
- * while they weren't.
+ * eases the level up from where it fell. The panel's heat (audioMeters.ts) asks the gate whether
+ * the level was measured, and records a gap rather than a cold stretch
+ * while it wasn't.
  */
 
-const STEM_SIGNALS: ReadonlySet<SignalId> = new Set<SignalId>(["anim.hats", "anim.lead"]);
+const STEM_SIGNALS: ReadonlySet<SignalId> = new Set<SignalId>(["anim.lead"]);
 
 export function isStemSignal(id: SignalId): boolean {
   return STEM_SIGNALS.has(id);
 }
 
-/** Whether a wire reads Hats or Lead: an unmuted source on a setting of this
+/** Whether a wire reads Lead: an unmuted source on a setting of this
  *  scene, or a built-in reaction's `sceneSources` (see the header). */
 export function wiresReadStems(sceneId: string, settings: readonly SceneSetting[]): boolean {
   for (const spec of settings) {

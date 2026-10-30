@@ -133,7 +133,7 @@ describe("moire blackout (advanceBlackout)", () => {
     expect(phase).toBe(0);
   });
 
-  it("lowOnset with blackout=0 never fires, however long it's driven", () => {
+  it("kickOnset with blackout=0 never fires, however long it's driven", () => {
     const st = createBlackoutState();
     for (let i = 0; i < 2000; i++) {
       const phase = advanceBlackout(st, 1 / 60, false, true, 0);
@@ -141,13 +141,13 @@ describe("moire blackout (advanceBlackout)", () => {
     }
   });
 
-  it("lowOnset can fire when blackout > 0, deterministically via an injected rng", () => {
+  it("kickOnset can fire when blackout > 0, deterministically via an injected rng", () => {
     const st = createBlackoutState();
     const phase = advanceBlackout(st, 0, false, true, 1, () => 0);
     expect(phase).toBeGreaterThan(0);
   });
 
-  it("lowOnset never fires when the injected rng always loses the roll", () => {
+  it("kickOnset never fires when the injected rng always loses the roll", () => {
     const st = createBlackoutState();
     for (let i = 0; i < 500; i++) {
       const phase = advanceBlackout(st, 1 / 60, false, true, 1, () => 0.999999);

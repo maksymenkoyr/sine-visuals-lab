@@ -71,8 +71,8 @@ export const ledheartsScene = createFullscreenScene(card.id, card.name, FRAG, {
   extraUniforms: (frame, anim, getSetting, drives) => {
     const dt = Math.min(Math.max(anim.dtSec, 0), MAX_DT_SEC);
     // Called every frame, unconditionally: fired() must see every frame.
-    const kick = drives.fired("push", anim.lowOnset);
-    const hit = drives.fired("flip", anim.midOnset);
+    const kick = drives.fired("push", anim.song.kickOnset);
+    const hit = drives.fired("flip", anim.song.chordOnset);
     const drop = drives.fired("wave", anim.dropOnset);
 
     pushVel = decay(pushVel, dt, PUSH_TAU_SEC);

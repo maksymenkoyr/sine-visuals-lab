@@ -1881,6 +1881,8 @@ function wireDeviceMenu(): void {
     currentPaletteId: () => palette.id,
     // A page that follows a feed reads the sender's levels: measured.
     stemsMeasured: () => stemGate?.measured() ?? true,
+    // Only the device that hears the music has the song layer's marks.
+    getSongMarks: () => engineSource?.marks ?? null,
     // The column head's audio-source status. A page that follows another device
     // has no local analyser.
     getAudioStatus: () => ({

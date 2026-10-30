@@ -198,14 +198,14 @@ export const SETTINGS: SceneSetting[] = [
   {
     key: "morph",
     label: "Morph",
-    description: "How fast every copy morphs on through the shapes by itself — 0 holds them, right moves them on about a shape per bass hit",
+    description: "How fast every copy morphs on through the shapes by itself — 0 holds them, right moves them on about a shape per kick",
     group: "Motion",
     family: "Pace",
     min: 0,
     max: 1,
     step: 0.05,
     default: 0,
-    drive: { default: "anim.lowOnset" },
+    drive: { default: "anim.kickOnset" },
   },
   {
     key: "newPath",

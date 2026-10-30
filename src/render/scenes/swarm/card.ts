@@ -59,10 +59,10 @@ export const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.4,
-    // Bass hits, not every onset: real music fires onsets several times a
+    // Kick hits, not every onset: real music fires onsets several times a
     // beat, and a share flung that often never lets the core re-form
     // (measured 2026-10-03: a uniform disc on a 129 bpm DJ track).
-    drive: { default: "anim.lowOnset", hit: { reactionLabel: "scatter" } },
+    drive: { default: "anim.kickOnset", hit: { reactionLabel: "scatter" } },
   },
   {
     key: "thump",
@@ -73,7 +73,7 @@ export const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.5,
-    drive: { default: "anim.lowOnset" },
+    drive: { default: "anim.kickOnset" },
   },
   {
     key: "heat",
@@ -127,10 +127,10 @@ export const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.6,
-    // Bass hits: on Any hit a DJ track fires several times a beat and the
+    // Kick hits: on Any hit a DJ track fires several times a beat and the
     // flash blurs into flicker (measured 2026-10-03); on the kick it reads
     // as a pulse. Any hit stays a pick in the panel.
-    drive: { default: "anim.lowOnset" },
+    drive: { default: "anim.kickOnset" },
   },
   {
     key: "reach",

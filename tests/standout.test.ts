@@ -17,7 +17,7 @@ import {
 // Most of these were written against Caustics' Beat ripple, the graded user,
 // so "a ring" below is one full standout's amount (a total of 1 per climb).
 
-// anim.beatPulse/lowPulse's own real shape (animClock.ts's BEAT_PULSE_DECAY_PER_SEC):
+// anim.beatPulse/song.kickPulse's own real shape (animClock.ts's BEAT_PULSE_DECAY_PER_SEC):
 // a step to 1 in a single tick, then exponential decay at 6/sec.
 const BEAT_PULSE_DECAY = 6;
 const DT = 1 / 60;

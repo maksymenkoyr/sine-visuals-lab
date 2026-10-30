@@ -27,7 +27,7 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 1,
     description: "How hard each kick hits. Each kick goes to the next look in turn.",
-    drive: { default: "anim.lowOnset", hit: { reactionLabel: "look" } },
+    drive: { default: "anim.kickOnset", hit: { reactionLabel: "look" } },
   },
   {
     key: "speed",

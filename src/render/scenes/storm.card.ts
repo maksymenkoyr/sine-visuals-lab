@@ -105,12 +105,12 @@ export const SETTINGS: SceneSetting[] = [
     default: 0.4,
     auto: { pulse: 0.2, attack: 0.2 },
     // The lurch's amplitude (beatAmp, render()) is graded across a union of
-    // three signals — a drop takes priority, else a bass or beat rise — so
+    // three signals — a drop takes priority, else a kick or beat rise — so
     // the default is Scene.
     drive: {
       default: "scene",
-      sceneLabel: "Scene: drop, else bass or beat hit",
-      sceneSources: ["anim.dropOnset", "anim.lowOnset", "feature.onset"],
+      sceneLabel: "Scene: drop, else kick or beat hit",
+      sceneSources: ["anim.dropOnset", "anim.kickOnset", "feature.onset"],
     },
   },
   {
@@ -187,12 +187,12 @@ export const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.75,
     auto: { attack: 0.3, pulse: 0.15 },
-    // Gates the pool's ordinary strike (render()) — a bass hit OR a beat
+    // Gates the pool's ordinary strike (render()) — a kick OR a beat
     // hit: no single catalogue source covers that union, so the default is
     // Scene.
     // uStrike's own GLSL sites are all plain gain curves on the setting's
     // own resolved value, no live signal, so nothing there needs wrapping.
-    drive: { default: "scene", sceneLabel: "Scene: bass or beat hit", sceneSources: ["anim.lowOnset", "feature.onset"], hit: { reactionLabel: "strike" } },
+    drive: { default: "scene", sceneLabel: "Scene: kick or beat hit", sceneSources: ["anim.kickOnset", "feature.onset"], hit: { reactionLabel: "strike" } },
   },
   {
     key: "reach",
@@ -230,7 +230,7 @@ export const SETTINGS: SceneSetting[] = [
   {
     key: "sections",
     label: "Dark sections",
-    description: "Rests the cloud in dark regions and lights them one or two at a time — on beats, on treble hits, and wherever a bolt lands",
+    description: "Rests the cloud in dark regions and lights them one or two at a time — on beats, on chord and hat hits, and wherever a bolt lands",
     group: "Look",
     min: 0,
     max: 1,
@@ -281,13 +281,13 @@ export const SETTINGS: SceneSetting[] = [
     default: 0.3,
     auto: { brightness: 0.35 },
     // Mode-dependent: the march's own erosion term reads uHigh (a level),
-    // every geometry pass's shimmer reads uHighPulse (a hit) behind its own
+    // every geometry pass's shimmer reads uHatPulse (a hit) behind its own
     // stochastic gate — no single catalogue source covers both, so the
     // default is Scene.
     drive: {
       default: "scene",
-      sceneLabel: "Scene: treble level (march) or treble hits (lattice/points/strands)",
-      sceneSources: ["anim.high", "anim.highOnset"],
+      sceneLabel: "Scene: treble level (march) or hat hits (lattice/points/strands)",
+      sceneSources: ["anim.high", "anim.hats"],
     },
   },
   {

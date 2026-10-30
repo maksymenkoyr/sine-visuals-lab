@@ -200,6 +200,12 @@ and `ours-chaikin/cells-ours.json`):
 - 2026-10-08 — Births, Relaunch and Drop sync became hit drivers (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the birth kick, the relaunch amount and the snap amount by how far the hit stood out; Flat, the default, is unchanged.
 - 2026-10-11 — Sampler uniforms that were looked up with a raw `getUniformLocation` on every call now go through `GLProgram.setI`. Nothing visible changed: headless before/after shots look the same. (#349)
 - 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/chaikin/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #802: Births' wire moved from the bass hit to the Kick.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 18.54 → 18.26, p95 20.10 → 19.94; silence
+    median 16.01 → 16.02, p95 17.36 → 17.36; hits a minute on the song 420
+    → 424, in silence 0 → 0; main's bass / mid / treble lanes 152 / 128 /
+    242 a minute against kick / clap / hats / chord 116 / 40 / 272 / 124.
 
 ## Tuning notes
 

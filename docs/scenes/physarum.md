@@ -72,6 +72,13 @@ follows). No video or visual reference was studied for this scene.
   hit stood out; Flat, the default, is unchanged.
 - 2026-10-11 — Sampler units now go through `GLProgram.setI`; the file's own location cache and its clears are gone. Nothing visible changed: headless before/after shots look the same. (#349)
 - 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/physarum.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #802: The low group's pull boost moved from the bass hit to
+  the Kick.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 2.97 → 3.07, p95 3.99 → 4.17; silence
+    median 0.22 → 0.18, p95 0.72 → 0.58; hits a minute on the song 422 →
+    426, in silence 0 → 0; main's bass / mid / treble lanes 150 / 140 /
+    242 a minute against kick / clap / hats / chord 116 / 44 / 284 / 132.
 
 ## Tuning notes
 

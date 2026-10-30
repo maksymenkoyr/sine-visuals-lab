@@ -115,6 +115,12 @@ layers never overlapped so nothing stacked toward white.
 - 2026-10-08 — Beat kick became a hit driver (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the peak of the onset envelope (advanceOnsetEnvelope now takes true, false or a 0..1 size) by how far the hit stood out; Flat, the default, is unchanged.
 - 2026-10-11 — Sampler units now go through `GLProgram.setI`; the file's own location cache and its clears are gone. Nothing visible changed: headless before/after shots look the same. (#349)
 - 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/slats/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #802: Kick dip moved from the bass hit to the Kick.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 10.32 → 10.39, p95 13.99 → 14.49; silence
+    median 5.48 → 5.48, p95 6.68 → 6.54; hits a minute on the song 408 →
+    408, in silence 0 → 0; main's bass / mid / treble lanes 148 / 128 /
+    242 a minute against kick / clap / hats / chord 110 / 48 / 276 / 124.
 
 ## Tuning notes
 

@@ -28,7 +28,7 @@
  *    tempo never locked when measured, so nothing here assumes a phase
  *    relationship the audio pipeline can't actually promise. A bar wrap is
  *    used only as an occasional gate, not a clock the geometry rides.
- *  - `kickDip` is a small, optional brightness dip against `anim.lowPulse` —
+ *  - `kickDip` is a small, optional brightness dip against `anim.song.kickPulse` —
  *    the one hypothesis in the plan that came from a single correlated run,
  *    kept modest for exactly that reason.
  *

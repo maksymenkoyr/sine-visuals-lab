@@ -94,7 +94,7 @@ describe("coderain figure", () => {
   it("poses a figure whose capsules stay finite and inside the figure's quad", () => {
     const fig = createFigure();
     const anim = {
-      beatPhase: 0, barPhase: 0, tempoLock: 1, beatPulse: 0, lowPulse: 0, sectionIntensity: 0.6,
+      beatPhase: 0, barPhase: 0, tempoLock: 1, beatPulse: 0, song: { kickPulse: 0 }, sectionIntensity: 0.6,
       dropPulse: 0, flowPhase: 0, timeSec: 0, profile: { pulse: 0.5 },
     } as unknown as AnimFrame;
     for (let i = 0; i < 240; i++) {
