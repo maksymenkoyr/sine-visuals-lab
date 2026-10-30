@@ -5739,6 +5739,20 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         });
         wireBandHighlight(picker.el, reads);
       }
+      if (spec.onScreen) {
+        const options = spec.options;
+        sceneRowHandles.push({
+          updateSignalPills: () => {
+            const shown = deps.getScene(sceneId)?.probe?.()?.[spec.key];
+            const index = typeof shown === "number" ? Math.round(shown) : null;
+            picker.setOnScreen(index);
+            // Named beside the readout too: in a long strip the outline alone is hard to find.
+            const chosen = Math.round(deps.getSceneSettingValue(sceneId, spec));
+            picker.setStatus(index !== null && index !== chosen && options[index] ? `now ${options[index]}` : "");
+          },
+          refreshAuto: () => {},
+        });
+      }
       return;
     }
     if (spec.type === "boolean") {

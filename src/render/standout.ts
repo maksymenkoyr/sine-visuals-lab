@@ -5,9 +5,10 @@
 //   - Caustics' Beat ripple sizes each ring by how far a climb stands out
 //     (advanceStandoutAmount), with its Ring threshold setting as the
 //     threshold;
-//   - Physarum 2's Dose starts a colony, and Alien's Cut changes the loop,
-//     once per standout (a StandoutTrigger), each with its own threshold row
-//     under the setting's graph.
+//   - Physarum 2's Dose starts a colony, and Alien's Dance cut and Camera
+//     cut change the dance or the camera, once per standout (a
+//     StandoutTrigger), each with its own threshold row under the setting's
+//     graph.
 //
 // How it listens, in order:
 //   1. A light smoothing knocks out frame-to-frame noise, and a rise
@@ -44,7 +45,7 @@
 // none of this: declaring `drive.hit` and reading `drives.fired` gets it the
 // detector, the threshold row, the Reaction row and the graph's marks from
 // the engine (drives.ts's header, "Hit drivers"). For a scene that runs the
-// detector itself (`drive.hit.ownDetector`, as Dose and Cut do):
+// detector itself (`drive.hit.ownDetector`, as Dose and Alien's cuts do):
 //   - declare `drive.threshold` with `default: STANDOUT_THRESHOLD_DEFAULT`
 //     and the setting's own label and hint. That makes the threshold
 //     scene-handled (drives.ts's header): the panel shows the On/Off switch
@@ -374,7 +375,7 @@ export function standoutLine(state: StandoutState, label: string): SettingMarkLi
 // ---- The trigger -----------------------------------------------------------
 //
 // The event form: a detector plus the shortest time between two fires, for a
-// setting that does one thing per standout (start a colony, cut the loop). A
+// setting that does one thing per standout (start a colony, cut to another dance). A
 // standout that lands too soon after the last fire, or while the caller has
 // the trigger disarmed (its setting switched off), is dropped, not saved for
 // later: that climb is spent, and the next one has to stand out on its own.
@@ -382,8 +383,9 @@ export function standoutLine(state: StandoutState, label: string): SettingMarkLi
 export interface StandoutTrigger {
   /** The detector underneath — standoutLine/standoutMarks read it. */
   readonly detector: StandoutState;
-  /** The shortest time between two fires, in seconds. */
-  readonly minGapSec: number;
+  /** The shortest time between two fires, in seconds. A caller may change
+   *  it between frames (Alien's Shortest dance and Shortest view sliders). */
+  minGapSec: number;
   /** Seconds since the last fire (Infinity before the first, so the first
    *  standout always fires). */
   sinceFireSec: number;

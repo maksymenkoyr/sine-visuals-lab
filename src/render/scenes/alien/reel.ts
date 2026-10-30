@@ -13,18 +13,22 @@
  * level. Silence reads 0: the speed eases down and the loop holds on the
  * frame it reached.
  *
- * **Cut: a trigger, not a timer.** A loop repeats until the Cut signal makes
- * a climb that stands out from its everyday ones (src/render/standout.ts, the
- * same detector Caustics' Beat ripple and Physarum 2's Dose read), and then
- * the reel cuts to another loop, picked at random among the others, unless
- * the shot on screen is younger than MIN_SHOT_SEC. Nothing else changes the
- * loop but the Dance setting: while it holds one dance (`chipLoop`), the
- * scene skips the cut. The View setting can hold one camera (`chipView`) for
- * every dance. Each loop keeps its own place, so cutting back finds the alien
- * where it was left. (Before that, a cut was the signal rising over a fixed
- * line: on a hit signal nearly every hit cleared it, and a hysteresis band
- * either cut every beat or, under a sustained bassline, never; the scene
- * record has the measurements.)
+ * **Cuts: triggers, not timers.** Two cuts, each on its own wire, each firing
+ * when its signal makes a climb that stands out from its everyday ones
+ * (src/render/standout.ts, the same detector Caustics' Beat ripple and
+ * Physarum 2's Dose read). Dance cut moves to another dance, picked at random
+ * among the others, seen through its own view (`showLoop`). Camera cut keeps
+ * the dance and moves to another view among CUT_VIEWS (`pickView`). Each
+ * waits until what it changes has been on screen for its Shortest slider
+ * (`CutInput.holdSec`); a dance cut moves the camera too, so Camera cut's
+ * wait starts over with it, and the two never land on one tick. Nothing else
+ * changes the dance but the Dance setting: while it holds one (`chipLoop`),
+ * the scene holds Dance cut off, and while View holds one camera
+ * (`chipView`), Camera cut. Each loop keeps its own place, so cutting back
+ * finds the alien where it was left. (Before that, a cut was the signal
+ * rising over a fixed line: on a hit signal nearly every hit cleared it, and
+ * a hysteresis band either cut every beat or, under a sustained bassline,
+ * never; the scene record has the measurements.)
  *
  * **Bounce: squash and stretch.** On top of the dance the alien squashes
  * toward the floor under him and springs back past rest (`stepBounce`, a
@@ -53,6 +57,9 @@ export interface LoopView {
   /** Its chip on the View row (card.ts). */
   name: string;
   camera: LoopCamera;
+  /** Framed for the old, shorter model, so his head runs off the top (the
+   *  scene record's Known issues): Camera cut never picks it. */
+  headOff?: true;
 }
 
 // Saved looks store the View chip by index (sceneLooks.ts), so a new view
@@ -60,11 +67,11 @@ export interface LoopView {
 export const VIEWS: readonly LoopView[] = [
   // Front, a little below the face, close: head and torso fill the frame,
   // arms reaching out of it — the reference's hero framing.
-  { name: "Close front", camera: { eye: [0, 1.3, 1.75], target: [0, 1.62, 0], focal: 3.2 } },
+  { name: "Close front", camera: { eye: [0, 1.3, 1.75], target: [0, 1.62, 0], focal: 3.2 }, headOff: true },
   // Three-quarter from his right and above: knees up.
-  { name: "High right", camera: { eye: [-1.6, 1.95, 1.85], target: [0, 1.35, 0.1], focal: 3.0 } },
+  { name: "High right", camera: { eye: [-1.6, 1.95, 1.85], target: [0, 1.35, 0.1], focal: 3.0 }, headOff: true },
   // From the floor at his left front, close, looking up: he looms over the lens.
-  { name: "Floor up", camera: { eye: [0.7, 0.2, 1.6], target: [0, 1.0, 0.05], focal: 1.7 } },
+  { name: "Floor up", camera: { eye: [0.7, 0.2, 1.6], target: [0, 1.0, 0.05], focal: 1.7 }, headOff: true },
   // The views below frame the Blender model's height, so his head stays in;
   // the views above still frame the old, shorter model (the scene record's
   // Known issues). Wider than those: most dances are in the legs.
@@ -144,6 +151,9 @@ export const LOOPS: readonly LoopSpec[] = [
 /** Index into VIEWS of each loop's own view. */
 export const LOOP_VIEW: readonly number[] = LOOPS.map((l) => VIEWS.findIndex((v) => v.name === l.view));
 
+/** Indexes into VIEWS of the views Camera cut picks from. */
+export const CUT_VIEWS: readonly number[] = VIEWS.flatMap((v, i) => (v.headOff ? [] : [i]));
+
 /** The loop a Dance chip holds, or null for Any, which leaves it to the reel. */
 export function chipLoop(value: number): number | null {
   const i = Math.round(value) - 1;
@@ -171,34 +181,60 @@ export function easeSpeed(speed: number, target: number, dtSec: number): number 
   return speed + (Math.max(0, target) - speed) * k;
 }
 
-/** The shortest a shot lasts before the next standout can cut. */
-export const MIN_SHOT_SEC = 2;
+/** Shortest dance's and Shortest view's defaults (card.ts), in seconds. */
+export const DANCE_HOLD_SEC = 2;
+export const VIEW_HOLD_SEC = 3;
 
 export interface Reel {
-  /** Index into LOOPS of the loop on screen. */
+  /** Index into LOOPS of the dance on screen. */
   loop: number;
-  /** The Cut rule: a standout in the Cut signal, at most once per
-   *  MIN_SHOT_SEC. Its detector is what the panel's dotted line reads. */
+  /** Index into VIEWS of the camera on screen, unless the View chip holds one. */
+  view: number;
+  /** Dance cut: a standout in its signal. Its detector is what the panel's
+   *  dotted line reads. */
   cut: StandoutTrigger;
-  /** Cuts so far — a running count for probes and tests. */
+  /** Camera cut: the same on its own signal. */
+  cameraCut: StandoutTrigger;
+  /** Cuts so far of each kind — running counts for probes and tests. */
   cuts: number;
+  cameraCuts: number;
 }
 
 export function createReel(): Reel {
-  return { loop: 0, cut: createStandoutTrigger(MIN_SHOT_SEC), cuts: 0 };
+  return {
+    loop: 0,
+    view: LOOP_VIEW[0]!,
+    cut: createStandoutTrigger(DANCE_HOLD_SEC),
+    cameraCut: createStandoutTrigger(VIEW_HOLD_SEC),
+    cuts: 0,
+    cameraCuts: 0,
+  };
 }
 
-/** What one tick of the music hands the reel's cut rule. */
-export interface CutInput {
-  dtSec: number;
-  /** Whether the Cut setting is on. Off, the rule still listens, so the
-   *  everyday climbs are already learned when it comes back on. */
-  cutOn: boolean;
-  cutSignal: number;
-  /** Cut threshold, as standout.ts's standoutThreshold reads it: the slider,
-   *  or null while its switch is Off (every climb out of near-silence cuts). */
-  cutThreshold: number | null;
+/** Puts `loop` on screen through its own view. The camera moved with it, so
+ *  Camera cut's wait starts over. */
+export function showLoop(reel: Reel, loop: number): void {
+  if (reel.loop === loop) return;
+  reel.loop = loop;
+  reel.view = LOOP_VIEW[loop]!;
+  reel.cameraCut.sinceFireSec = 0;
 }
+
+/** What one tick of the music hands one of the reel's two cuts. */
+export interface CutInput {
+  /** Whether the cut may fire: its setting is on and no chip holds what it
+   *  changes. Off, the rule still listens, so the everyday climbs are
+   *  already learned when it comes back on. */
+  on: boolean;
+  signal: number;
+  /** Its threshold, as standout.ts's standoutThreshold reads it: the slider,
+   *  or null while its switch is Off (every climb out of near-silence cuts). */
+  threshold: number | null;
+  /** Its Shortest slider: seconds what it changes stays on screen first. */
+  holdSec: number;
+}
+
+export type CutKind = "dance" | "camera";
 
 /** Another loop than `current`, uniformly among the rest. */
 export function pickOther(current: number, count: number, rand: number): number {
@@ -207,13 +243,31 @@ export function pickOther(current: number, count: number, rand: number): number 
   return (current + step) % count;
 }
 
-/** Advances the cut rule one tick. Returns true on the tick it cut. */
-export function stepCut(reel: Reel, input: CutInput, rand: () => number = Math.random): boolean {
-  const dt = Math.max(0, input.dtSec);
-  if (!stepStandoutTrigger(reel.cut, dt, input.cutSignal, input.cutThreshold, input.cutOn)) return false;
-  reel.loop = pickOther(reel.loop, LOOPS.length, rand());
-  reel.cuts++;
-  return true;
+/** Another view of CUT_VIEWS than `current`, uniformly; any of them when
+ *  `current` isn't one. */
+export function pickView(current: number, rand: number): number {
+  const at = CUT_VIEWS.indexOf(current);
+  if (at < 0) return CUT_VIEWS[Math.min(CUT_VIEWS.length - 1, Math.floor(rand * CUT_VIEWS.length))]!;
+  return CUT_VIEWS[pickOther(at, CUT_VIEWS.length, rand)]!;
+}
+
+/** Advances both cuts one tick. Returns the one that cut on this tick. */
+export function stepCuts(reel: Reel, dtSec: number, dance: CutInput, camera: CutInput, rand: () => number = Math.random): CutKind | null {
+  const dt = Math.max(0, dtSec);
+  reel.cut.minGapSec = Math.max(0, dance.holdSec);
+  reel.cameraCut.minGapSec = Math.max(0, camera.holdSec);
+  const danceCut = stepStandoutTrigger(reel.cut, dt, dance.signal, dance.threshold, dance.on);
+  if (danceCut) {
+    showLoop(reel, pickOther(reel.loop, LOOPS.length, rand()));
+    reel.cuts++;
+  }
+  // Stepped on a dance cut's tick too, disarmed, so it keeps learning.
+  const cameraCut = stepStandoutTrigger(reel.cameraCut, dt, camera.signal, camera.threshold, camera.on && !danceCut);
+  if (cameraCut) {
+    reel.view = pickView(reel.view, rand());
+    reel.cameraCuts++;
+  }
+  return danceCut ? "dance" : cameraCut ? "camera" : null;
 }
 
 /** The deepest squash, as a share of the alien's height, at Bounce 1 with

@@ -413,6 +413,9 @@ export interface PickerRow {
   sync: () => void;
   /** The dim note beside the readout; empty string clears it. */
   setStatus: (text: string) => void;
+  /** Outlines the chip the host shows right now, whichever is chosen
+   *  (SceneSetting.onScreen); null clears it. */
+  setOnScreen: (index: number | null) => void;
 }
 
 export interface PickerRowSpec {
@@ -459,6 +462,8 @@ export interface PickerRowSpec {
 // An icon chip (PickerRowSpec.icons): the palette chip's frame, sized to
 // its drawing rather than to a word, with the SVG inheriting the chip's ink.
 const pickerIconChipStyle = " display: inline-flex; align-items: center; justify-content: center; padding: 4px 10px; line-height: 0;";
+// Outline only: a mark that moved text or padding would reflow a wrapped strip on every change.
+const pickerOnScreenStyle = " color: #fff; border-color: var(--vc-accent); box-shadow: inset 0 0 0 1px var(--vc-accent);";
 
 export function createPickerRow(spec: PickerRowSpec): PickerRow {
   const el = document.createElement("div");
@@ -556,15 +561,22 @@ export function createPickerRow(spec: PickerRowSpec): PickerRow {
     Math.min(spec.options.length - 1, Math.max(0, Math.round(value)));
 
   let current = clampIndex(spec.get());
-  function apply(value: number): void {
-    current = clampIndex(value);
+  let onScreen: number | null = null;
+  function paint(): void {
     chips.forEach((chip, i) => {
       chip.style.cssText =
         (i === current ? paletteChipLitStyle : paletteChipStyle) +
+        (i === onScreen ? pickerOnScreenStyle : "") +
         (spec.icons?.[i] ? pickerIconChipStyle : "") +
         (isLocked(i) ? " opacity: 0.4; cursor: not-allowed;" : "");
       chip.setAttribute("aria-checked", String(i === current));
+      if (i === onScreen) chip.setAttribute("aria-current", "true");
+      else chip.removeAttribute("aria-current");
     });
+  }
+  function apply(value: number): void {
+    current = clampIndex(value);
+    paint();
     readout.textContent = spec.options[current];
     showHint();
     resetBtn.style.visibility = current !== clampIndex(spec.defaultValue) ? "visible" : "hidden";
@@ -603,6 +615,12 @@ export function createPickerRow(spec: PickerRowSpec): PickerRow {
     },
     setStatus: (text) => {
       if (status.textContent !== text) status.textContent = text;
+    },
+    setOnScreen: (index) => {
+      const next = index === null || index < 0 || index >= chips.length ? null : index;
+      if (next === onScreen) return;
+      onScreen = next;
+      paint();
     },
   };
 }

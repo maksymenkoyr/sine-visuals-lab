@@ -2,7 +2,7 @@
 import type { PanelSection, Scene, SceneCard } from "../../scene.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
 import { STANDOUT_THRESHOLD_DEFAULT } from "../../standout.ts";
-import { LOOPS, VIEWS } from "./reel.ts";
+import { DANCE_HOLD_SEC, LOOPS, VIEW_HOLD_SEC, VIEWS } from "./reel.ts";
 
 // This scene's gallery section and the day it was added (scenes/sceneModules.ts).
 export const gallery = { stage: "development", added: "2026-10-05" } as const;
@@ -51,7 +51,7 @@ export const SETTINGS: SceneSetting[] = [
   {
     key: "dance",
     label: "Dance",
-    description: "Any: each cut picks another dance. A dance: he keeps doing that one and Cut waits",
+    description: "Any: each Dance cut picks another dance, and the outlined chip is the one on screen. A dance: he keeps doing that one and Dance cut waits",
     group: "Motion",
     type: "enum",
     options: ["Any", ...LOOPS.map((l) => l.dance)],
@@ -59,18 +59,98 @@ export const SETTINGS: SceneSetting[] = [
     max: LOOPS.length,
     step: 1,
     default: 0,
+    onScreen: true,
+  },
+  // Keeps the key "cut" from when it was the only cut, so saved looks and
+  // wires keep it.
+  {
+    key: "cut",
+    label: "Dance cut",
+    description:
+      "On: the dance repeats until the wired input node jumps out from its everyday ones, over the dotted line on its graph, " +
+      "then cuts to another dance, seen through the camera it was framed for. Off, or while Dance holds one, the dance on screen repeats",
+    group: "Motion",
+    type: "boolean",
+    min: 0,
+    max: 1,
+    step: 1,
+    default: 1,
+    drive: {
+      default: "anim.dropOnset",
+      // A cut has no size, so its Reaction row stays on Flat.
+      hit: { ownDetector: true, flatOnly: "A cut either happens or it doesn't, so it can't be sized." },
+      // Scene-handled: the same standout as Physarum 2's Dose threshold
+      // (standout.ts's header has how one is wired).
+      threshold: {
+        default: STANDOUT_THRESHOLD_DEFAULT,
+        label: "Dance cut threshold",
+        hint: "Moves the dotted line: how far a sound has to stand out from the everyday ones to cut to another dance. Left: more cuts, even from quiet sounds. Right: only clear standouts.",
+      },
+    },
+  },
+  {
+    key: "cutHold",
+    label: "Shortest dance",
+    description: "The least time, in seconds, a dance stays on screen before Dance cut can change it. Left: cuts can come fast. Right: each dance plays longer",
+    group: "Motion",
+    min: 0,
+    max: 10,
+    step: 0.25,
+    default: DANCE_HOLD_SEC,
+    // Both Shortest sliders: scaled by Master, turning it up would cut less
+    // often, the other way from every other setting.
+    masterScale: false,
   },
   {
     key: "view",
     label: "View",
-    description: "Own: each dance through the camera it was framed for. A view: every dance through that camera",
+    description:
+      "Any: each dance opens through the camera it was framed for and Camera cut moves it, and the outlined chip is the one on screen. " +
+      "A view: every dance through that camera, and Camera cut waits",
     group: "Camera",
     type: "enum",
-    options: ["Own", ...VIEWS.map((v) => v.name)],
+    // Saved looks store the chip by index, so Any stays first.
+    options: ["Any", ...VIEWS.map((v) => v.name)],
     min: 0,
     max: VIEWS.length,
     step: 1,
     default: 0,
+    onScreen: true,
+  },
+  {
+    key: "cameraCut",
+    label: "Camera cut",
+    description:
+      "On: the camera stays until the wired input node jumps out from its everyday ones, over the dotted line on its graph, " +
+      "then cuts to another view while the dance goes on. Off, or while View holds one, the camera stays",
+    group: "Camera",
+    type: "boolean",
+    min: 0,
+    max: 1,
+    step: 1,
+    default: 1,
+    drive: {
+      default: "anim.lowOnset",
+      hit: { ownDetector: true, flatOnly: "A cut either happens or it doesn't, so it can't be sized." },
+      threshold: {
+        default: STANDOUT_THRESHOLD_DEFAULT,
+        label: "Camera cut threshold",
+        hint: "Moves the dotted line: how far a sound has to stand out from the everyday ones to cut to another view. Left: more cuts, even from quiet sounds. Right: only clear standouts.",
+      },
+    },
+  },
+  {
+    key: "cameraHold",
+    label: "Shortest view",
+    description:
+      "The least time, in seconds, a view stays on screen before Camera cut can change it; a dance cut starts it over. " +
+      "Left: cuts can come fast. Right: each view stays longer",
+    group: "Camera",
+    min: 0,
+    max: 10,
+    step: 0.25,
+    default: VIEW_HOLD_SEC,
+    masterScale: false,
   },
   // The camera by hand, on top of the view (camera.ts). Master Scale leaves
   // them alone: scaled, the camera would move whenever someone turned it.
@@ -129,37 +209,14 @@ export const SETTINGS: SceneSetting[] = [
     default: 1,
     masterScale: false,
   },
-  {
-    key: "cut",
-    label: "Cut",
-    description:
-      "On: the loop repeats until the wired input node jumps out from its everyday ones, over the dotted line on its graph, " +
-      "then cuts to another dance (never twice within a couple of seconds). Off, or while Dance holds one, the dance on screen repeats",
-    group: "Camera",
-    type: "boolean",
-    min: 0,
-    max: 1,
-    step: 1,
-    default: 1,
-    drive: {
-      default: "anim.dropOnset",
-      // A cut has no size, so its Reaction row stays on Flat.
-      hit: { ownDetector: true, flatOnly: "A cut either happens or it doesn't, so it can't be sized." },
-      // Scene-handled: the same standout as Physarum 2's Dose threshold
-      // (standout.ts's header has how one is wired).
-      threshold: {
-        default: STANDOUT_THRESHOLD_DEFAULT,
-        label: "Cut threshold",
-        hint: "Moves the dotted line: how far a sound has to stand out from the everyday ones to cut to another angle. Left: more cuts, even from quiet sounds. Right: only clear standouts.",
-      },
-    },
-  },
 ];
 
 /** The Motion group as one section: the Move row with a live readout under
  *  it (speed, frames bought per second, the loop's playhead), then Bounce,
- *  its smoothness and Dance. */
-const PANEL: PanelSection[] = [{ widget: "alienPlay", title: "Motion", settings: ["move", "bounce", "bounceSmooth", "dance"] }];
+ *  its smoothness, Dance and the dance's cut. */
+const PANEL: PanelSection[] = [
+  { widget: "alienPlay", title: "Motion", settings: ["move", "bounce", "bounceSmooth", "dance", "cut", "cutHold"] },
+];
 
 export const card: SceneCard = {
   id: "alien",

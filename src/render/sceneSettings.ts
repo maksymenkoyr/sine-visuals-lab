@@ -92,6 +92,11 @@ export interface SceneSetting {
    *  it into `default`, which must itself be a free option — and the
    *  device menu shows it as a locked chip. */
   proOptions?: readonly string[];
+  /** An "enum" whose first option leaves the pick to the scene (Alien's
+   *  Dance and View on Any): the scene's `probe()` (scene.ts) returns, under
+   *  this setting's key, the option index on screen now, and the device menu
+   *  outlines that chip and names it beside the readout. */
+  onScreen?: true;
   /** How this parameter responds to music character. Signed weights per dial;
    *  omit for a parameter that should stay manual. See autoTune.ts. Inline
    *  type-only import avoids a runtime cycle with autoTune.ts, which imports
