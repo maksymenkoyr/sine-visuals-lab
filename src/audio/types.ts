@@ -138,7 +138,7 @@ export interface FeatureFrame {
    *  animClock treats null as nothing heard. */
   engine: EngineReading | null;
   /** The song layer's reading behind this frame (src/net/protocol.ts's song
-   *  tail); null where none was measured: no song layer yet, no engine, or a
+   *  tail); null where none was measured: no engine, or a
    *  sender that predates it. animClock treats null as nothing heard. */
   song: SongFrame | null;
 }
