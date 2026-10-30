@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createAnimClock, type AnimClock, type AnimFrame } from "../src/render/animClock.ts";
+import { createAnimClock, DROP_MARK, type AnimClock, type AnimFrame } from "../src/render/animClock.ts";
 import { LOCK_MEANINGS } from "../src/render/lockMeaning.ts";
 import { FOLLOW_LOCK } from "../src/render/metronome.ts";
 import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
@@ -93,6 +93,56 @@ describe("the song reading on the anim clock", () => {
     const open = createAnimClock().advance(DT, frame({ level: 1, song: edges }), undefined, marks);
     expect(open.gateDimmer).toBe(1);
     expect(open.song.kickOnset && open.song.clapOnset && open.song.hatOnset && open.song.chordOnset).toBe(true);
+  });
+
+  describe("the Drop edge", () => {
+    const drop = (level: number) => frame({ song: songFrame({ dropLevel: level }) });
+
+    it("fires once when the drop level crosses the mark, and its pulse decays from 1", () => {
+      const clock = createAnimClock();
+      const fires: boolean[] = [];
+      for (const level of [0, 0.4, DROP_MARK - 0.01]) fires.push(clock.advance(DT, drop(level)).dropOnset);
+      expect(fires).toEqual([false, false, false]);
+      const crossed = clock.advance(DT, drop(DROP_MARK));
+      expect(crossed.dropOnset).toBe(true);
+      expect(crossed.dropPulse).toBe(1);
+      const held = clock.advance(DT, drop(1));
+      expect(held.dropOnset).toBe(false);
+      expect(held.dropPulse).toBeLessThan(1);
+      expect(held.dropPulse).toBeGreaterThan(0);
+    });
+
+    it("does not fire again until the level has fallen past the re-arm line", () => {
+      const clock = createAnimClock();
+      let count = 0;
+      const run = (levels: number[]): void => {
+        for (const level of levels) if (clock.advance(DT, drop(level)).dropOnset) count++;
+      };
+      run([0.2, 0.9, 0.8, DROP_MARK - 0.05, 0.9]);
+      expect(count).toBe(1);
+      run([DROP_MARK - 0.2, 0.9]);
+      expect(count).toBe(2);
+    });
+
+    it("does not fire with the silence gate shut, and a drop crossed then is not made up later", () => {
+      const marks: SilenceGateMarks = { closed: 0.5, open: 0.6 };
+      const clock = createAnimClock();
+      const shut = clock.advance(DT, frame({ level: 0, song: songFrame({ dropLevel: 1 }) }), undefined, marks);
+      expect(shut.gateDimmer).toBeLessThan(0.5);
+      expect(shut.dropOnset).toBe(false);
+      expect(shut.dropPulse).toBe(0);
+      const open = clock.advance(DT, frame({ level: 1, song: songFrame({ dropLevel: 1 }) }), undefined, marks);
+      expect(open.dropOnset).toBe(false);
+    });
+
+    it("reads the frame's own level, not the eased one, and fires nothing with no song reading", () => {
+      const clock = createAnimClock();
+      const first = clock.advance(DT, drop(1));
+      expect(first.dropOnset).toBe(true);
+      expect(first.song.dropLevel).toBeLessThan(DROP_MARK);
+      const none = createAnimClock();
+      for (let i = 0; i < 10; i++) expect(none.advance(DT, frame()).dropOnset).toBe(false);
+    });
   });
 
   it("a frame with no song fires no edge and eases every level down to 0", () => {

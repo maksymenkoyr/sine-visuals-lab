@@ -114,6 +114,15 @@ primary at a time; ground `#fafafa` vs. `#fafafa`.
   size (0 = no hit) and Sized lifts the envelope's peak to it; Flat, the
   default, is unchanged.
 - 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/ink.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #803: the scene's drop reaction now fires when audio v6's
+  drop level crosses its mark (`DROP_MARK`, `src/render/animClock.ts`), not
+  on the Section trend's old drop detector.
+  - tune-real on a real song (around-the-world, 60 s) then silence, the
+    commit before → this change, one run each: song change median
+    20.99 → 20.03, p95 24.57 → 24.43; silence median
+    10.61 → 10.04, p95 14.56 → 13.36; hits a minute on the song
+    354 → 377, in silence 0 → 0; drops a minute on the song
+    0 → 2, in silence 0 → 0.
 
 ## Tuning notes
 

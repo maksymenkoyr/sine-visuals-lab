@@ -130,6 +130,15 @@ shells thrown outward on bass hits. Reference frames were pulled ad hoc with
     median 0.00 → 0.00, p95 0.01 → 0.01; hits a minute on the song 416 →
     404, in silence 0 → 0; main's bass / mid / treble lanes 158 / 128 /
     242 a minute against kick / clap / hats / chord 110 / 40 / 276 / 126.
+- 2026-10-30, #803: the scene's drop reaction now fires when audio v6's
+  drop level crosses its mark (`DROP_MARK`, `src/render/animClock.ts`), not
+  on the Section trend's old drop detector.
+  - tune-real on a real song (around-the-world, 60 s) then silence, the
+    commit before → this change, one run each: song change median
+    2.34 → 2.50, p95 4.15 → 3.84; silence median
+    0.00 → 0.00, p95 0.01 → 0.01; hits a minute on the song
+    360 → 365, in silence 0 → 0; drops a minute on the song
+    0 → 2, in silence 0 → 0.
 
 ## Tuning notes
 

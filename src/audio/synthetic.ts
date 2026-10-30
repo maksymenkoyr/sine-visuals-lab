@@ -45,6 +45,13 @@ const NOISE_FLOOR = 0.04;
 const SECTION_PERIOD_SEC = 26;
 const SECTION_DEPTH = 0.7; // 0 = no section dynamics, 1 = quiet section hits pure noise floor
 
+// The song layer's drop level: a quick rise at each section's peak, then a
+// slow fall. The fall is slow enough to cross animClock.ts's re-arm line well
+// before the next section, so every peak fires one Drop.
+const DROP_AT_SECTION = 0.5;
+const DROP_RISE_SEC = 0.4;
+const DROP_FALL_SEC = 2;
+
 // The engine reading's hit strengths: both clear an open silence gate, and the
 // kick stands out more, as a real kick over a hat does.
 const KICK_STRENGTH = 2;
@@ -178,6 +185,8 @@ export function createSyntheticFeed(opts: SyntheticOpts = {}): SyntheticFeed {
       song.hatLevel = hats;
       song.keys = lead;
       song.loudness = energy;
+      const sinceDropSec = (((sectionPhase - DROP_AT_SECTION) % 1) + 1) % 1 * SECTION_PERIOD_SEC;
+      song.dropLevel = sinceDropSec < DROP_RISE_SEC ? sinceDropSec / DROP_RISE_SEC : Math.exp(-(sinceDropSec - DROP_RISE_SEC) / DROP_FALL_SEC);
       return { time: timeSec, bands, energy, onset: beat, pulseOnset: beat, bpm, onsetPhase: beatPhase, level, hats, lead, engine, song };
     },
   };

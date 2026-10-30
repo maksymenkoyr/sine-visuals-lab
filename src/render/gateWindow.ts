@@ -16,7 +16,7 @@
  * and drives.ts imports both: importing a value from drives.ts here would
  * form a runtime cycle. This file imports nothing from drives.ts.
  */
-import { type AnimFrame, BEAT_PULSE_DECAY_PER_SEC } from "./animClock.ts";
+import { type AnimFrame, BEAT_PULSE_DECAY_PER_SEC, DROP_PULSE_DECAY_PER_SEC } from "./animClock.ts";
 import { GROUP_TUNING } from "./bandEnergy.ts";
 import { HIT_KNEE_DEFAULT, hitStandout, type HitLane } from "../audio/hitStrength.ts";
 import { SIGNALS, type SignalId } from "./signals.ts";
@@ -81,12 +81,6 @@ const GLIDE_TAU_MAX_SEC = 0.6;
 const FALL_TAU_MAX_SEC = 1.2;
 const RISE_TAU_SEC = 0.01;
 const SMOOTH_FIRST_TAU_MAX_SEC = 0.4;
-
-// matches src/render/sectionIntensity.ts's own DROP_PULSE_DECAY (kept in
-// step by hand — that module doesn't export it, same convention as
-// LINE_DRIVE_RELEASE_PER_SEC in drives.ts until animClock's own constant was
-// exported for GRID_PULSE_DECAY_PER_SEC).
-const DROP_PULSE_DECAY_PER_SEC = 2.5;
 
 function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
@@ -239,7 +233,7 @@ export function glideStep(y: number, target: number, s: number, dtSec: number): 
 
 /** Which Length row (AnimFrame.hitTail) stretches a hit-kind source's
  *  Graded release — the lane whose pulse edgeDecayPerSec below borrows
- *  its rate from. Null for Drop: its slow pulse (sectionIntensity.ts) is a
+ *  its rate from. Null for Drop: its slow pulse (animClock.ts's DROP_PULSE_DECAY_PER_SEC) is a
  *  section swell, not a hit's ring-out, so no Length row stretches it. */
 function edgeTailLane(id: SignalId): HitLane | null {
   switch (id) {

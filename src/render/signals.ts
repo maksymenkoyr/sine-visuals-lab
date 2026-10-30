@@ -117,8 +117,10 @@ export type MeterCardId = "sound" | "stems" | "beat" | "song";
  *  "energy", "low", "mid" and "high" are the Sound card's Level, Bass, Mid and
  *  Treble rows; "hitAny", "hitKick", "hitClap", "hitHats", "hitChord" and "surge"
  *  are the tracks of its Hits drum roll (audioMeters.ts's HIT_TRACKS); an
- *  instrument track carries its hits' jack and its level's. "lead" is the Stems
- *  card's own row. Each dial's own
+ *  instrument track carries its hits' jack and its level's. "lead" and "keys" are the Stems
+ *  card's own rows, "playing" the Song card's first row and "drop" its track
+ *  beside Section (audioMeters.ts's createDropTrack), whose hit jack and level
+ *  jack both mount there. Each dial's own
  *  cell in the Song card's strip is its DialSignalId. */
 export type MeterRowId =
   | "section"
@@ -137,6 +139,9 @@ export type MeterRowId =
   | "mid"
   | "high"
   | "lead"
+  | "keys"
+  | "playing"
+  | "drop"
   | DialSignalId
   | BandSignalId;
 
@@ -179,6 +184,9 @@ export type SignalId =
   | "anim.hatsLevel"
   | "anim.chordLevel"
   | "anim.lead"
+  | "anim.keys"
+  | "anim.playing"
+  | "anim.dropLevel"
   | "anim.energy"
   | "anim.sectionIntensity"
   | "anim.centroid"
@@ -425,6 +433,25 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     monitor: { card: "stems", row: "lead" },
     bandRange: "mid",
   }),
+  "anim.keys": signal({
+    id: "anim.keys",
+    label: "Keys",
+    description:
+      "How loud the keys are (AnimFrame.song.keys, audio v6's song layer), eased and dimmed by the silence gate like the song's other levels.",
+    kind: "level",
+    read: (_frame, anim) => anim.song.keys,
+    monitor: { card: "stems", row: "keys" },
+    bandRange: "mid",
+  }),
+  "anim.playing": signal({
+    id: "anim.playing",
+    label: "Playing",
+    description:
+      "Whether music is playing (AnimFrame.song.playing, audio v6's song layer): up while it is, down when it stops.",
+    kind: "level",
+    read: (_frame, anim) => anim.song.playing,
+    monitor: { card: "song", row: "playing" },
+  }),
   "anim.energy": signal({
     id: "anim.energy",
     label: "Level",
@@ -457,11 +484,20 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "anim.dropOnset",
     label: "Drop",
     description:
-      "A section-level loudness drop (AnimFrame.dropOnset), read here as sectionIntensity's dropPulse — its decaying flash, the same reasoning as Kick.",
+      "A drop landing: the tick audio v6's drop level (AnimFrame.song.dropLevel) climbs up through its mark, while the silence gate is at least half open (AnimFrame.dropOnset). Read here as its decaying flash (AnimFrame.dropPulse), the same reasoning as Kick.",
     kind: "edge",
     read: (_frame, anim) => anim.dropPulse,
     edge: (anim) => anim.dropOnset,
-    monitor: { card: "song", row: "section" },
+    monitor: { card: "song", row: "drop" },
+  }),
+  "anim.dropLevel": signal({
+    id: "anim.dropLevel",
+    label: "Drop level",
+    description:
+      "The level Drop is picked from: what rises at a drop's start (AnimFrame.song.dropLevel, audio v6's song layer), drawn on the Drop track as its floor.",
+    kind: "level",
+    read: (_frame, anim) => anim.song.dropLevel,
+    monitor: { card: "song", row: "drop" },
   }),
   "anim.centroid": signal({
     id: "anim.centroid",

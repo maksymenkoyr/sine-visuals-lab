@@ -62,6 +62,12 @@ export interface AnimSong {
 /** The gate dimmer a song edge needs: the song layer's edges carry no strength for hitPasses to weigh, so a half-shut gate is the cut-off. */
 const SONG_EDGE_MIN_DIMMER = 0.5;
 
+/** The Drop edge fires when audio v6's ranged drop level (FeatureFrame.song.dropLevel) climbs up through DROP_MARK, and re-arms once it has fallen under DROP_MARK - DROP_REARM_GAP. Both measured on audio-subsystem's rich test (#803): the edge found the drop starts through the mic cases and on line-in where the Section trend's old drop detector and the quantile triggers found almost none. */
+export const DROP_MARK = 0.75;
+const DROP_REARM_GAP = 0.1;
+/** Per second; the Drop edge's pulse falls at this rate, gateWindow.ts's Graded release too. */
+export const DROP_PULSE_DECAY_PER_SEC = 2.5;
+
 /** A pulse after `dtSec` of the decay bandEnergy.ts gives the lane's own pulse. */
 function decayLanePulse(pulse: number, lane: "low" | "mid" | "high", dtSec: number, rateScale: number, tails: HitTails): number {
   return pulse * Math.exp(-dtSec * GROUP_TUNING[lane].pulseDecayRate * rateScale * tails[lane]);
@@ -143,8 +149,9 @@ export interface AnimFrame {
   lowOnset: boolean;
   midOnset: boolean;
   highOnset: boolean;
-  /** Section-level loudness trend and drop flash — see sectionIntensity.ts. */
+  /** Section-level loudness trend — see sectionIntensity.ts. */
   sectionIntensity: number;
+  /** The Drop edge (true only on the tick the song layer's drop level crossed DROP_MARK, while the silence gate is at least half open) and its decaying flash; nothing fires with no song reading. */
   dropPulse: number;
   dropOnset: boolean;
   /** The dials in MUSIC_DIALS' description of the track's character — see
@@ -341,6 +348,8 @@ export function createAnimClock(opts: { lockMeaning?: LockMeaning } = {}): AnimC
   let beatPulse = 0;
   let hats = 0;
   let lead = 0;
+  let dropArmed = true;
+  let dropPulse = 0;
   const song: AnimSong = {
     kickOnset: false,
     clapOnset: false,
@@ -402,6 +411,13 @@ export function createAnimClock(opts: { lockMeaning?: LockMeaning } = {}): AnimC
       song.clapPulse = song.clapOnset ? 1 : decayLanePulse(song.clapPulse, "mid", dtSec, rateScale, hitTail);
       song.hatPulse = song.hatOnset ? 1 : decayLanePulse(song.hatPulse, "high", dtSec, rateScale, hitTail);
       song.chordPulse = song.chordOnset ? 1 : decayLanePulse(song.chordPulse, "mid", dtSec, rateScale, hitTail);
+      // Reads the frame's own level, before the easing below.
+      const dropLevel = heard?.dropLevel ?? 0;
+      if (dropLevel < DROP_MARK - DROP_REARM_GAP) dropArmed = true;
+      const dropCrossed = dropArmed && dropLevel >= DROP_MARK;
+      if (dropCrossed) dropArmed = false;
+      const dropOnset = edgesOpen && dropCrossed;
+      dropPulse = dropOnset ? 1 : dropPulse * Math.exp(-dtSec * DROP_PULSE_DECAY_PER_SEC);
       for (const key of SONG_LEVELS) song[key] = slewLevel(song[key], heard ? heard[key] * dimmer : 0, dtSec, rateScale);
       const beatRatio = frame.engine?.surge ?? 0;
       // Tap tempo (tapTempo.ts's header). The seed lands before either
@@ -501,8 +517,8 @@ export function createAnimClock(opts: { lockMeaning?: LockMeaning } = {}): AnimC
         midOnset: bandEnergy.midOnset,
         highOnset: bandEnergy.highOnset,
         sectionIntensity: section.intensity,
-        dropPulse: section.dropPulse,
-        dropOnset: section.dropOnset,
+        dropPulse,
+        dropOnset,
         profile: {
           pulse: profile.pulse,
           tempo: profile.tempo,
