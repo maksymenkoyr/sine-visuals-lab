@@ -111,7 +111,9 @@ export interface FeatureFrame {
   /** Hats [0,1]: the drum part of the Treble range, from src/audio/stemSplit.ts
    *  on the device that hears the sound, sent to followers in the frame. 0
    *  wherever there is no split to read (no analyser, a sender that predates
-   *  it). Unslewed and ungated here; AnimFrame.hats is the eased, gated form. */
+   *  it). Unslewed and ungated here; AnimFrame.hats is the eased, gated form.
+   *  No signal reads it any more (the Hats hit and its level come from `song`);
+   *  it stays on the wire for followers that predate that. */
   hats: number;
   /** Lead [0,1]: the held part of the Mid range (vocals, synths, guitar), the
    *  same way as `hats`. */

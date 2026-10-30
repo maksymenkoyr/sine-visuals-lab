@@ -235,11 +235,14 @@ confidence falls under its close mark (`musicHoldsGate`). An empty room's hiss
 never gets that periodic. Each device runs this off the `music` and
 `confidence` its frames carry, so the pop-out and a TV open with the laptop.
 
-Hats is a hit found beside the engine, not by it: a peak of the sound above
-`HATS_LO_HZ` over its own floor (`src/audio/stemSplit.ts`, then
-`src/render/levelHits.ts` in `animClock.ts`). Because the engine names each
+Hats is a hit found beside the engine, not by it. It used to be a peak of the
+sound above `HATS_LO_HZ` over its own floor (`src/audio/stemSplit.ts`, then a
+peak finder in `animClock.ts`, now gone); the Hats signal now reads the song
+layer's hat edge (`src/audio/song/`, below), and the split's hats level no
+longer feeds a signal. The note that follows is the measurement that picked
+the first approach, kept dated. Because the engine names each
 attack once, its hats miss most hi-hats that land with a kick or a snare; Hats
-reads only the top of the spectrum, so it keeps them. It borrows one verdict
+reads only the top of the spectrum, so it keeps them. It borrowed one verdict
 from the engine: a peak counts only while `music` is on. The jumps above also
 wait for it; their confidence floor only lost Hats real hits. Changing the engine's naming to find these hats would
 move every bench score above; this leaves them untouched. Measured 2026-10-26
@@ -336,7 +339,13 @@ like the engine's hits: `WireDecimator` ORs them across skipped ticks,
 `JitterBuffer` queues each edge and hands it out once when it comes due, and the
 pop-out's inbox keeps it until a render takes it. `animClock` eases the levels
 and turns the edges into `AnimFrame.song`, and `renderLatch` keeps the edges for
-a render-capped scene.
+a render-capped scene. Both the levels and the edges answer to the silence gate
+there: the levels carry its dimmer, and an edge counts only while the gate is at
+least half open (`SONG_EDGE_MIN_DIMMER`), since the song's edges carry no
+strength for `hitPasses` to weigh. The panel's Kick, Clap, Hats and Chord
+signals (`src/render/signals.ts`) read these, and the host's firing marks
+(`EngineSource.marks`) reach only the Hits roll on the device that hears the
+music.
 
 `SongLayer` (`src/audio/song/songLayer.ts`) fills it. It runs on the main
 thread beside the engine, in `src/audio/engineSource.ts`: both get every capture

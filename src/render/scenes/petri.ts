@@ -345,7 +345,7 @@ void main() {
   uv.x *= aspect;
 
   float glowEff = uGlow * (1.0 + 0.6 * glowDrive(uBeatPulse));
-  float reliefEff = uRelief * (1.0 + 0.8 * reliefDrive(uLowPulse));
+  float reliefEff = uRelief * (1.0 + 0.8 * reliefDrive(uKickPulse));
   float hueShift = (tintDrive(uCentroid) - 0.5) * uTint * 0.5;
   float zoom = 1.0 + uPunch * 0.10 * punchDrive(uBeatPulse) + 0.12 * uCutKick;
 
@@ -668,9 +668,9 @@ function createPetriScene(): Scene {
         anySeedThisFrame = true;
       }
 
-      const wipeFired = drives.fired("wipe", anim.lowOnset);
+      const wipeFired = drives.fired("wipe", anim.song.kickOnset);
       if (wipeFired && wipeAmount > 0.02 && wipeCooldown <= 0 && slotsUsed < MAX_SEEDS) {
-        const radius = (0.015 + 0.05 * wipeAmount) * (0.6 + 0.4 * anim.lowPulse) * drives.hitSize("wipe");
+        const radius = (0.015 + 0.05 * wipeAmount) * (0.6 + 0.4 * anim.song.kickPulse) * drives.hitSize("wipe");
         stampSeed(-1, radius);
         wipeCooldown = WIPE_COOLDOWN_SEC;
         anySeedThisFrame = true;

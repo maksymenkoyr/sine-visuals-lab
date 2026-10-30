@@ -26,7 +26,7 @@ const clocks = (over: Partial<MoveClocks> = {}): MoveClocks => ({
   barPhase: 0.6,
   tempoLock: 1,
   beatPulse: 0.5,
-  lowPulse: 0.2,
+  kickPulse: 0.2,
   sectionIntensity: 0.5,
   dropPulse: 0,
   flowPhase: 3.7,
@@ -100,8 +100,8 @@ describe("dancers moves", () => {
   it("sway reads only the free clock, never the beat", () => {
     const a = createPose();
     const b = createPose();
-    sway(clocks({ beatPhase: 0.1, barPhase: 0.2, beatPulse: 1, lowPulse: 1 }), 0.8, a);
-    sway(clocks({ beatPhase: 0.9, barPhase: 0.7, beatPulse: 0, lowPulse: 0 }), 0.8, b);
+    sway(clocks({ beatPhase: 0.1, barPhase: 0.2, beatPulse: 1, kickPulse: 1 }), 0.8, a);
+    sway(clocks({ beatPhase: 0.9, barPhase: 0.7, beatPulse: 0, kickPulse: 0 }), 0.8, b);
     expect([...a]).toEqual([...b]);
   });
 

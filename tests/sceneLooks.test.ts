@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { deflateSync, inflateSync, strFromU8 } from "fflate";
 import type { SceneSetting } from "../src/render/sceneSettings.ts";
 import { getSceneSetting, setSceneSetting } from "../src/render/sceneSettings.ts";
@@ -137,23 +137,23 @@ describe("encodeLook / decodeLook", () => {
       name: "Driven",
       sceneId: "caustics",
       manual: { focus: 0.4 },
-      drives: { flash: driveSettingFromChoice("anim.lowOnset"), ripple: driveSettingFromChoice({ source: "beat", grid: 3 }) },
+      drives: { flash: driveSettingFromChoice("anim.kickOnset"), ripple: driveSettingFromChoice({ source: "beat", grid: 3 }) },
     };
     expect(decodeLook(encodeLook(look))).toEqual(look);
   });
 
   it("a one-source, weight-1, Graded patch encodes on the wire as the bare DriveChoice (old-app compatible)", () => {
-    const look: SceneLook = { name: "D", sceneId: "caustics", manual: {}, drives: { flash: driveSettingFromChoice("anim.lowOnset") } };
+    const look: SceneLook = { name: "D", sceneId: "caustics", manual: {}, drives: { flash: driveSettingFromChoice("anim.kickOnset") } };
     const code = encodeLook(look);
     const wire = wireOf(code);
-    expect(wire.d).toEqual({ flash: "anim.lowOnset" });
+    expect(wire.d).toEqual({ flash: "anim.kickOnset" });
   });
 
   it("a real multi-source patch round-trips as the compact {m,s} form", () => {
     const patch: DriveSetting = {
       mix: "gate",
       sources: [
-        { choice: "anim.lowOnset", weight: 1.5, height: "graded" },
+        { choice: "anim.kickOnset", weight: 1.5, height: "graded" },
         { choice: "anim.mid", weight: 0.7 },
       ],
     };
@@ -163,7 +163,7 @@ describe("encodeLook / decodeLook", () => {
     expect(wire.d.flash).toEqual({
       m: "gate",
       s: [
-        { c: "anim.lowOnset", w: 1.5, h: "graded" },
+        { c: "anim.kickOnset", w: 1.5, h: "graded" },
         { c: "anim.mid", w: 0.7 },
       ],
     });
@@ -174,7 +174,7 @@ describe("encodeLook / decodeLook", () => {
     const patch: DriveSetting = {
       mix: "gate",
       sources: [
-        { choice: "anim.lowOnset", weight: 1 },
+        { choice: "anim.kickOnset", weight: 1 },
         { choice: "anim.mid", weight: 1, when: true },
         { choice: "anim.high", weight: 1, when: true, off: true },
       ],
@@ -233,9 +233,9 @@ describe("captureLook", () => {
     const look = captureLook("Test", sceneId, SPECS_WITH_DRIVE);
     expect(look.drives).toBeUndefined(); // flash is still at its default (feature.onset)
 
-    setDriveSetting(sceneId, FLASH, driveSettingFromChoice("anim.lowOnset"));
+    setDriveSetting(sceneId, FLASH, driveSettingFromChoice("anim.kickOnset"));
     const look2 = captureLook("Test", sceneId, SPECS_WITH_DRIVE);
-    expect(look2.drives).toEqual({ flash: driveSettingFromChoice("anim.lowOnset") });
+    expect(look2.drives).toEqual({ flash: driveSettingFromChoice("anim.kickOnset") });
   });
 });
 
@@ -258,10 +258,10 @@ describe("applyLook", () => {
 
   it("sets a listed drive choice and resets an unlisted one back to its default", () => {
     const sceneId = "look-apply-2";
-    setDriveSetting(sceneId, FLASH, driveSettingFromChoice("anim.highOnset"));
+    setDriveSetting(sceneId, FLASH, driveSettingFromChoice("anim.hats"));
 
-    applyLook({ name: "L", sceneId, manual: {}, drives: { flash: driveSettingFromChoice("anim.lowOnset") } }, SPECS_WITH_DRIVE);
-    expect(getDriveSetting(sceneId, FLASH)).toEqual(driveSettingFromChoice("anim.lowOnset"));
+    applyLook({ name: "L", sceneId, manual: {}, drives: { flash: driveSettingFromChoice("anim.kickOnset") } }, SPECS_WITH_DRIVE);
+    expect(getDriveSetting(sceneId, FLASH)).toEqual(driveSettingFromChoice("anim.kickOnset"));
 
     applyLook({ name: "L2", sceneId, manual: {} }, SPECS_WITH_DRIVE);
     expect(getDriveSetting(sceneId, FLASH)).toEqual(driveSettingFromChoice("feature.onset"));
@@ -405,5 +405,85 @@ describe("wire modifiers in a Look", () => {
     expect(decodeLook(wireJson({ ...base, h: { n1: { ...node, src: "__proto__" } } }))).toBeNull();
     expect(decodeLook(wireJson({ ...base, h: { n1: "x" } }))).toBeNull();
     expect(decodeLook(wireJson({ ...base, h: [] }))).toBeNull();
+  });
+});
+
+describe("a retired signal id in a Look", () => {
+  const wireJson = (payload: unknown): string => btoa(JSON.stringify(payload)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+  afterEach(() => {
+    delete (globalThis as { localStorage?: unknown }).localStorage;
+    vi.resetModules();
+  });
+
+  it("a share code made on main with Bass hit decodes onto Kick", () => {
+    // main's ids: the code carries what the app wrote before the retirement.
+    const look = decodeLook(
+      wireJson({
+        v: 1,
+        n: "old",
+        s: "caustics",
+        m: {},
+        d: { flash: "anim.lowOnset", ripple: { m: "add", s: [{ c: "anim.midOnset" }, { c: "anim.highOnset", w: 0.5 }, { c: "anim.kickBand" }] } },
+      }),
+    );
+    expect(look?.drives?.flash).toEqual(driveSettingFromChoice("anim.kickOnset"));
+    expect(look?.drives?.ripple).toEqual({
+      mix: "add",
+      sources: [
+        { choice: "anim.chordOnset", weight: 1 },
+        { choice: "anim.hats", weight: 0.5 },
+        { choice: "anim.kickLevel", weight: 1 },
+      ],
+    });
+  });
+
+  it("a saved Look with a Bass hit wire applies as Kick", () => {
+    const sceneId = "look-retired-apply";
+    const old = { mix: "add", sources: [{ choice: "anim.lowOnset", weight: 1 }] } as unknown as DriveSetting;
+    applyLook({ name: "old", sceneId, manual: {}, drives: { flash: old } }, SPECS_WITH_DRIVE);
+    expect(getDriveSetting(sceneId, FLASH)).toEqual(driveSettingFromChoice("anim.kickOnset"));
+  });
+
+  it("an entry that fails is dropped from the Look, not the Look: applied, the setting returns to its default", () => {
+    const sceneId = "look-retired-bad";
+    setDriveSetting(sceneId, FLASH, driveSettingFromChoice("anim.hats"));
+    const bad = { mix: "add", sources: [{ choice: "anim.nope", weight: 1 }] } as unknown as DriveSetting;
+    applyLook({ name: "bad", sceneId, manual: { focus: 0.3 }, drives: { flash: bad } }, SPECS_WITH_DRIVE);
+    expect(getDriveSetting(sceneId, FLASH)).toEqual(driveSettingFromChoice("feature.onset"));
+    expect(getSceneSetting(sceneId, FOCUS)).toBeCloseTo(0.3);
+  });
+
+  it("when the store loads, each saved Look's drives are read through the current catalogue and a bad entry goes alone", async () => {
+    const raw = new Map<string, string>();
+    raw.set(
+      "vibe.looks",
+      JSON.stringify({
+        caustics: [
+          {
+            name: "old",
+            sceneId: "caustics",
+            manual: { focus: 0.2 },
+            drives: {
+              flash: { mix: "add", sources: [{ choice: "anim.highOnset", weight: 1 }] },
+              ripple: { mix: "add", sources: [{ choice: "anim.nope", weight: 1 }] },
+              sparkle: 12,
+              glow: "scene",
+            },
+          },
+        ],
+      }),
+    );
+    (globalThis as { localStorage?: unknown }).localStorage = {
+      getItem: (k: string) => raw.get(k) ?? null,
+      setItem: (k: string, v: string) => void raw.set(k, v),
+      removeItem: (k: string) => void raw.delete(k),
+    };
+    vi.resetModules();
+    const fresh = await import("../src/render/sceneLooks.ts");
+    const [look] = fresh.listLooks("caustics");
+    expect(look?.manual).toEqual({ focus: 0.2 });
+    expect(look?.drives).toEqual({ flash: driveSettingFromChoice("anim.hats"), glow: "scene" });
+    expect(JSON.parse(raw.get("vibe.looks")!).caustics[0].drives.flash.sources[0].choice).toBe("anim.hats");
   });
 });

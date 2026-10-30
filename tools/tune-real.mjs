@@ -24,8 +24,9 @@
 //   drift) and p95 (the pulses). Timed by the clock, not per frame, so a
 //   slow headless frame rate doesn't shrink it.
 // - hits/min: rising edges of the probe's beat.fired (each detected hit,
-//   not just the beat), counted every frame; bass, mid and treble/min the
-//   same for each lane's own hit (the probe's beat.lanes).
+//   not just the beat), counted every frame; kick, clap, hats and chord/min
+//   the same for each instrument's own edge (the probe's beat.hits, the song
+//   layer's edges as a scene sees them).
 // - energy: mean of the probe's bands.energy, to confirm the song arrived.
 // Thresholds differ per scene, so nothing passes or fails here: on silence,
 // any change should be motion the scene has by design, and no hit should
@@ -124,8 +125,8 @@ async function measure(source, file) {
           let nextSample = fromMs;
           let hits = 0;
           let wasFired = false;
-          const lanes = { low: 0, mid: 0, high: 0 };
-          const laneWas = { low: false, mid: false, high: false };
+          const inst = { kick: 0, clap: 0, hat: 0, chord: 0 };
+          const instWas = { kick: false, clap: false, hat: false, chord: false };
           let energy = 0;
           let frames = 0;
           const tick = () => {
@@ -135,9 +136,9 @@ async function measure(source, file) {
               if (p) {
                 if (p.beat.fired && !wasFired) hits++;
                 wasFired = p.beat.fired;
-                for (const k of Object.keys(lanes)) {
-                  if (p.beat.lanes[k] && !laneWas[k]) lanes[k]++;
-                  laneWas[k] = p.beat.lanes[k];
+                for (const k of Object.keys(inst)) {
+                  if (p.beat.hits[k] && !instWas[k]) inst[k]++;
+                  instWas[k] = p.beat.hits[k];
                 }
                 energy += p.bands.energy;
                 frames++;
@@ -156,7 +157,7 @@ async function measure(source, file) {
                 nextSample = t + sampleMs;
               }
             }
-            if (t >= untilMs) resolve({ change, hits, lanes, energy: energy / Math.max(1, frames), fps: frames / ((t - fromMs) / 1000) });
+            if (t >= untilMs) resolve({ change, hits, inst, energy: energy / Math.max(1, frames), fps: frames / ((t - fromMs) / 1000) });
             else requestAnimationFrame(tick);
           };
           tick();
@@ -175,7 +176,7 @@ async function measure(source, file) {
     const sorted = [...r.change].sort((a, b) => a - b);
     const at = (q) => sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] ?? 0;
     const perMin = (n) => (n / seconds) * 60;
-    return { source, median: at(0.5), p95: at(0.95), hitsPerMin: perMin(r.hits), lanes: [r.lanes.low, r.lanes.mid, r.lanes.high].map(perMin), energy: r.energy, fps: r.fps };
+    return { source, median: at(0.5), p95: at(0.95), hitsPerMin: perMin(r.hits), inst: [r.inst.kick, r.inst.clap, r.inst.hat, r.inst.chord].map(perMin), energy: r.energy, fps: r.fps };
   } finally {
     await browser.close();
   }
@@ -183,11 +184,11 @@ async function measure(source, file) {
 
 const rows = [await measure("song", wav), await measure("silence", silentWav(fromSec + seconds + 5))];
 console.log(`\n${scene}: ${seconds} s from ${fromSec} s, change = % of full scale per ${SAMPLE_MS} ms`);
-console.log("source    change med  change p95  hits/min  bass/min  mid/min  treble/min  energy  fps");
+console.log("source    change med  change p95  hits/min  kick/min  clap/min  hats/min  chord/min  energy  fps");
 for (const r of rows) {
-  const [bass, mid, treble] = r.lanes.map((n) => n.toFixed(0));
+  const [kick, clap, hats, chord] = r.inst.map((n) => n.toFixed(0));
   console.log(
-    `${r.source.padEnd(9)} ${r.median.toFixed(2).padStart(10)}  ${r.p95.toFixed(2).padStart(10)}  ${r.hitsPerMin.toFixed(0).padStart(8)}  ${bass.padStart(8)}  ${mid.padStart(7)}  ${treble.padStart(10)}  ${r.energy.toFixed(2).padStart(6)}  ${r.fps.toFixed(0).padStart(3)}`,
+    `${r.source.padEnd(9)} ${r.median.toFixed(2).padStart(10)}  ${r.p95.toFixed(2).padStart(10)}  ${r.hitsPerMin.toFixed(0).padStart(8)}  ${kick.padStart(8)}  ${clap.padStart(8)}  ${hats.padStart(8)}  ${chord.padStart(9)}  ${r.energy.toFixed(2).padStart(6)}  ${r.fps.toFixed(0).padStart(3)}`,
   );
 }
 const [song, silence] = rows;

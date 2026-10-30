@@ -10,7 +10,7 @@ export const gallery = { stage: "draft", added: "2026-09-25" } as const;
  *  pattern (src/render/scenes/shards/index.ts). "High"/"Bar" have no
  *  registered SignalId (beatListener.ts's SOURCE_SIGNAL), so arcSource's own
  *  `reads` below only covers Beat/Bass — no chip for the other two. */
-export const ARC_SOURCE_NAMES = ["Beat", "Bass", "High", "Bar"] as const;
+export const ARC_SOURCE_NAMES = ["Beat", "Kick", "Hats", "Bar"] as const;
 export const ARC_SOURCE = { BEAT: 0, BASS: 1, HIGH: 2, BAR: 3 } as const;
 
 export const SETTINGS: SceneSetting[] = [
@@ -146,7 +146,7 @@ export const SETTINGS: SceneSetting[] = [
     // claiming the broadband beat.
     reads: [
       { signal: "feature.onset", activeWhen: (get) => get("arcSource") === ARC_SOURCE.BEAT },
-      { signal: "anim.lowOnset", activeWhen: (get) => get("arcSource") === ARC_SOURCE.BASS },
+      { signal: "anim.kickOnset", activeWhen: (get) => get("arcSource") === ARC_SOURCE.BASS },
     ] satisfies readonly SignalLink[],
   },
   {
@@ -195,7 +195,7 @@ export const SETTINGS: SceneSetting[] = [
   {
     key: "arcSource",
     label: "Lightning on",
-    description: "What triggers a strike: every beat, bass hits only, high-band hits only, or once a bar",
+    description: "What triggers a strike: every beat, kicks only, hat hits only, or once a bar",
     group: "Look",
     type: "enum",
     options: [...ARC_SOURCE_NAMES],
@@ -205,7 +205,7 @@ export const SETTINGS: SceneSetting[] = [
     default: ARC_SOURCE.BEAT,
     reads: [
       { signal: "feature.onset", activeWhen: (get) => get("arcSource") === ARC_SOURCE.BEAT },
-      { signal: "anim.lowOnset", activeWhen: (get) => get("arcSource") === ARC_SOURCE.BASS },
+      { signal: "anim.kickOnset", activeWhen: (get) => get("arcSource") === ARC_SOURCE.BASS },
     ] satisfies readonly SignalLink[],
   },
 ];

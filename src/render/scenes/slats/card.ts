@@ -105,7 +105,7 @@ export const SETTINGS: SceneSetting[] = [
   {
     key: "kickDip",
     label: "Kick dip",
-    description: "Brightness dips for an instant against a bass hit",
+    description: "Brightness dips for an instant against a kick",
     group: "Motion",
     min: 0,
     max: 0.6,
@@ -113,8 +113,8 @@ export const SETTINGS: SceneSetting[] = [
     default: 0.15,
     advanced: true,
     auto: { pulse: 0.2 },
-    // uLowPulse directly (SLAT_FRAG's alpha dip) — a plain Bass hit default.
-    drive: { default: "anim.lowOnset" },
+    // uKickPulse directly (SLAT_FRAG's alpha dip) — a plain Kick default.
+    drive: { default: "anim.kickOnset" },
   },
   {
     key: "opacity",

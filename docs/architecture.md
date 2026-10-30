@@ -34,10 +34,11 @@ through `musicProfile.ts`'s dials, and neither is a setting.
 `src/audio/sensitivity.ts`'s Sensitivity/Expansion/Smoothing curves shape the
 bands on top of that, at values `src/render/autoTune.ts` picks from the music. Beside the bands,
 `src/audio/stemSplit.ts` reads the analyser's full FFT bins, before the AGC (which
-would level held sound away): the hits at the top of the spectrum for the Hats
-signal, and the held part of the mids for Lead; `app.ts` writes both into the frame, so a TV gets
+would level held sound away): the held part of the mids for Lead (and the hits
+at the top of the spectrum, which no signal reads now: the Hats hit comes from
+the song layer, `src/audio/song/`); `app.ts` writes both into the frame, so a TV gets
 them over the wire rather than working them out itself. The split runs only on
-ticks where something reads them; `src/render/stemReaders.ts` says who does.
+ticks where something reads Lead; `src/render/stemReaders.ts` says who does.
 
 Each render tick, `src/render/animClock.ts`'s `createAnimClock` takes the current
 `FeatureFrame` and produces one `AnimFrame` — flow phase, the audio engine's

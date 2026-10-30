@@ -16,8 +16,8 @@ that reshapes an input node's value on its way to that one setting.
 
 | Say | Means | Don't say | In code |
 |---|---|---|---|
-| **input node** | A live value measured from the sound or the tempo tracker: Bass hit, Treble level, Tempo lock, Beat wave. Its panel label comes from `driveSourceLabel` (`src/ui/driveSources.ts`); one input, one name, the same on its row, its wire and its pill. | signal, meter, source, input | `SignalId`, `DriveSourceChoice` |
-| **hit** / **level** | The two kinds of input node. A **hit** fires once per sound, such as Bass hit or Hats, and its monitor is a track of **notes**. A **level** moves all the time, such as Treble level or Lead, and its monitor is a line graph. A hit's wire adds **Height**: **Fixed** (every hit full height) or **Graded** (as tall as the hit), where the hit has a size. Both take a modifier. "+ Add by name" lists them under **Hits** and **Levels**. | event, trigger, signal (for a level), edge | `kind: "edge"` / `"level"` in `src/render/signals.ts`; `HitHeight` (`src/render/gateWindow.ts`); `DRIVE_ADD_GROUPS` (`src/ui/driveSources.ts`) |
+| **input node** | A live value measured from the sound or the tempo tracker: Kick, Treble level, Tempo lock, Beat wave. Its panel label comes from `driveSourceLabel` (`src/ui/driveSources.ts`); one input, one name, the same on its row, its wire and its pill. | signal, meter, source, input | `SignalId`, `DriveSourceChoice` |
+| **hit** / **level** | The two kinds of input node. A **hit** fires once per sound, such as Kick or Hats, and its monitor is a track of **notes**; an instrument's hit has its level beside it as a second input node (Kick level), drawn as the floor of that track. A **level** moves all the time, such as Treble level or Lead, and its monitor is a line graph. A hit's wire adds **Height**: **Fixed** (every hit full height) or **Graded** (as tall as the hit), where the hit has a size. Both take a modifier. "+ Add by name" lists them under **Hits** and **Levels**. | event, trigger, signal (for a level), edge | `kind: "edge"` / `"level"` in `src/render/signals.ts`; `HitHeight` (`src/render/gateWindow.ts`); `DRIVE_ADD_GROUPS` (`src/ui/driveSources.ts`) |
 | **jack** | The ring on an input node's row, in the meters. An input node goes *out* of its jack. | output, socket | `src/ui/jack.ts` |
 | **animation node** | A scene setting that can follow input nodes. Shorten to **setting** once the sentence has said which one. | reactive setting, driver, drive row, patched setting, destination | a `SceneSetting` with a `drive` |
 | **port** | The ring at the left of an animation node's row. Wires end here; clicking it pins the setting. | input port, jack | the row's `port` button (`buildDriveRow`) |
@@ -67,21 +67,24 @@ that reshapes an input node's value on its way to that one setting.
   single bands, each named by its Hz. Click a bar
   on the spectrum to give that band its own row and click it again to drop
   it; a band wired to a setting always shows its row. Then Level, then
-  **Hits**: a drum roll with a track and a jack for Any, Bass, Mid, Treble
-  and Onset surge. A **note** is one reading that cleared its line: filled
+  **Hits**: a drum roll with a track and a jack for Any, then one for each
+  instrument the song layer hears (`HIT_TRACKS` in `src/ui/audioMeters.ts`),
+  then Onset surge. An instrument's track has two jacks, its hits and the
+  level they are picked from; the level is drawn as a filled floor under the
+  notes, and a dashed line marks where the hit fires, on the device that hears
+  the music only. A **note** on Any is one reading that cleared its line: filled
   when it counted, hollow when it came too soon after the last, faint white
-  when the room was too quiet. Its fold id (`"sound"`) is new, so the old Dynamics fold doesn't carry
+  when the room was too quiet. An instrument's note is filled when it counted,
+  brighter the higher its level stood. Its fold id (`"sound"`) is new, so the old Dynamics fold doesn't carry
   over.
 - **Stems card.** Right after Sound: Lead, the held part of the sound, as a
-  line; Hats, the hi-hats and cymbals, as a Hits track with a **note** on
-  each hit, brighter the harder it hit, and faint white where it peaked while
-  the engine heard no music; then Kick. Each has its own colour
-  and jack. Lead and Hats are measured only on the device with the mic.
+  line with its own colour and jack. It is measured only on the device with
+  the mic.
 
 ## Writing new copy
 
 - Name the input node by its panel label, the setting by its row label: "Plug
-  Bass hit into Beat Expand", "Unplug Bass hit".
+  Kick into Beat Expand", "Unplug Kick".
 - Prefer the concrete noun to the abstract one: "this wire", not "this
   source" or "this input".
 - The code names in the right-hand column are not wrong and don't need

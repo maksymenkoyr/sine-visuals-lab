@@ -124,6 +124,13 @@ has by design.
   | #682 | 19.17 | 22.83 | 7.95 | 9.27 |
 
   Back to the old lanes' motion. No hit fired on silence.
+- 2026-10-30, #802: Push moved from the bass hit to the Kick and Spin from
+  the mid hit to the Chord.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 17.87 → 16.57, p95 21.61 → 21.26; silence
+    median 7.97 → 7.95, p95 9.19 → 9.21; hits a minute on the song 426 →
+    416, in silence 0 → 0; main's bass / mid / treble lanes 142 / 138 /
+    242 a minute against kick / clap / hats / chord 106 / 48 / 282 / 124.
 
 ## Tuning notes
 

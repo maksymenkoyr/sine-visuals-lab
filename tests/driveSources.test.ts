@@ -15,6 +15,24 @@ describe("add groups", () => {
   });
 });
 
+describe("the instruments", () => {
+  it("every catalogue entry has a label, a description and a colour", () => {
+    for (const id of Object.keys(SIGNALS) as (keyof typeof SIGNALS)[]) {
+      expect(driveSourceLabel(id), id).toBeTruthy();
+      expect(driveSourceDescription(id), id).toBeTruthy();
+      expect(driveSourceColor(id), id).toMatch(/^#[0-9a-f]{6}$/i);
+    }
+  });
+
+  it("the add groups list Kick, Clap, Hats and Chord as hits and their levels beside the band levels", () => {
+    const labels = (name: string) => DRIVE_ADD_GROUPS.find((g) => g.label === name)!.choices.map((c) => driveSourceLabel(c));
+    expect(labels("Hits")).toEqual(["Any hit", "Kick", "Clap", "Hats", "Chord", "Drop"]);
+    const levels = labels("Levels");
+    for (const level of ["Kick level", "Clap level", "Hats level", "Chord level", "Bass level", "Mid level", "Treble level"]) expect(levels).toContain(level);
+    expect(levels).not.toContain("Kick band");
+  });
+});
+
 describe("band sources", () => {
   // SignalId's template-literal band member lets the label/description/colour
   // records type-check with a band missing, so this is the only guard.

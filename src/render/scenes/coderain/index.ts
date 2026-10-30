@@ -18,9 +18,9 @@
 // these are this scene's own choices:
 // - Rush: how far the overall level speeds the fall up or slows it, centred
 //   on a mid reading (All level is auto-gained, so it sits mid-range).
-// - Downpour: on a bass hit, a share of the columns starts a fresh, brighter
+// - Downpour: on a kick, a share of the columns starts a fresh, brighter
 //   head at the top of the view (the burst ring, BURST_SLOTS deep).
-// - Hit glow: the heads flare on a bass hit.
+// - Hit glow: the heads flare on a kick.
 // - Turn: on a drop, the camera swings to a new heading, smoothly (the
 //   reference has no hard cuts; neither does this).
 // The camera is an explorer on foot (explorer.ts): it walks on without
@@ -309,9 +309,9 @@ function createCodeRainScene(): Scene {
       fallClock += FALL_BASE * speed * fall * Math.max(0.25, 1 + RUSH_GAIN * rush * (level - 0.5)) * dt;
 
       // Bursts: a hit starts fresh heads at the top of the view.
-      const downpourFired = drives.fired("downpour", anim.lowOnset);
+      const downpourFired = drives.fired("downpour", anim.song.kickOnset);
       if (downpour > 0.001 && downpourFired && anim.timeSec - lastBurstTime > BURST_MIN_GAP_SEC) {
-        const height = clamp01(drives.value("downpour", anim.lowPulse));
+        const height = clamp01(drives.value("downpour", anim.song.kickPulse));
         const slot = burstCount % BURST_SLOTS;
         bursts[slot * 4] = fallClock;
         bursts[slot * 4 + 1] = DOWNPOUR_SHARE * downpour * Math.max(0.35, height) * drives.hitSize("downpour");
@@ -330,7 +330,7 @@ function createCodeRainScene(): Scene {
         burstUniform[s * 4 + 2] = bursts[s * 4 + 2];
         burstUniform[s * 4 + 3] = 0;
       }
-      const headLift = 1 + HEAD_LIFT * hitGlow * clamp01(drives.value("hitGlow", anim.lowPulse));
+      const headLift = 1 + HEAD_LIFT * hitGlow * clamp01(drives.value("hitGlow", anim.song.kickPulse));
 
       // The camera: the explorer walks and looks; a drop swings it all.
       const turnFired = drives.fired("turn", anim.dropOnset);

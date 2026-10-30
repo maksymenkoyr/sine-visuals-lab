@@ -75,6 +75,7 @@ import { hideTooltip, showTooltip } from "./tooltip.ts";
 import { setHintText } from "./hintSwatches.ts";
 import { installKeyHints, noteKeyUse, SHORTCUTS, welcomeOnce } from "./keyHints.ts";
 import { createAudioMeters, type AudioMetersDeps } from "./audioMeters.ts";
+import type { SongMarks } from "../audio/song/songLayer.ts";
 import { chainOf, type ChainFocus, type ChainGraph } from "./patchChain.ts";
 import { isOffReadout, sliderValueText } from "./sliderValueText.ts";
 import {
@@ -461,6 +462,8 @@ export interface DeviceMenuDeps {
   currentPaletteId: () => string;
   /** False while app.ts skips the stem split (src/render/stemReaders.ts); Heat records a gap. */
   stemsMeasured: () => boolean;
+  /** Where the song layer's triggers fire (EngineSource.marks); null wherever this device runs no song layer of its own. */
+  getSongMarks: () => SongMarks | null;
   onPickPalette: (id: string) => void;
   getAudioStatus: () => AudioStatus;
   /** Mic-vs-screen state (src/audio/sourcePref.ts). Null on a renderer or the synthetic feed, which hides the Source row. */
@@ -2019,6 +2022,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     getSilenceGate: () => deps.resolveSilenceGate(),
     getBandEdgesHz: () => deps.getBandEdgesHz(),
     stemsMeasured: () => deps.stemsMeasured(),
+    getSongMarks: () => deps.getSongMarks(),
     patch: jackPatch,
   });
 

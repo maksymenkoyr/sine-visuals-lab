@@ -138,6 +138,12 @@ beat and a drop inverts the picture for a few bars. Draft scene.
   plain loop already sits in the app's range, so it was dropped.
 - 2026-10-08 — Step, Fold and Invert became hit drivers (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the grid jump, the fold amount and how far the drop inversion goes (DiveInputs.invertSize) by how far the hit stood out; Flat, the default, is unchanged.
 - 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/fractalgrid/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #802: Step's wire moved from the bass hit to the Kick.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 12.59 → 12.64, p95 28.69 → 29.33; silence
+    median 12.78 → 13.06, p95 26.54 → 26.97; hits a minute on the song 408
+    → 402, in silence 0 → 0; main's bass / mid / treble lanes 154 / 126 /
+    242 a minute against kick / clap / hats / chord 112 / 40 / 284 / 120.
 
 ## Tuning notes
 

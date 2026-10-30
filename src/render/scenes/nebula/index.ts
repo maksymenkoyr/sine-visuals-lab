@@ -172,7 +172,7 @@ function createNebulaScene(): Scene {
       pathUniforms(flight, path);
       const camPos = cameraWorld(flight);
       // fired() consumes the edge, so both are read every frame whatever their settings.
-      if (drives.fired("twinkle", anim.hatsOnset)) triggerTwinkle(reactions, drives.hitSize("twinkle"));
+      if (drives.fired("twinkle", anim.song.hatOnset)) triggerTwinkle(reactions, drives.hitSize("twinkle"));
       if (drives.fired("shock", anim.dropOnset)) triggerShock(reactions, camPos, [cam[12], cam[13], cam[14]]);
       advanceReactions(reactions, dt, drives.value("inner", anim.lead), drives.value("tilt", anim.centroid));
       shockUniforms(reactions, camPos, shockAt);

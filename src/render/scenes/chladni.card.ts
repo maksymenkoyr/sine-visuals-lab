@@ -28,7 +28,7 @@ export const SIZE_MIX_DEFAULT = 0.45;
  *  (Thrown colour sets how far). See the file header's sand colour section. */
 export const THROWN_TO = ["Toward white", "Second colour", "Through the palette", "Into shadow"] as const;
 
-// Glow's default wires: the slewed treble level and the treble onset pulse,
+// Glow's default wires: the slewed treble level and the hats pulse,
 // summed with these weights. POINT_VERT's vGlow sum uses the same pair, so
 // the default patch draws exactly what the old built-in reaction did.
 export const GLOW_LEVEL_WEIGHT = 0.8;
@@ -206,7 +206,7 @@ export const SETTINGS: SceneSetting[] = [
   {
     key: "kick",
     label: "Bass kick",
-    description: "A bass hit throws the sand off its lines; the figure re-forms as it settles",
+    description: "A kick throws the sand off its lines; the figure re-forms as it settles",
     group: "Motion",
     min: 0,
     max: 1,
@@ -214,8 +214,8 @@ export const SETTINGS: SceneSetting[] = [
     default: 0.5,
     // Dark, bass-heavy mixes carry more kick presence to throw on.
     auto: { brightness: -0.3, attack: 0.25 },
-    // uLowPulse directly — a plain Bass hit default.
-    drive: { default: "anim.lowOnset" },
+    // uKickPulse directly — a plain Kick default.
+    drive: { default: "anim.kickOnset" },
   },
   {
     key: "toss",
@@ -411,7 +411,7 @@ export const SETTINGS: SceneSetting[] = [
         mix: "add",
         sources: [
           { choice: "anim.high", weight: GLOW_LEVEL_WEIGHT },
-          { choice: "anim.highOnset", weight: GLOW_HIT_WEIGHT },
+          { choice: "anim.hats", weight: GLOW_HIT_WEIGHT },
         ],
       },
     },

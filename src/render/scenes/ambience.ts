@@ -1046,7 +1046,7 @@ export const ambienceScene: Scene = (() => {
       }
 
       // A hit fires a swell; a section drop fires a burst.
-      const swellFired = drives.fired("swell", anim.lowOnset || anim.onset, undefined, Math.max(anim.lowPulse, anim.beatPulse));
+      const swellFired = drives.fired("swell", anim.song.kickOnset || anim.onset, undefined, Math.max(anim.song.kickPulse, anim.beatPulse));
       if (anim.dropOnset) {
         for (let n = 0; n < 3; n++) pool.trigger(1, cols, rows, true);
       } else if (swellFired) {

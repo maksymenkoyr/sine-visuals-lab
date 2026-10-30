@@ -120,6 +120,13 @@ From the bundle's `report.md` and PR #90's verification (2026-09-05/06 and
   glide (`glide: false`), since it changes the object count.
 - 2026-10-11 — Sampler units and the int uniforms (`uObjCount`, `uCopies`) now go through `GLProgram.setI`; the file's own location cache and its clears are gone. Nothing visible changed: headless before/after shots look the same. (#349)
 - 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/gates/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #802: Lightning's source options "Bass" and "High" now follow
+  the Kick and the Hats and are named that way; their order is unchanged.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 10.24 → 10.41, p95 15.34 → 16.19; silence
+    median 5.75 → 6.54, p95 10.30 → 10.85; hits a minute on the song 404 →
+    416, in silence 0 → 0; main's bass / mid / treble lanes 150 / 140 /
+    242 a minute against kick / clap / hats / chord 112 / 46 / 284 / 118.
 
 ## Tuning notes
 

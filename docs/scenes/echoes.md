@@ -222,6 +222,13 @@ Mirror, colour by age and a hit shockwave from a list of four:
   0.61 on silence (5.3×), no hits on silence. Judged by eye on synthetic
   shots only for the new looks, not side by side with a reference.
 - 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/echoes/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #802: The Kick and Shockwave settings moved from the bass hit
+  to the Kick.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 1.89 → 1.83, p95 2.95 → 2.91; silence
+    median 0.31 → 0.32, p95 0.61 → 0.58; hits a minute on the song 420 →
+    414, in silence 0 → 0; main's bass / mid / treble lanes 140 / 138 /
+    242 a minute against kick / clap / hats / chord 122 / 42 / 278 / 138.
 
 ## Tuning notes
 

@@ -122,17 +122,17 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "blackout",
     label: "Blackout chance",
-    description: "How often a bass hit flips the whole field to its opposite phase; a section drop always does",
+    description: "How often a kick flips the whole field to its opposite phase; a section drop always does",
     group: "Motion",
     min: 0,
     max: 1,
     step: 0.05,
     default: 0.6,
     auto: { attack: 0.2 },
-    // Gates only the chance-rolled bass-hit flip (advanceBlackout) — a
-    // plain Bass hit default. The section-drop flip alongside it is
+    // Gates only the chance-rolled kick flip (advanceBlackout) — a
+    // plain Kick default. The section-drop flip alongside it is
     // unconditional, independent of this choice.
-    drive: { default: "anim.lowOnset", hit: { flatOnly: "A flip either happens or it doesn't, so it can't be sized.", reactionLabel: "flip" } },
+    drive: { default: "anim.kickOnset", hit: { flatOnly: "A flip either happens or it doesn't, so it can't be sized.", reactionLabel: "flip" } },
   },
   {
     key: "curtain",

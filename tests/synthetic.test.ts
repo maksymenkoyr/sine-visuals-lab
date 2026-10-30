@@ -59,4 +59,28 @@ describe("createSyntheticFeed", () => {
     const t = 1.234;
     expect(Array.from(a.frame(t).bands)).not.toEqual(Array.from(b.frame(t).bands));
   });
+
+  it("fills song from its own hits: a kick on each beat, a clap on the backbeat, hats off the beat, no chord", () => {
+    const feed = createSyntheticFeed({ bpm: 120 });
+    let kicks = 0;
+    let claps = 0;
+    let hats = 0;
+    for (let t = 0; t < DURATION_SEC; t += DT) {
+      const frame = feed.frame(t);
+      const song = frame.song!;
+      expect(song).not.toBeNull();
+      expect(song.kick).toBe(frame.onset);
+      if (song.clap) expect(song.kick).toBe(true);
+      expect(song.chord).toBe(false);
+      expect(song.playing).toBe(1);
+      expect(song.hatLevel).toBeGreaterThanOrEqual(0);
+      expect(song.hatLevel).toBeLessThanOrEqual(1);
+      if (song.kick) kicks++;
+      if (song.clap) claps++;
+      if (song.hat) hats++;
+    }
+    expect(kicks).toBe(20);
+    expect(claps).toBe(10);
+    expect(hats).toBeGreaterThanOrEqual(19);
+  });
 });

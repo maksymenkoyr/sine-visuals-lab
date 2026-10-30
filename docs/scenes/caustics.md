@@ -975,6 +975,18 @@ reference-measurement workflow used by later scenes.
   |---|---:|---:|---:|---:|---:|---:|
   | song | 20.87 | 34.71 | 420 | 182 | 94 | 218 |
   | silence | 0.73 | 0.99 | 0 | 0 | 0 | 0 |
+- 2026-10-30, #802: The reactions moved from the band hits to the
+  instruments: the Beat ripple, Speed pump and Bass swell wires from the
+  bass hit to the Kick, Contour from the mid hit to the Chord, and Sparkle
+  (with Tighten and Flare) from the treble hit to the Hats.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 21.46 → 20.67, p95 35.32 → 36.51; silence
+    median 0.74 → 0.73, p95 0.98 → 0.98; hits a minute on the song 408 →
+    416, in silence 0 → 0; main's bass / mid / treble lanes 150 / 128 /
+    242 a minute against kick / clap / hats / chord 112 / 40 / 286 / 124.
+  - Sparkle's Adaptive mode (`ADAPT_*` in `causticsSparkle.ts`) was tuned
+    on the old treble stand-out and now reads the hats level at the edge,
+    so it wants the owner's look.
 
 ## Tuning notes
 

@@ -25,19 +25,19 @@ const SPARKLE: SceneSetting = {
   default: 0.41,
   // Directly the hats/cymbals dial.
   auto: { brightness: 0.45, attack: 0.15 },
-  // Two signals across two layers (a treble hit, or — with Sparkle sustain
+  // Two signals across two layers (a hat hit, or — with Sparkle sustain
   // dialed up — the sustained treble level too), not one, so the default
   // is Scene — see the sparkle block in extraUniforms. Used to have its own
   // continuous "Sparkle from line" dial blending toward the sensitivity
   // line; that's now Frequencies, a discrete alternative source on this
   // same picker. Each edge starts a hit, Basic or Adaptive (causticsSparkle.ts).
   // Not a hit driver: no standout detector, so its graph has no reach line,
-  // reaction dots or Reaction row. Under Adaptive the built-in treble hit is
+  // reaction dots or Reaction row. Under Adaptive the built-in hat hit is
   // sized by its stand-out, so a soft hat sparkles less than a hard one.
   drive: {
     default: "scene",
-    sceneLabel: "Scene: treble hits + sustain wash",
-    sceneSources: ["anim.highOnset", "anim.high"],
+    sceneLabel: "Scene: hat hits + sustain wash",
+    sceneSources: ["anim.hats", "anim.high"],
     noStandout: "The user wanted no reaction dots or standout Threshold on sparkle (2026-10-15)",
   },
 };
@@ -124,7 +124,7 @@ const SETTINGS: SceneSetting[] = [
     default: 0.21,
     // Waves read best against punchy, uncluttered material.
     auto: { attack: 0.35, pulse: 0.25, density: -0.2 },
-    // A bass onset OR a broadband beat, unconditionally — no single
+    // A kick onset OR a broadband beat, unconditionally — no single
     // catalogue source reproduces that union, so the default is Scene (see
     // the `extraUniforms` closure below, and drives.ts's header for why a
     // Scene default is still bit-identical to today). Fed to
@@ -149,8 +149,8 @@ const SETTINGS: SceneSetting[] = [
     // earns half a standout instead.
     drive: {
       default: "scene",
-      sceneLabel: "Scene: bass or beat hit",
-      sceneSources: ["anim.lowOnset", "feature.onset"],
+      sceneLabel: "Scene: kick or beat hit",
+      sceneSources: ["anim.kickOnset", "feature.onset"],
       hit: { ownDetector: true, readout: "sized" },
     },
   },
@@ -299,11 +299,11 @@ const SETTINGS: SceneSetting[] = [
     default: 0.35,
     // Speed pump only reads as a pump on music with real hits to push against.
     auto: { pulse: 0.35, attack: 0.2 },
-    // Driven continuously by anim.lowPulse today — a plain Bass hit default
+    // Driven continuously by anim.song.kickPulse today — a plain Kick default
     // (drives.ts's decaying-envelope reading of it, same field): a kick is
     // the natural pedal to push against; rewire it to energy or anything
     // else in the picker.
-    drive: { default: "anim.lowOnset" },
+    drive: { default: "anim.kickOnset" },
   },
   {
     key: "bass",
@@ -316,8 +316,8 @@ const SETTINGS: SceneSetting[] = [
     default: 1,
     // A dark mix wants the low-end swell emphasized; a bright one doesn't need it.
     auto: { brightness: -0.4 },
-    // uLowPulse directly — a plain Bass hit default.
-    drive: { default: "anim.lowOnset" },
+    // uKickPulse directly — a plain Kick default.
+    drive: { default: "anim.kickOnset" },
   },
   {
     key: "turbulence",
@@ -389,7 +389,7 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0, // keeps the default look
     // Taste, so no auto table (same reasoning as causticDensity).
-    drive: { default: "anim.highOnset" },
+    drive: { default: "anim.hats" },
   },
   {
     key: "flash",
@@ -418,7 +418,7 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0, // keeps the default look
     // Taste, so no auto table (same reasoning as causticDensity).
-    drive: { default: "anim.highOnset" },
+    drive: { default: "anim.hats" },
   },
   {
     key: "contour",
@@ -430,7 +430,7 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.8,
     // Taste, so no auto table (same reasoning as causticDensity).
-    drive: { default: "anim.midOnset" },
+    drive: { default: "anim.chordOnset" },
   },
   {
     key: "levelGlow",
@@ -480,7 +480,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "sparkleFx",
     label: "Sparkle effect",
-    description: "What a treble hit does to the pool: Grain glints on the crests, Prism splits the filaments into colour, Run sends light along them",
+    description: "What a hat hit does to the pool: Grain glints on the crests, Prism splits the filaments into colour, Run sends light along them",
     group: "Look",
     min: 0,
     max: SPARKLE_EFFECTS.length - 1,

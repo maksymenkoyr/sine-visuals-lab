@@ -320,9 +320,9 @@ function createToonRaveScene(): Scene {
 
       // Dance: always read the triggers so an edge is consumed even when off.
       const danceOn = resolveSceneSetting(ID, settingFor("dance")) >= 0.5;
-      const danceFired = drives.fired("dance", anim.lowOnset);
+      const danceFired = drives.fired("dance", anim.song.kickOnset);
       const danceValue = clamp01(drives.value("dance", 0, 0));
-      const pumpFired = drives.fired("energyPump", anim.lowOnset);
+      const pumpFired = drives.fired("energyPump", anim.song.kickOnset);
       if (!frozen) {
         dance.step(dt, danceFired, danceValue);
         energy.step(dt, {

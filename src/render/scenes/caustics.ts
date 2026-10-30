@@ -113,7 +113,7 @@ import { advanceSparkleHits, createSparkleHits, EFFECT_GRAIN, EFFECT_PRISM, EFFE
 // uBass/uTurbulence/
 // uSparkle give the low/mid/high bands each a distinct visual (swell / churn
 // / whichever sparkle effect is picked — crest glints by default; each
-// treble hit plays the picked shape, causticsSparkle.ts's header). Every
+// hat hit plays the picked shape, causticsSparkle.ts's header). Every
 // music-driven term is a slider times its drive, so
 // with the sliders at 0 the picture only drifts on its own clock.
 //
@@ -727,7 +727,7 @@ void main() {
   // is a one-shot ring rather than a standing bulge.
   float pLen0 = length(p);
   vec2 dir0 = pLen0 > 1e-4 ? p / pLen0 : vec2(1.0, 0.0);
-  float bassBulge = uBass * bassDrive(uLowPulse);
+  float bassBulge = uBass * bassDrive(uKickPulse);
   // Faded to zero at the origin: dir0 flips sign across the center, so a
   // displacement that's still nonzero there tears the field at a single
   // point — every filament near the middle gets dragged into a pinch.
@@ -830,7 +830,7 @@ void main() {
   float sharpRest = mix(${FOG_SHARP_CRISP.toFixed(1)}, ${FOG_SHARP_HAZY.toFixed(1)}, uFog);
   float sharp = (sharpRest / (1.0 + uFocus * focusDrive(uBeatPulse) * ${FOCUS_SNAP_RATIO.toFixed(2)}))
     * (1.0 - bassBulge * 0.25);
-  sharp *= exp(${TIGHTEN_GAIN.toFixed(2)} * uTighten * tightenDrive(uHighPulse));
+  sharp *= exp(${TIGHTEN_GAIN.toFixed(2)} * uTighten * tightenDrive(uHatPulse));
   float ridgeGain = sqrt(sharp / 4.0); // a wider ridge is proportionally dimmed, so Fog pulse eases intensity too, not just width
   // Warp compresses screen space into q-space, and near its own fold points
   // that compression runs unbounded — arbitrarily fine screen-space detail,
@@ -874,7 +874,7 @@ void main() {
   }
 
   // Flare: the brightest crests gain the most; dim water stays dim.
-  acc += ${FLARE_GAIN.toFixed(2)} * uFlare * flareDrive(uHighPulse) * pow(max(acc, 0.0), ${FLARE_CURVE.toFixed(2)}) * smoothstep(0.45, 1.0, acc);
+  acc += ${FLARE_GAIN.toFixed(2)} * uFlare * flareDrive(uHatPulse) * pow(max(acc, 0.0), ${FLARE_CURVE.toFixed(2)}) * smoothstep(0.45, 1.0, acc);
   // Run acts on the finished ridges here; Prism's fringes are added to the
   // colour below. Both read sparkleE, so at Sparkle 0 or between hits they
   // leave the pool exactly as it is.
@@ -919,7 +919,7 @@ void main() {
     acc += uSparkle * sparkleGlintDrive * crestGate * pow(sparkleNoise, sparkleExp) * sparkleGain;
   }
 
-  // Soft center bloom on a bass hit, on top of the geometric bulge above.
+  // Soft center bloom on a kick, on top of the geometric bulge above.
   acc += bassBulge * exp(-pLen0 * 1.5) * 0.6;
 
   // Level glow, Beat flash and the ripple crest: each is its slider times what
@@ -937,7 +937,7 @@ void main() {
   // Contour steps the Shades tone and maps it back to light, so Rainbow,
   // whose hue rides the light, steps its colours too. The lowest edge gets
   // no line, or every speck of dark water would be outlined.
-  float contourAmt = clamp(uContour * contourDrive(uMidPulse), 0.0, 1.0);
+  float contourAmt = clamp(uContour * contourDrive(uChordPulse), 0.0, 1.0);
   float contourRim = 0.0;
   if (contourAmt > 0.001) {
     float cx = acc * ${SHADE_GAIN.toFixed(2)};
@@ -1127,9 +1127,9 @@ float softCeil(float x, float knee, float ceil) {
         const levelValue = drives.value("driftLevel", loudSwellCalibrated);
         // Speed pump's own accelerate-then-release velocity, advanced before the
         // rate below reads pump.vel, so this tick's push already counts.
-        // Bass hit's own decaying envelope at driftPump's Beat-hit default —
+        // Kick's own decaying envelope at driftPump's Beat-hit default —
         // see the "driftPump" SceneSetting's own comment.
-        advancePump(pump, anim.dtSec, drives.value("driftPump", anim.lowPulse), getSetting("driftPump"));
+        advancePump(pump, anim.dtSec, drives.value("driftPump", anim.song.kickPulse), getSetting("driftPump"));
         const phaseStep = anim.dtSec * driftRatePerSec({
           drift: getSetting("drift"),
           driftLevel,
@@ -1163,7 +1163,7 @@ float softCeil(float x, float knee, float ceil) {
         // setting's own comment and advanceStandoutAmount's own doc comment for
         // why a continuous rise-based read is what makes a busy driver duck
         // itself instead of stacking full rings).
-        const sceneDefaultSignal = Math.max(anim.lowPulse, anim.beatPulse);
+        const sceneDefaultSignal = Math.max(anim.song.kickPulse, anim.beatPulse);
         const rawSignal = drives.value("ripple", sceneDefaultSignal);
         // rawSignal has already been through the shared Threshold gate (when
         // it's on); Ring threshold then sets how far a climb must stand out
@@ -1216,14 +1216,15 @@ float softCeil(float x, float knee, float ceil) {
 
         // Sparkle: each edge of the sparkle drive starts a hit (the
         // "sparkle" setting's own comment), played Basic or Adaptive. A
-        // treble onset plays at the treble pulse's height (a flat 1 while
-        // hitStrength.ts's shape is flat) and hands Adaptive its stand-out;
+        // Hats onset plays at the Hats pulse's height (a flat 1 while
+        // hitStrength.ts's shape is flat) and hands Adaptive the hat level at
+        // the hit as its stand-out;
         // a wire's edge plays at full size with none. The drive's level is
         // both Adaptive's ring test and Sparkle sustain's wash, a floor under
         // the shape that keeps a below-zero swing's direction.
-        const sparkleFired = drives.fired("sparkle", anim.highOnset);
-        const sparkleSize = anim.highOnset ? anim.highPulse : 1;
-        const sparkleStandout = anim.highOnset ? anim.hitStrength.high.standout : -1;
+        const sparkleFired = drives.fired("sparkle", anim.song.hatOnset);
+        const sparkleSize = anim.song.hatOnset ? anim.song.hatPulse : 1;
+        const sparkleStandout = anim.song.hatOnset ? anim.song.hatLevel : -1;
         const sparkleLevel = drives.value("sparkle", anim.high);
         const adaptive = Math.round(getSetting("sparkleAdapt")) === MODE_ADAPTIVE;
         const shapeEnv = advanceSparkleHits(sparkleHits, anim.dtSec, sparkleFired, sparkleSize, {

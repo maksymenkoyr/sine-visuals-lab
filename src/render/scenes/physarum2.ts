@@ -384,7 +384,7 @@ export function createCrawlPumpState(): CrawlPumpState {
 }
 
 /** Advances Speed pump's velocity in place: `input` (0..1, whatever the
- *  "speedPump" driver is wired to — a bass hit's decaying envelope by default)
+ *  "speedPump" driver is wired to — a kick's decaying envelope by default)
  *  accelerates `vel` by `CRAWL_PUMP_ACCEL * amount * input * dtSec`, then `vel`
  *  decays exponentially toward 0 with time constant CRAWL_PUMP_RELEASE_SEC and
  *  is capped at CRAWL_PUMP_VEL_CAP. `amount` is the Speed pump slider (0..1);
@@ -2081,7 +2081,7 @@ function createPhysarum2Scene(): Scene {
       // stepper is fixed-rate, not a GLSL uniform.
       const d = drives ?? PASSTHROUGH_DRIVES;
       const pumpSpec = settingFor("speedPump");
-      advanceCrawlPump(crawlPump, dt, d.value(pumpSpec.key, anim.lowPulse), resolveSceneSetting(ID, pumpSpec));
+      advanceCrawlPump(crawlPump, dt, d.value(pumpSpec.key, anim.song.kickPulse), resolveSceneSetting(ID, pumpSpec));
       const boostSpec = settingFor("speedBoost");
       const stepRate = crawlStepRate({
         speed: resolveSceneSetting(ID, settingFor("speed")),

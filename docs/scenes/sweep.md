@@ -138,6 +138,12 @@ piece of the reel. In development (draft PR #391).
   pixel at three frames each (`gpu-bench --dump`).
 - 2026-10-08 — New path became a hit driver (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). It is flat-only: a new path either starts or it doesn't.
 - 2026-10-24 — Id, name, settings, panel and gallery record moved to `src/render/scenes/sweep/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #802: Morph moved from the bass hit to the Kick.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 0.79 → 0.79, p95 1.16 → 1.19; silence
+    median 0.00 → 0.00, p95 0.00 → 0.00; hits a minute on the song 408 →
+    432, in silence 0 → 0; main's bass / mid / treble lanes 146 / 128 /
+    242 a minute against kick / clap / hats / chord 112 / 42 / 282 / 116.
 
 ## Tuning notes
 

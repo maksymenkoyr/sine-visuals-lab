@@ -139,8 +139,11 @@ Darker means more important.
     - ○○○ **Meters: Sound, Stems, Hits, Beat, Song** — live readouts of
       what the analysis hears; each row's jack is a signal you can wire.
       Sound is a thin spectrum over Level, Bass, Mid, Treble
-      and a row for each band you click on the spectrum (or wire);
-      Stems holds Lead, Hats and Kick ·
+      and a row for each band you click on the spectrum (or wire), then
+      the Hits roll: Any, an instrument track for each of the song layer's
+      hits with its level as the track's floor (two jacks, and a dashed
+      firing line on the device that hears the music), and Onset surge;
+      Stems holds Lead ·
       `src/ui/audioMeters.ts`, the dials are `MUSIC_DIALS`
     - ○○○ **Heat history** — the last meter card, folded by default: one
       strip per wired setting and per signal, second by second · `src/ui/audioMeters.ts`

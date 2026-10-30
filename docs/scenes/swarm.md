@@ -181,6 +181,13 @@ onsets (106 in the window, ≈6.6/s):
   default, is unchanged. Re-collapse is flat-only: a re-collapse either
   starts or it doesn't.
 - 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/swarm/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #802: Scatter, Beat flash and Thump moved from the bass hit to
+  the Kick.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 1.69 → 1.46, p95 3.61 → 3.56; silence
+    median 0.25 → 0.24, p95 1.77 → 1.73; hits a minute on the song 406 →
+    396, in silence 0 → 0; main's bass / mid / treble lanes 146 / 126 /
+    242 a minute against kick / clap / hats / chord 118 / 48 / 270 / 118.
 
 ## Tuning notes
 

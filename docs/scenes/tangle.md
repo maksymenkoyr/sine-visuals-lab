@@ -124,6 +124,12 @@ the reference's sparse still state while the music plays, by design.
 - **Detail** went 6 → 8 → 10 → 14 to reach the reference's vertex count.
 - 2026-10-08 — Re-inflate and Reset on drop became hit drivers (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the pull home and the reset amount by how far the hit stood out; Flat, the default, is unchanged.
 - 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/tangle/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #802: Inflate moved from the bass hit to the Kick.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 1.72 → 1.56, p95 2.45 → 2.53; silence
+    median 0.90 → 0.89, p95 1.09 → 1.11; hits a minute on the song 428 →
+    420, in silence 0 → 0; main's bass / mid / treble lanes 152 / 138 /
+    242 a minute against kick / clap / hats / chord 108 / 46 / 278 / 122.
 
 ## Tuning notes
 
