@@ -20,6 +20,7 @@ function frame(engine: Partial<EngineReading> | null, bands?: Float32Array): Fea
     bpm: 0,
     onsetPhase: 0,
     engine: engine === null ? null : engineReading(engine),
+    song: null,
   };
 }
 

@@ -18,6 +18,7 @@ function loud(): VisualSample {
     lead: 0,
     wave: { min: -0.6, max: 0.7 },
     engine: null,
+    song: null,
     gateOff: false,
   };
 }

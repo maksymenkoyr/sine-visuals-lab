@@ -41,7 +41,9 @@
 export interface LookLimits {
   /** A text message, in UTF-16 units; checked before JSON.parse. */
   readonly maxMessageChars: number;
-  /** A binary frame (the real ones are the feature-frame size). */
+  /** A binary frame. The longest today is the feature frame with its song tail
+   *  (SONG_FRAME_BYTES in src/net/protocol.ts); the rest is room for the next
+   *  tail, so a small addition does not need a Worker deploy to land first. */
   readonly maxBinaryBytes: number;
   /** UTF-8 bytes of every id, key and value in a document. */
   readonly maxDocBytes: number;
@@ -83,7 +85,7 @@ export interface LookLimits {
 
 export const LOOK_LIMITS: LookLimits = {
   maxMessageChars: 131072,
-  maxBinaryBytes: 64,
+  maxBinaryBytes: 96,
   maxDocBytes: 98304,
   maxValueBytes: 65536,
   maxKeys: 256,

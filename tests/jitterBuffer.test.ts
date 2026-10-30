@@ -3,6 +3,7 @@ import { JitterBuffer } from "../src/net/jitterBuffer.ts";
 import { NUM_BANDS } from "../src/audio/types.ts";
 import type { WireEngine } from "../src/net/protocol.ts";
 import { engineReading } from "./engineReading.ts";
+import { songFrame } from "./songFrame.ts";
 
 function frame(roomTimeMs: number, energy: number, onset = false, bpm = 0, level = energy, pulseOnset = onset) {
   return { bands: new Float32Array(NUM_BANDS).fill(energy), energy, onset, pulseOnset, bpm, level, hats: 0, lead: 0, roomTimeMs };
@@ -134,5 +135,32 @@ describe("JitterBuffer", () => {
     expect(buf.sampleAt(33)!.gateOff).toBe(true);
     expect(buf.sampleAt(9999)!.gateOff).toBe(true);
   });
-});
 
+  it("interpolates the song levels between frames", () => {
+    const buf = new JitterBuffer();
+    buf.push({ ...frame(0, 0.5), song: songFrame({ keys: 0, loudness: 1 }) });
+    buf.push({ ...frame(100, 0.5), song: songFrame({ keys: 1, loudness: 0 }) });
+    const mid = buf.sampleAt(25)!.song!;
+    expect(mid.keys).toBeCloseTo(0.25, 5);
+    expect(mid.loudness).toBeCloseTo(0.75, 5);
+  });
+
+  it("hands a song edge out once, when its time comes due", () => {
+    const buf = new JitterBuffer();
+    buf.push({ ...frame(0, 0.5), song: songFrame() });
+    buf.push({ ...frame(50, 0.5), song: songFrame({ clap: true }) });
+    buf.push({ ...frame(100, 0.5), song: songFrame() });
+    expect(buf.sampleAt(25)!.song!.clap).toBe(false);
+    expect(buf.sampleAt(60)!.song!.clap).toBe(true);
+    expect(buf.sampleAt(70)!.song!.clap).toBe(false);
+    expect(buf.sampleAt(100)!.song!.clap).toBe(false);
+  });
+
+  it("gives song null for a sender that sent none", () => {
+    const buf = new JitterBuffer();
+    buf.push(frame(0, 0.5));
+    buf.push(frame(100, 0.5));
+    expect(buf.sampleAt(50)!.song).toBeNull();
+    expect(buf.sampleAt(500)!.song).toBeNull();
+  });
+});

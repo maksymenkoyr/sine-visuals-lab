@@ -1,4 +1,4 @@
-import { type EngineReading, HIT_KINDS, HIT_STRENGTH_MAX, NUM_BANDS } from "../audio/types.ts";
+import { type EngineReading, HIT_KINDS, HIT_STRENGTH_MAX, NUM_BANDS, SONG_EDGES, SONG_LEVELS, type SongFrame } from "../audio/types.ts";
 
 /**
  * Wire format for a feature frame, little-endian:
@@ -53,6 +53,14 @@ import { type EngineReading, HIT_KINDS, HIT_STRENGTH_MAX, NUM_BANDS } from "../a
  * treats as nothing heard: no levels, no hits, no beat. That is a
  * mixed-version pairing during a deploy, and lasts until the sender reloads;
  * retire this paragraph with the legacy-decode fallback below.
+ *   [59]     song edges: bit0 kick, bit1 clap, bit2 hat, bit3 chord
+ *   [60..66] song levels, Uint8 each (0..1 -> 0..255), in the order of
+ *            SONG_LEVELS: clap, hat, chord, keys, loudness, drop, playing
+ * = SONG_FRAME_BYTES: the song layer's reading (src/audio/types.ts's
+ * SongFrame). It is written only on a frame that also has an engine reading,
+ * and a frame shorter than SONG_FRAME_BYTES decodes `song` as null. Like the
+ * engine's hits, the edges are latched by the wire decimator so each crosses
+ * once. A follower whose decoder stops at the engine tail ignores these bytes.
  *
  * bit1 (pulseOnset) was added after bit0 shipped — decodeFeatureFrame ORs it
  * with `onset` on decode (`(flags & 2) !== 0 || onset`) so a sender that
@@ -101,6 +109,7 @@ const LEGACY_FRAME_BYTES = BASE_FRAME_BYTES - 1;
 const FRAME_BYTES = BASE_FRAME_BYTES + 2;
 const STEM_FRAME_BYTES = FRAME_BYTES + 2;
 const ENGINE_FRAME_BYTES = STEM_FRAME_BYTES + 15;
+const SONG_FRAME_BYTES = ENGINE_FRAME_BYTES + 1 + SONG_LEVELS.length;
 
 const MUSIC_BIT = 1;
 const SURGE_KIND_SHIFT = 1;
@@ -196,6 +205,8 @@ export interface EncodableFrame {
   gateOff?: boolean;
   /** Absent or null sends no engine tail. */
   engine?: EngineReading | null;
+  /** Absent or null sends no song tail; it also needs an engine reading. */
+  song?: SongFrame | null;
 }
 
 /** `wave`, when given, becomes the frame's tail, followed by the stem levels
@@ -203,7 +214,8 @@ export interface EncodableFrame {
  *  neither, the 40-byte frame. */
 export function encodeFeatureFrame(frame: EncodableFrame, roomTimeMs: number, wave: WaveEnvelope | null = null): ArrayBuffer {
   const engine = frame.engine ?? null;
-  const buf = new ArrayBuffer(engine ? ENGINE_FRAME_BYTES : wave ? STEM_FRAME_BYTES : BASE_FRAME_BYTES);
+  const song = engine ? (frame.song ?? null) : null;
+  const buf = new ArrayBuffer(song ? SONG_FRAME_BYTES : engine ? ENGINE_FRAME_BYTES : wave ? STEM_FRAME_BYTES : BASE_FRAME_BYTES);
   const view = new DataView(buf);
   let o = 0;
   view.setUint8(o, MSG_FEATURE_FRAME);
@@ -249,6 +261,13 @@ export function encodeFeatureFrame(frame: EncodableFrame, roomTimeMs: number, wa
     view.setUint16(o + 10, ago16(w.beatAgoMs), true);
     view.setUint16(o + 12, ago16(w.downbeatAgoMs), true);
     view.setUint8(o + 14, w.updates & 255);
+    o += 15;
+  }
+  if (song) {
+    let edges = 0;
+    for (let i = 0; i < SONG_EDGES.length; i++) if (song[SONG_EDGES[i]]) edges |= 1 << i;
+    view.setUint8(o, edges);
+    for (let i = 0; i < SONG_LEVELS.length; i++) view.setUint8(o + 1 + i, unit8(song[SONG_LEVELS[i]]));
   }
   return buf;
 }
@@ -271,6 +290,8 @@ export interface DecodedFrame {
   engine: WireEngine | null;
   /** FeatureFrame.gateOff; false without an engine tail. */
   gateOff: boolean;
+  /** The sender's song reading; null when the frame carries none. */
+  song: SongFrame | null;
 }
 
 export function decodeFeatureFrame(buf: ArrayBuffer): DecodedFrame | null {
@@ -337,8 +358,27 @@ export function decodeFeatureFrame(buf: ArrayBuffer): DecodedFrame | null {
       updates: view.getUint8(e + 14),
     };
   }
+  let song: SongFrame | null = null;
+  if (buf.byteLength >= SONG_FRAME_BYTES) {
+    const e = ENGINE_FRAME_BYTES;
+    const edges = view.getUint8(e);
+    const level = (i: number): number => view.getUint8(e + 1 + i) / 255;
+    song = {
+      kick: (edges & 1) !== 0,
+      clap: (edges & 2) !== 0,
+      hat: (edges & 4) !== 0,
+      chord: (edges & 8) !== 0,
+      clapLevel: level(0),
+      hatLevel: level(1),
+      chordLevel: level(2),
+      keys: level(3),
+      loudness: level(4),
+      dropLevel: level(5),
+      playing: level(6),
+    };
+  }
   const wave =
     buf.byteLength >= FRAME_BYTES && !waveAbsent ? { min: decodeWaveSample(view.getInt8(o)), max: decodeWaveSample(view.getInt8(o + 1)) } : null;
 
-  return { bands, energy, onset, pulseOnset, bpm, onsetPhase, level, hats, lead, roomTimeMs, wave, engine, gateOff };
+  return { bands, energy, onset, pulseOnset, bpm, onsetPhase, level, hats, lead, roomTimeMs, wave, engine, gateOff, song };
 }

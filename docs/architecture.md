@@ -95,7 +95,9 @@ look and has no panel or audio of its own.
   the current layout and a legacy-decode fallback with its own sunset condition.
   The engine's reading rides in the frame, and `src/net/wireDecimator.ts` and
   `src/net/jitterBuffer.ts` keep its one-frame hits from being lost on the way
-  (`docs/audio-engine.md`, "From mic to TV").
+  (`docs/audio-engine.md`, "From mic to TV"). The song layer's reading rides
+  after it in a song tail on the same terms; the device that hears the music
+  fills it, and its edges are latched like the engine's hits.
 - `server/room.ts` (the Durable Object, class `Room`, bound as `ROOM` per
   `wrangler.toml`) is only the Cloudflare adapter. What a room does is
   `server/roomCore.ts`, which the tests drive with fake sockets; who may join and

@@ -122,5 +122,6 @@ export function applySensitivity(frame: FeatureFrame, sensitivity: number, expan
     hats: frame.hats,
     lead: frame.lead,
     engine: frame.engine,
+    song: frame.song,
   };
 }

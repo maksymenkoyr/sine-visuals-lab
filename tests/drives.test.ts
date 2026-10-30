@@ -60,6 +60,7 @@ function frame(overrides: Partial<FeatureFrame> = {}): FeatureFrame {
     bpm: 120,
     onsetPhase: 0,
     engine: null,
+    song: null,
     ...overrides,
   };
 }

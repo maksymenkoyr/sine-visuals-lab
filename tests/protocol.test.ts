@@ -3,6 +3,7 @@ import { encodeFeatureFrame, decodeFeatureFrame } from "../src/net/protocol.ts";
 import { NUM_BANDS } from "../src/audio/types.ts";
 import { isClipping } from "../src/audio/waveform.ts";
 import { engineReading } from "./engineReading.ts";
+import { songFrame } from "./songFrame.ts";
 
 describe("protocol", () => {
   it("round-trips every field within quantization tolerance", () => {
@@ -156,6 +157,66 @@ describe("protocol", () => {
     const decoded = decodeFeatureFrame(longer.buffer);
     expect(decoded!.roomTimeMs).toBe(777);
     expect(decoded!.wave!.max).toBeCloseTo(0.25, 2);
+  });
+
+  it("reads the engine tail of a frame that ends before a longer song tail would", () => {
+    const frame = { bands: new Float32Array(NUM_BANDS), energy: 0.5, onset: false, pulseOnset: false, bpm: 90, onsetPhase: 0, level: 0.5, hats: 0, lead: 0 };
+    const buf = encodeFeatureFrame({ ...frame, engine: engineReading({ low: 0.5 }) }, 777);
+    const longer = new Uint8Array(buf.byteLength + 3);
+    longer.set(new Uint8Array(buf));
+    const decoded = decodeFeatureFrame(longer.buffer);
+    expect(decoded!.engine!.low).toBeCloseTo(0.5, 2);
+    expect(decoded!.song).toBeNull();
+  });
+});
+
+describe("song tail", () => {
+  const base = { bands: new Float32Array(NUM_BANDS), energy: 0.2, onset: false, pulseOnset: false, bpm: 120, onsetPhase: 0, level: 0.3, hats: 0, lead: 0 };
+  const engine = engineReading({ music: true });
+  const song = songFrame({ kick: true, chord: true, clapLevel: 0.2, hatLevel: 0.4, chordLevel: 0.6, keys: 0.8, loudness: 1, dropLevel: 0.1, playing: 0.9 });
+
+  it("round-trips the edges exactly and the levels within one byte step", () => {
+    const decoded = decodeFeatureFrame(encodeFeatureFrame({ ...base, engine, song }, 1000))!;
+    expect(decoded.song).not.toBeNull();
+    const got = decoded.song!;
+    for (const edge of ["kick", "clap", "hat", "chord"] as const) expect(got[edge]).toBe(song[edge]);
+    for (const level of ["clapLevel", "hatLevel", "chordLevel", "keys", "loudness", "dropLevel", "playing"] as const) {
+      expect(Math.abs(got[level] - song[level])).toBeLessThanOrEqual(1 / 255);
+    }
+  });
+
+  it("round-trips every edge combination", () => {
+    for (let bits = 0; bits < 16; bits++) {
+      const edges = { kick: (bits & 1) !== 0, clap: (bits & 2) !== 0, hat: (bits & 4) !== 0, chord: (bits & 8) !== 0 };
+      const got = decodeFeatureFrame(encodeFeatureFrame({ ...base, engine, song: songFrame(edges) }, 0))!.song!;
+      expect({ kick: got.kick, clap: got.clap, hat: got.hat, chord: got.chord }).toEqual(edges);
+    }
+  });
+
+  it("leaves the engine tail's own bytes where they were", () => {
+    const without = new Uint8Array(encodeFeatureFrame({ ...base, engine }, 1000));
+    const withSong = new Uint8Array(encodeFeatureFrame({ ...base, engine, song }, 1000));
+    expect(withSong.length).toBeGreaterThan(without.length);
+    expect(Array.from(withSong.subarray(0, without.length))).toEqual(Array.from(without));
+  });
+
+  it("decodes an engine-only frame with no song", () => {
+    expect(decodeFeatureFrame(encodeFeatureFrame({ ...base, engine }, 1000))!.song).toBeNull();
+    expect(decodeFeatureFrame(encodeFeatureFrame({ ...base, engine, song: null }, 1000))!.song).toBeNull();
+  });
+
+  it("sends no song tail without an engine reading", () => {
+    const buf = encodeFeatureFrame({ ...base, song }, 1000, { min: -0.1, max: 0.1 });
+    expect(decodeFeatureFrame(buf)!.song).toBeNull();
+  });
+
+  it("reads the song of a frame longer than this layout", () => {
+    const buf = encodeFeatureFrame({ ...base, engine, song }, 1000);
+    const longer = new Uint8Array(buf.byteLength + 3);
+    longer.set(new Uint8Array(buf));
+    const decoded = decodeFeatureFrame(longer.buffer)!;
+    expect(decoded.song!.kick).toBe(true);
+    expect(decoded.song!.loudness).toBe(1);
   });
 });
 
