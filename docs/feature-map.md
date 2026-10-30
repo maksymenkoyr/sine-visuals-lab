@@ -143,7 +143,9 @@ Darker means more important.
       the Hits roll: Any, an instrument track for each of the song layer's
       hits with its level as the track's floor (two jacks, and a dashed
       firing line on the device that hears the music), and Onset surge;
-      Stems holds Lead ·
+      Stems holds Lead and Keys; Song holds Playing, Section, a Drop track
+      like an instrument's on the Hits roll (the drop level as its floor, two
+      jacks, a dashed firing line every device shows) and the dials ·
       `src/ui/audioMeters.ts`, the dials are `MUSIC_DIALS`
     - ○○○ **Heat history** — the last meter card, folded by default: one
       strip per wired setting and per signal, second by second · `src/ui/audioMeters.ts`

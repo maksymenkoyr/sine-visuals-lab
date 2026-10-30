@@ -773,6 +773,15 @@ hexagon and decagon.
     median 3.96 → 2.12, p95 4.79 → 2.71; hits a minute on the song 418 →
     414, in silence 0 → 0; main's bass / mid / treble lanes 150 / 138 /
     242 a minute against kick / clap / hats / chord 114 / 48 / 280 / 122.
+- 2026-10-30, #803: the scene's drop reaction now fires when audio v6's
+  drop level crosses its mark (`DROP_MARK`, `src/render/animClock.ts`), not
+  on the Section trend's old drop detector.
+  - tune-real on a real song (around-the-world, 60 s) then silence, the
+    commit before → this change, one run each: song change median
+    10.47 → 12.81, p95 14.78 → 23.42; silence median
+    3.27 → 1.70, p95 4.40 → 2.40; hits a minute on the song
+    364 → 370, in silence 0 → 0; drops a minute on the song
+    0 → 2, in silence 0 → 0.
 
 ## Tuning notes
 

@@ -77,9 +77,15 @@ that reshapes an input node's value on its way to that one setting.
   when the room was too quiet. An instrument's note is filled when it counted,
   brighter the higher its level stood. Its fold id (`"sound"`) is new, so the old Dynamics fold doesn't carry
   over.
-- **Stems card.** Right after Sound: Lead, the held part of the sound, as a
-  line with its own colour and jack. It is measured only on the device with
-  the mic.
+- **Stems card.** Right after Sound: Lead, the held part of the sound, then
+  Keys, each a line with its own colour and jack. Lead is measured only on the
+  device with the mic; Keys comes from the song layer, so every device has it.
+- **Song card.** Playing (is music on), Section (how intense this stretch is
+  against the last while), then **Drop**: a track like an instrument's on the
+  Hits roll, with the drop level as its filled floor, a note where the drop
+  fired and a dashed line where the level has to climb to fire it. That line is
+  a fixed mark, so every device shows it. Drop has two jacks, the hit (Drop)
+  and the level (Drop level). The music dials follow.
 
 ## Writing new copy
 

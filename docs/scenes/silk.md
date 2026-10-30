@@ -141,6 +141,15 @@ bpm, 59 beats, 3539 probe samples / 185 reference onsets):
   which in silence never came.
 - 2026-10-11 — Sampler units now go through `GLProgram.setI`; the file's own location cache and its clears are gone. Nothing visible changed: headless before/after shots look the same. (#349)
 - 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/silk/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #803: the scene's drop reaction now fires when audio v6's
+  drop level crosses its mark (`DROP_MARK`, `src/render/animClock.ts`), not
+  on the Section trend's old drop detector.
+  - tune-real on a real song (around-the-world, 60 s) then silence, the
+    commit before → this change, one run each: song change median
+    2.03 → 1.99, p95 3.42 → 3.14; silence median
+    0.58 → 0.59, p95 0.84 → 0.84; hits a minute on the song
+    364 → 357, in silence 0 → 0; drops a minute on the song
+    0 → 2, in silence 0 → 0.
 
 ## Tuning notes
 
