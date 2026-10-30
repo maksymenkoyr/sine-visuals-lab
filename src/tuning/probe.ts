@@ -4,7 +4,7 @@
  * logic over data app.ts already has each tick; app.ts supplies it via
  * ProbeInput rather than this module reaching into app.ts's internals.
  */
-import type { FeatureFrame } from "../audio/types.ts";
+import type { FeatureFrame, SongFrame } from "../audio/types.ts";
 import type { AnimFrame } from "../render/animClock.ts";
 import type { SceneSetting } from "../render/sceneSettings.ts";
 import { getSceneExpansion, getSceneMaster, getSceneSetting } from "../render/sceneSettings.ts";
@@ -74,6 +74,8 @@ export interface ProbeSnapshot {
   bands: { low: number; mid: number; high: number; energy: number };
   /** AnimFrame.hats/lead (src/audio/stemSplit.ts), eased and gated. */
   stems: { hats: number; lead: number };
+  /** This tick's FeatureFrame.song, copied; null where no song layer measured it. */
+  song: SongFrame | null;
   /** barPhase and metronomeBpm are src/render/beatTrim.ts's own corrected
    *  readings (AnimFrame.barPhase/metronomeBpm) — surfaced here so a
    *  headless check can confirm a bar resync / ×2 / ÷2 landed without
@@ -137,6 +139,7 @@ export function buildProbeSnapshot(input: ProbeInput): ProbeSnapshot {
     masterExpansion: getSceneExpansion(),
     bands: { low: anim?.low ?? 0, mid: anim?.mid ?? 0, high: anim?.high ?? 0, energy: vis?.energy ?? 0 },
     stems: { hats: anim?.hats ?? 0, lead: anim?.lead ?? 0 },
+    song: vis?.song ? { ...vis.song } : null,
     beat: {
       fired: anim?.onset ?? false,
       bpm: vis?.bpm ?? 0,

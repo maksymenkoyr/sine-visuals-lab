@@ -3286,6 +3286,7 @@ function readLocalCapture(
   const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale);
   const engine = engineSource ? engineSource.read(now) : null;
   f.engine = engine;
+  f.song = engineSource ? engineSource.song : null;
   f.gateOff = !captureIsMic;
   f.bpm = engineSource ? engineSource.bpm : 0;
   gateMusicHeld = musicHoldsGate(engine, gateMusicHeld);
