@@ -107,6 +107,13 @@ frames were pulled directly with `yt-dlp` and `ffmpeg` rather than through a
   | #682 | 9.28 | 12.33 | 3.28 | 9.07 |
 
   Little changed. The silence rows are the scene's own drift: no hit fires on silence in any build, so their spread isn't this change. No hit fired on silence.
+- 2026-10-30, #802: The swell's wire moved from the bass hit (or the beat
+  hit) to the Kick (or the beat hit).
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 9.09 → 10.54, p95 13.56 → 18.10; silence
+    median 2.52 → 2.47, p95 6.32 → 6.15; hits a minute on the song 410 →
+    406, in silence 0 → 0; main's bass / mid / treble lanes 144 / 138 /
+    242 a minute against kick / clap / hats / chord 110 / 40 / 278 / 130.
 
 ## Tuning notes
 

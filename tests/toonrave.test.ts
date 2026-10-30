@@ -550,9 +550,9 @@ describeScene("toonrave settings", () => {
   });
 
   itScene("the reactive settings have drives, and the trigger reads the drop edge", () => {
-    expectScene(byKey("dance").drive?.default).toBe("anim.lowOnset");
+    expectScene(byKey("dance").drive?.default).toBe("anim.kickOnset");
     expectScene(byKey("energyBoost").drive?.default).toBe("feature.level");
-    expectScene(byKey("energyPump").drive?.default).toBe("anim.lowOnset");
+    expectScene(byKey("energyPump").drive?.default).toBe("anim.kickOnset");
     expectScene(byKey("energy").drive).toBeUndefined();
     expectScene(byKey("energyDrop").drive).toBeUndefined();
     expectScene(byKey("lights").drive).toBeDefined();

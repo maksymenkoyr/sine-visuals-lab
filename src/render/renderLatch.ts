@@ -54,7 +54,6 @@ export function createRenderLatch(): RenderLatch {
   let pendingMidOnset = false;
   let pendingHighOnset = false;
   let pendingDropOnset = false;
-  let pendingHatsOnset = false;
   let pendingSongKick = false;
   let pendingSongClap = false;
   let pendingSongHat = false;
@@ -71,7 +70,6 @@ export function createRenderLatch(): RenderLatch {
       pendingMidOnset ||= anim.midOnset;
       pendingHighOnset ||= anim.highOnset;
       pendingDropOnset ||= anim.dropOnset;
-      pendingHatsOnset ||= anim.hatsOnset;
       pendingSongKick ||= anim.song.kickOnset;
       pendingSongClap ||= anim.song.clapOnset;
       pendingSongHat ||= anim.song.hatOnset;
@@ -101,7 +99,6 @@ export function createRenderLatch(): RenderLatch {
         midOnset: pendingMidOnset,
         highOnset: pendingHighOnset,
         dropOnset: pendingDropOnset,
-        hatsOnset: pendingHatsOnset,
         metronomeBeat: pendingMetronomeBeat,
         metronomeBar: pendingMetronomeBar,
       };
@@ -111,7 +108,6 @@ export function createRenderLatch(): RenderLatch {
       pendingMidOnset = false;
       pendingHighOnset = false;
       pendingDropOnset = false;
-      pendingHatsOnset = false;
       pendingSongKick = false;
       pendingSongClap = false;
       pendingSongHat = false;

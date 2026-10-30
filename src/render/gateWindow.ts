@@ -243,11 +243,11 @@ export function glideStep(y: number, target: number, s: number, dtSec: number): 
  *  section swell, not a hit's ring-out, so no Length row stretches it. */
 function edgeTailLane(id: SignalId): HitLane | null {
   switch (id) {
-    case "anim.lowOnset":
+    case "anim.kickOnset":
       return "low";
-    case "anim.midOnset":
+    case "anim.clapOnset":
+    case "anim.chordOnset":
       return "mid";
-    case "anim.highOnset":
     case "anim.hats":
       return "high";
     case "anim.dropOnset":
@@ -264,11 +264,11 @@ function edgeDecayPerSec(id: SignalId): number {
   switch (id) {
     case "feature.onset":
       return BEAT_PULSE_DECAY_PER_SEC;
-    case "anim.lowOnset":
+    case "anim.kickOnset":
       return GROUP_TUNING.low.pulseDecayRate;
-    case "anim.midOnset":
+    case "anim.clapOnset":
+    case "anim.chordOnset":
       return GROUP_TUNING.mid.pulseDecayRate;
-    case "anim.highOnset":
     case "anim.hats":
       return GROUP_TUNING.high.pulseDecayRate;
     case "anim.dropOnset":
@@ -294,30 +294,29 @@ export function parseHitHeight(raw: unknown): HitHeight | null {
   return raw === "loud" ? "graded" : null;
 }
 
-/** Hits whose detector reads how far the hit cleared its firing line, so a
- *  Graded height has something to grade; every other hit-kind entry (the
- *  metronome, Drop) is a bare trigger and Graded would only repeat Fixed. */
-const GRADED_EDGES: ReadonlySet<SignalId> = new Set<SignalId>(["feature.onset", "anim.lowOnset", "anim.midOnset", "anim.highOnset", "anim.hats"]);
+/** Hits that have a level to grade against, so a Graded height has something
+ *  to grade; every other hit-kind entry (the metronome, Drop) is a bare
+ *  trigger and Graded would only repeat Fixed. */
+const GRADED_EDGES: ReadonlySet<SignalId> = new Set<SignalId>(["feature.onset", "anim.kickOnset", "anim.clapOnset", "anim.hats", "anim.chordOnset"]);
 
 export function hasHitStrength(id: SignalId): boolean {
   return GRADED_EDGES.has(id);
 }
 
-/** Graded height's target on a hit-kind entry's edge: the stand-out of the
- *  hit that just fired (hitStrength.ts's hitStandout on the engine's ratio),
- *  the strongest of the lanes that fired for Any hit, and for Hats how high
- *  its peak went (already against its loudest recent hit). A bare trigger
- *  reads 1. */
+/** Graded height's target on a hit-kind entry's edge: for an instrument, its
+ *  own level jack's value at the edge (the level it was picked from); for Any
+ *  hit, the stand-out of the strongest lane that fired (hitStrength.ts's
+ *  hitStandout on the engine's ratio). A bare trigger reads 1. */
 function edgeGradedLevel(id: SignalId, anim: AnimFrame): number {
   switch (id) {
-    case "anim.lowOnset":
-      return hitStandout(anim.hits.low.ratio, HIT_KNEE_DEFAULT);
-    case "anim.midOnset":
-      return hitStandout(anim.hits.mid.ratio, HIT_KNEE_DEFAULT);
-    case "anim.highOnset":
-      return hitStandout(anim.hits.high.ratio, HIT_KNEE_DEFAULT);
+    case "anim.kickOnset":
+      return anim.low;
+    case "anim.clapOnset":
+      return anim.song.clapLevel;
     case "anim.hats":
-      return anim.hatsHit;
+      return anim.song.hatLevel;
+    case "anim.chordOnset":
+      return anim.song.chordLevel;
     case "feature.onset": {
       let best = 0;
       if (anim.lowOnset) best = Math.max(best, hitStandout(anim.hits.low.ratio, HIT_KNEE_DEFAULT));

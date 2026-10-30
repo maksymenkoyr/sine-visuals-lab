@@ -114,7 +114,7 @@ export const SETTINGS: SceneSetting[] = [
   },
   {
     key: "wipe",
-    label: "Bass wipe",
+    label: "Kick wipe",
     description: "A kick clears a round hole in the colony, which then regrows from its rim — size follows the hit",
     group: "Motion",
     min: 0,
@@ -122,9 +122,9 @@ export const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.4,
     auto: { dynamics: 0.2 },
-    // anim.lowOnset gates the stamp below — a plain Bass hit default. The
-    // hole's own radius still rides anim.lowPulse's graded hit shape, untouched.
-    drive: { default: "anim.lowOnset", hit: { reactionLabel: "wipe" } },
+    // anim.song.kickOnset gates the stamp below — a plain Kick default. The
+    // hole's own radius still rides anim.song.kickPulse's graded hit shape, untouched.
+    drive: { default: "anim.kickOnset", hit: { reactionLabel: "wipe" } },
   },
   {
     key: "regime",
@@ -165,8 +165,8 @@ export const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.6,
     auto: { dynamics: 0.2 },
-    // uLowPulse directly (DISPLAY_FRAG's reliefEff) — a plain Bass hit default.
-    drive: { default: "anim.lowOnset" },
+    // uKickPulse directly (DISPLAY_FRAG's reliefEff) — a plain Kick default.
+    drive: { default: "anim.kickOnset" },
   },
   {
     key: "shaping",

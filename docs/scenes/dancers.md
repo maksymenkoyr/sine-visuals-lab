@@ -183,6 +183,13 @@ original work built around that data.
   asked: the clips marked Drop (the other 12 old ones) left the library.
   All four families still have clips; Alien took the new list as its
   dances (`docs/scenes/alien.md`). `clips-v1.bin` stays for older tabs.
+- 2026-10-30, #802: Jaw chatter and Camera move's roll moved from the bass
+  hit to the Kick.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 2.15 → 2.10, p95 3.06 → 3.00; silence
+    median 0.41 → 0.42, p95 0.74 → 0.73; hits a minute on the song 428 →
+    426, in silence 0 → 0; main's bass / mid / treble lanes 150 / 140 /
+    242 a minute against kick / clap / hats / chord 122 / 42 / 278 / 128.
 
 ## Tuning notes
 

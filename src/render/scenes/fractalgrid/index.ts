@@ -41,7 +41,7 @@
 //
 // Sync mapping (drives, not fixed couplings — drives.ts's header): the
 // reference is silent, so every reaction here is ours. Dive speed rides the
-// bass level, the grid steps on bass hits, folds land on the bar grid, lines
+// bass level, the grid steps on kicks, folds land on the bar grid, lines
 // thicken on any beat, and a drop inverts the picture for a few bars.
 import { createFullscreenScene } from "../../fullscreenScene.ts";
 import type { Scene } from "../../scene.ts";
@@ -269,7 +269,7 @@ const base = createFullscreenScene(card.id, card.name, FRAG, {
     const iterations = resolveSceneSetting(ID, settingFor("iterations"));
 
     const bass = Math.min(1.5, Math.max(0, drives.value("dive", anim.low, DIVE_REST)));
-    const stepHit = drives.fired("step", anim.lowOnset);
+    const stepHit = drives.fired("step", anim.song.kickOnset);
     const foldHit = drives.fired("fold", anim.onset);
     const dropHit = drives.fired("invert", anim.dropOnset);
     const stepFired = step > 0 && stepHit;
@@ -281,7 +281,7 @@ const base = createFullscreenScene(card.id, card.name, FRAG, {
       dt,
       rate: dive * (DIVE_FLOOR + DIVE_GAIN * bass),
       depthScale: depth,
-      stepCells: stepFired ? step * drives.value("step", anim.lowPulse) * drives.hitSize("step") : 0,
+      stepCells: stepFired ? step * drives.value("step", anim.song.kickPulse) * drives.hitSize("step") : 0,
       foldSteps: foldFired ? fold * drives.hitSize("fold") : 0,
       dropFired,
       invertSize: drives.hitSize("invert"),

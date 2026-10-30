@@ -46,7 +46,7 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 1,
     description: "How far each kick throws the hearts outward.",
-    drive: { default: "anim.lowOnset", hit: { reactionLabel: "push" } },
+    drive: { default: "anim.kickOnset", hit: { reactionLabel: "push" } },
   },
   {
     key: "spin",
@@ -67,7 +67,7 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 1,
     description: "How hard each hit sets the hearts spinning.",
-    drive: { default: "anim.midOnset", hit: { reactionLabel: "spin" } },
+    drive: { default: "anim.chordOnset", hit: { reactionLabel: "spin" } },
   },
   {
     key: "wave",

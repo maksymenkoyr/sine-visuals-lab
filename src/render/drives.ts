@@ -38,7 +38,7 @@ import { createWireModState, freshWireMod, clampWireMod, sameWireMod, stepWireMo
  *   - **add** — Σ weight·value. The everyday case: two hits reinforcing
  *     each other, or a hit layered under a sustained level.
  *   - **max** — the single largest weight·value. "Whichever is louder right
- *     now", for two sources that should never simply stack (Bass hit *or*
+ *     now", for two sources that should never simply stack (Kick *or*
  *     Any hit, say, rather than a double-height pulse when both land).
  *   - **gate** — each source has a *role*, `DriveSource.when` (absent means
  *     "plays"; `true` marks it a *condition*). `plays = Σ over non-condition,
@@ -130,8 +130,9 @@ import { createWireModState, freshWireMod, clampWireMod, sameWireMod, stepWireMo
  *     or the grid's own pulse. "This hit is binary: it either lands or it
  *     doesn't", however hard it hit.
  *   - **Graded** — the engine's own size for that hit: how far it stood
- *     clear of its firing line (hitStrength.ts's `hitStandout`), or for Hats
- *     how high its peak went, decaying at the source's own pulse-decay
+ *     clear of its firing line (hitStrength.ts's `hitStandout`) for Any hit, or
+ *     for an instrument (Kick, Clap, Hats, Chord) how high its own level
+ *     stood at the edge, decaying at the source's own pulse-decay
  *     rate. A whisper lands short, a slam lands tall. The envelope itself is
  *     stepHeightEnv in gateWindow.ts.
  *
@@ -314,7 +315,7 @@ import { createWireModState, freshWireMod, clampWireMod, sameWireMod, stepWireMo
  * scene's own render() gets one built from the render-latched AnimFrame
  * (renderLatch.ts's consume()
  * result, the same object passed to render() itself), so a plain-catalogue
- * edge choice (Beat, Bass hit, …) reads its per-source edge straight off
+ * edge choice (Beat, Kick, …) reads its per-source edge straight off
  * that already-latched boolean — no separate latch needed for those. Only a
  * grid source keeps its own pending-edge flag (set in accumulate(), since a
  * grid tick isn't an AnimFrame field at all), and only `.fired()` clears it,

@@ -29,7 +29,7 @@ export const SETTINGS: SceneSetting[] = [
     step: 1,
     default: 1,
     drive: {
-      default: "anim.lowOnset",
+      default: "anim.kickOnset",
       hit: { flatOnly: "The dance only uses when each hit lands, not how big it was, so it can't be sized.", reactionLabel: "beat" },
     },
   },
@@ -66,7 +66,7 @@ export const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.5,
-    drive: { default: "anim.lowOnset", hit: { reactionLabel: "pump" } },
+    drive: { default: "anim.kickOnset", hit: { reactionLabel: "pump" } },
   },
   {
     key: "energyDrop",

@@ -55,6 +55,11 @@ export const STRIP_HIGH = "#f6b15b";
 export const STEM_LEAD = "#eb64f7";
 export const STEM_HATS = "#6464f7";
 export const KICK_GREEN = "#64f764";
+/** Clap and Chord, the Hits roll's other two instruments: the colours the
+ *  owner picked on the song-layer proposal page. Not yet measured against the
+ *  colours above, which a new colour near them has to be. */
+export const CLAP_CREAM = "#f4eeaf";
+export const CHORD_LILAC = "#c0a2f5";
 /** A picked band's row (audioMeters.ts), cycled by band number so neighbouring
  *  bands differ. Picked for the widest CIELAB distance from every card accent,
  *  FAMILY_ACCENTS entry and drive-source colour, the stem and Kick colours

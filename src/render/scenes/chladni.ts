@@ -1044,7 +1044,7 @@ ${ZONE_DRIVE_GLSL}
 // Sand zones' remap (chladniSand.ts). Mirrored by rawPlateDrive for probe().
 float plateDrive() {
   float shake = pow(uShake, 1.5) * 2.0;
-  return zoneDrive(shake * (0.25 + 2.4 * shakeDrive(uEnergy)) + uKick * kickDrive(uLowPulse) * 1.5);
+  return zoneDrive(shake * (0.25 + 2.4 * shakeDrive(uEnergy)) + uKick * kickDrive(uKickPulse) * 1.5);
 }
 // Weight (see file header): air drag cuts a light grain's hop short, and fine
 // powder clings, so it needs a harder plate to lift.
@@ -1505,7 +1505,7 @@ void main() {
   // a halo (see POINT_FRAG), mostly on the hat/cymbal onset pulse so it
   // flashes rather than fogs.
   float glint = step(1.0 - 1.0 / (${GLINT_ONE_IN.toFixed(1)} * max(1.0, uSandAmount)), hash21(vec2(texel) * 0.517 + 9.1));
-  float glintGlow = glint * clamp(uHighGlow * highGlowDrive(${GLOW_LEVEL_WEIGHT.toFixed(2)} * uHigh + ${GLOW_HIT_WEIGHT.toFixed(2)} * uHighPulse), 0.0, 1.0);
+  float glintGlow = glint * clamp(uHighGlow * highGlowDrive(${GLOW_LEVEL_WEIGHT.toFixed(2)} * uHigh + ${GLOW_HIT_WEIGHT.toFixed(2)} * uHatPulse), 0.0, 1.0);
   // Embers' neon halo: carried by one grain in EMBER_HALO_ONE_IN, growing
   // with its heat.
   float emberGlow = 0.0;
@@ -2055,7 +2055,7 @@ function createChladniScene(): Scene {
         resolveSceneSetting(ID, settingFor("shake")),
         drives.value("shake", frame.energy),
         resolveSceneSetting(ID, settingFor("kick")),
-        drives.value("kick", anim.lowPulse),
+        drives.value("kick", anim.song.kickPulse),
       );
 
       gl.disable(gl.BLEND);

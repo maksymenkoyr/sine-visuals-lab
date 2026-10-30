@@ -122,6 +122,14 @@ shells thrown outward on bass hits. Reference frames were pulled ad hoc with
   | #682 | 3.11 | 4.41 | 0.00 | 0.01 |
 
   Back to the old lanes' motion. No hit fired on silence.
+- 2026-10-30, #802: Bass kick, Chunk burst, Camera move and Beat flash moved
+  from the bass hit to the Kick, and Sparkle's hit part from the treble hit
+  to the Hats.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 3.17 → 2.82, p95 4.64 → 4.32; silence
+    median 0.00 → 0.00, p95 0.01 → 0.01; hits a minute on the song 416 →
+    404, in silence 0 → 0; main's bass / mid / treble lanes 158 / 128 /
+    242 a minute against kick / clap / hats / chord 110 / 40 / 276 / 126.
 
 ## Tuning notes
 

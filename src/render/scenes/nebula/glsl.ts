@@ -210,7 +210,7 @@ void main() {
   vec2 here = vec2(pathX(0.0), pathY(0.0));
 
   float th = mix(0.69, 0.55, uGas);
-  float hot = 1.0 + ${f(FLARE_GAIN)} * uFlare * flareDrive(uLowPulse);
+  float hot = 1.0 + ${f(FLARE_GAIN)} * uFlare * flareDrive(uKickPulse);
   float bright = uGlow * (1.0 + ${f(GLOW_GAIN)} * glowDrive(uEnergy));
   vec3 churn = ${f(CHURN_R)} * vec3(cos(uChurn), sin(uChurn), 0.0);
 

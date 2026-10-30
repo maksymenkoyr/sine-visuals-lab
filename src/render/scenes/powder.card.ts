@@ -67,7 +67,7 @@ export const SETTINGS: SceneSetting[] = [
   {
     key: "kick",
     label: "Bass kick",
-    description: "Every bass hit throws a directed plume of powder out of the mass; it coasts, then falls",
+    description: "Every kick throws a directed plume of powder out of the mass; it coasts, then falls",
     group: "Motion",
     min: 0,
     max: 1,
@@ -76,10 +76,10 @@ export const SETTINGS: SceneSetting[] = [
     // Dark, bass-heavy mixes carry more kick presence to throw on.
     auto: { attack: 0.3, brightness: -0.2 },
     // Gates the ordinary plume (render()) and scales the point-size grow
-    // term (POINT_VERT) — both anim.lowPulse/lowOnset directly, a plain
-    // Bass hit default. A drop's own opposed-pair plume is unconditional,
+    // term (POINT_VERT) — both anim.song.kickPulse/kickOnset directly, a plain
+    // Kick default. A drop's own opposed-pair plume is unconditional,
     // independent of this choice, the same as caustics' drop ring.
-    drive: { default: "anim.lowOnset", hit: { reactionLabel: "plume" } },
+    drive: { default: "anim.kickOnset", hit: { reactionLabel: "plume" } },
   },
   {
     key: "chunks",
@@ -98,7 +98,7 @@ export const SETTINGS: SceneSetting[] = [
     drive: {
       default: "scene",
       sceneLabel: "Scene: this scene's own hit-strength detector",
-      sceneSources: ["anim.low", "anim.lowOnset", "anim.sectionIntensity", "anim.dropOnset"],
+      sceneSources: ["anim.low", "anim.kickOnset", "anim.sectionIntensity", "anim.dropOnset"],
       hit: { reactionLabel: "burst" },
     },
   },
@@ -157,10 +157,10 @@ export const SETTINGS: SceneSetting[] = [
     default: 0.45,
     // Bright, snappy material is what has hats worth twinkling on.
     auto: { brightness: 0.4, attack: 0.15 },
-    // Two signals across two layers (a treble hit, or the sustained treble
+    // Two signals across two layers (a hat hit, or the sustained treble
     // level too), not one — same reasoning as caustics' Sparkle —
     // so the default is Scene.
-    drive: { default: "scene", sceneLabel: "Scene: treble level + hits", sceneSources: ["anim.high", "anim.highOnset"] },
+    drive: { default: "scene", sceneLabel: "Scene: treble level + hits", sceneSources: ["anim.high", "anim.hats"] },
   },
   {
     key: "hueDrift",
@@ -197,11 +197,11 @@ export const SETTINGS: SceneSetting[] = [
     // Move the camera on music that has hits and a tempo to move to.
     auto: { pulse: 0.25, tempo: 0.15 },
     // Two different signals at two different sites — the push-in reads a
-    // bass hit, the drop shake reads the drop pulse — so the default is Scene.
+    // kick, the drop shake reads the drop pulse — so the default is Scene.
     drive: {
       default: "scene",
-      sceneLabel: "Scene: bass hit (push-in) and drop (shake)",
-      sceneSources: ["anim.lowOnset", "anim.dropOnset"],
+      sceneLabel: "Scene: kick (push-in) and drop (shake)",
+      sceneSources: ["anim.kickOnset", "anim.dropOnset"],
     },
   },
   {
@@ -216,13 +216,13 @@ export const SETTINGS: SceneSetting[] = [
     // Same reasoning as chladni's and caustics' flash: punches read on
     // punchy, uncluttered material.
     auto: { attack: 0.3, pulse: 0.2, density: -0.15 },
-    // Every site mixes a different weighted blend of bass hit/beat hit/
+    // Every site mixes a different weighted blend of kick/beat hit/
     // drop (or, at two sites, just one of them alone) — no single catalogue
     // pick reproduces all five, so the default is Scene.
     drive: {
       default: "scene",
-      sceneLabel: "Scene: bass, beat and drop hits, weighted per site",
-      sceneSources: ["anim.lowOnset", "feature.onset", "anim.dropOnset"],
+      sceneLabel: "Scene: kick, beat and drop hits, weighted per site",
+      sceneSources: ["anim.kickOnset", "feature.onset", "anim.dropOnset"],
     },
   },
   {

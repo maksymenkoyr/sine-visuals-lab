@@ -54,7 +54,7 @@ export const portalScene = createFullscreenScene(card.id, card.name, FRAG, {
   },
   extraUniforms: (_frame, anim, getSetting, drives) => {
     // Called every frame, unconditionally: fired() must see every frame.
-    const fired = drives.fired("kick", anim.lowOnset);
+    const fired = drives.fired("kick", anim.song.kickOnset);
     const size = fired ? drives.hitSize("kick") * getSetting("kick") : 0;
     const t = anim.timeSec;
     advanceLooks(looks, fired, size, t, getSetting("turns") + 1);

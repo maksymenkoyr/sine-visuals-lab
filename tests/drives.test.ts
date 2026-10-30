@@ -30,6 +30,7 @@ import { SIGNALS, type SignalId } from "../src/render/signals.ts";
 import { GROUP_TUNING } from "../src/render/bandEnergy.ts";
 import { NUM_BANDS, type EngineReading, type FeatureFrame } from "../src/audio/types.ts";
 import { engineReading, ratioForStandout } from "./engineReading.ts";
+import { animSong, songFrame } from "./songFrame.ts";
 import type { SceneSetting } from "../src/render/sceneSettings.ts";
 import { listScenes } from "../src/render/scene.ts";
 // Side-effect import: registers every scene, same convention as signals.test.ts.
@@ -47,7 +48,11 @@ function heard(level: number, hit: boolean, ratio = 2): EngineReading {
   return engineReading({ low: level, mid: level, high: level, kick: strength, snare: strength, hat: strength });
 }
 
+/** A frame whose engine reading carries a hit also carries the song layer's
+ *  matching edges (kick, clap and hat), as the app's two layers do together. */
 function frame(overrides: Partial<FeatureFrame> = {}): FeatureFrame {
+  const e = overrides.engine;
+  const song = e && (e.kick > 0 || e.snare > 0 || e.hat > 0) ? songFrame({ kick: e.kick > 0, clap: e.snare > 0, hat: e.hat > 0 }) : null;
   return {
     time: 0,
     bands: new Float32Array(NUM_BANDS),
@@ -60,7 +65,7 @@ function frame(overrides: Partial<FeatureFrame> = {}): FeatureFrame {
     bpm: 120,
     onsetPhase: 0,
     engine: null,
-    song: null,
+    song,
     ...overrides,
   };
 }
@@ -84,7 +89,7 @@ function patchSetting(sceneId: string, key: string, patch: DrivePatch): SceneSet
 describe("drives: catalogue identity", () => {
   it("a plain SignalId choice reads exactly SIGNALS[id].read(frame, anim), with custom=1", () => {
     const clock = createAnimClock();
-    // A few ticks with a real onset so beatPulse/lowPulse aren't just 0.
+    // A few ticks with a real onset so beatPulse/song.kickPulse aren't just 0.
     const bands = new Float32Array(NUM_BANDS).fill(0.6);
     clock.advance(DT, frame({ bands, onset: true, engine: heard(bands[0], true) }));
     const anim = clock.advance(DT, frame({ bands, onset: true, engine: heard(bands[0], true) }));
@@ -532,19 +537,21 @@ describe("drives: caustics defaults reproduce today's couplings exactly", () => 
     expect(drives.uniformPair("turbulence")).toEqual({ drive: anim.mid, custom: 1 });
   });
 
-  it("bass and driftPump default to Bass hit, matching anim.lowPulse exactly", () => {
+  it("bass and driftPump default to Kick, matching anim.song.kickPulse exactly", () => {
     const anim = animWith({ bands: new Float32Array(NUM_BANDS).fill(0.7), onset: true });
     const engine = createDriveEngine();
     const drives = engine.forScene("caustics", settings, anim);
-    expect(drives.uniformPair("bass")).toEqual({ drive: anim.lowPulse, custom: 1 });
-    expect(drives.value("driftPump", -1)).toBe(anim.lowPulse);
+    expect(drives.uniformPair("bass")).toEqual({ drive: anim.song.kickPulse, custom: 1 });
+    expect(anim.song.kickPulse).toBeGreaterThan(0);
+    expect(drives.value("driftPump", -1)).toBe(anim.song.kickPulse);
   });
 
-  it("driftPump defaults to Bass hit, matching anim.lowOnset exactly for fired()", () => {
+  it("driftPump defaults to Kick, matching anim.song.kickOnset exactly for fired()", () => {
     const anim = animWith({ bands: new Float32Array(NUM_BANDS).fill(0.9), onset: false, engine: engineReading({ low: 0.9, kick: 2 }) });
     const engine = createDriveEngine();
     const drives = engine.forScene("caustics", settings, anim);
-    expect(drives.fired("driftPump", false)).toBe(anim.lowOnset);
+    expect(anim.song.kickOnset).toBe(true);
+    expect(drives.fired("driftPump", false)).toBe(anim.song.kickOnset);
   });
 
   it("sparkle, ripple and driftLevel default to Scene", () => {
@@ -576,11 +583,11 @@ describe("drives: caustics defaults reproduce today's couplings exactly", () => 
     const engine = createDriveEngine();
     // Bass hit only.
     const bassOnly = animWith({ bands: new Float32Array(NUM_BANDS).fill(0.9), onset: false, engine: engineReading({ low: 0.9, kick: 2 }) });
-    const sceneDefaultBass = bassOnly.lowOnset || bassOnly.onset;
+    const sceneDefaultBass = bassOnly.song.kickOnset || bassOnly.onset;
     expect(engine.forScene("caustics", settings, bassOnly).fired("ripple", sceneDefaultBass)).toBe(sceneDefaultBass);
     // Neither.
     const neither = animWith({});
-    const sceneDefaultNeither = neither.lowOnset || neither.onset;
+    const sceneDefaultNeither = neither.song.kickOnset || neither.onset;
     expect(sceneDefaultNeither).toBe(false);
     expect(engine.forScene("caustics", settings, neither).fired("ripple", sceneDefaultNeither)).toBe(false);
   });
@@ -1141,18 +1148,18 @@ describe("drives: hit heights (Fixed/Graded) on a patch source", () => {
     const clock = createAnimClock();
     const engine = createDriveEngine();
     const sceneId = "height-default";
-    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "anim.lowOnset", weight: 1 }] });
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "anim.kickOnset", weight: 1 }] });
     const anim = tickToOnset(clock, engine, sceneId, [spec]);
-    expect(engine.forScene(sceneId, [spec], anim).uniformPair("k").drive).toBe(anim.lowPulse);
+    expect(engine.forScene(sceneId, [spec], anim).uniformPair("k").drive).toBe(anim.song.kickPulse);
   });
 
   it("Fixed jumps to 1 on the source's own edge and decays at that source's own pulse-decay rate", () => {
     const clock = createAnimClock();
     const engine = createDriveEngine();
     const sceneId = "height-fixed";
-    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "anim.lowOnset", weight: 1, height: "fixed" }] });
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "anim.kickOnset", weight: 1, height: "fixed" }] });
     const anim = tickToOnset(clock, engine, sceneId, [spec]);
-    expect(anim.lowOnset).toBe(true); // sanity: the tick really fired
+    expect(anim.song.kickOnset).toBe(true); // sanity: the tick really fired
     expect(engine.forScene(sceneId, [spec], anim).uniformPair("k").drive).toBe(1);
 
     // One further tick at the same (held) level: no new rise, so no new
@@ -1162,20 +1169,20 @@ describe("drives: hit heights (Fixed/Graded) on a patch source", () => {
     const held = new Float32Array(NUM_BANDS).fill(0.9);
     const anim2 = clock.advance(DT, frame({ bands: held, onset: false, engine: heard(0.9, false) }));
     engine.accumulate(DT, frame({ bands: held }), 0.9, anim2, sceneId, [spec]);
-    expect(anim2.lowOnset).toBe(false);
+    expect(anim2.song.kickOnset).toBe(false);
     const after = engine.forScene(sceneId, [spec], anim2).uniformPair("k").drive;
     expect(after).toBeCloseTo(Math.exp(-DT * GROUP_TUNING.low.pulseDecayRate), 6);
   });
 
-  it("Graded jumps to the hit's own stand-out on the edge — a Bass hit's ratio through hitStandout", () => {
+  it("Graded jumps to the Kick level on the edge — the level its own hit was picked from", () => {
     const clock = createAnimClock();
     const engine = createDriveEngine();
     const sceneId = "height-graded";
-    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "anim.lowOnset", weight: 1, height: "graded" }] });
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "anim.kickOnset", weight: 1, height: "graded" }] });
     const anim = tickToOnset(clock, engine, sceneId, [spec]);
-    expect(anim.lowOnset).toBe(true);
+    expect(anim.song.kickOnset).toBe(true);
     const drive = engine.forScene(sceneId, [spec], anim).uniformPair("k").drive;
-    expect(drive).toBeCloseTo(hitStandout(anim.hits.low.ratio, HIT_KNEE_DEFAULT), 9);
+    expect(drive).toBeCloseTo(anim.low, 9);
     expect(drive).toBeLessThan(1);
   });
 
@@ -1195,30 +1202,31 @@ describe("drives: hit heights (Fixed/Graded) on a patch source", () => {
     expect(landed(4)).toBeGreaterThan(landed(1.5));
   });
 
-  it("a Hats wire is a hit: Fixed lands at 1, Graded at the height of its peak", () => {
-    const landed = (height: "fixed" | "graded"): { drive: number; peak: number } => {
+  it("a Hats wire is a hit: Fixed lands at 1, Graded at the hat level at the edge", () => {
+    const landed = (height: "fixed" | "graded"): { drive: number; level: number } => {
       const clock = createAnimClock();
       const engine = createDriveEngine();
       const sceneId = `height-hats-${height}`;
       const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "anim.hats", weight: 1, height }] });
-      const music = engineReading({ music: true });
-      for (let i = 0; i < 40; i++) {
-        const f = frame({ hats: i < 10 ? 1 : 0, engine: music });
-        const anim = clock.advance(DT, f);
-        engine.accumulate(DT, f, 0, anim, sceneId, [spec]);
-        if (anim.hatsOnset) return { drive: engine.forScene(sceneId, [spec], anim).uniformPair("k").drive, peak: anim.hatsHit };
+      for (let i = 0; i < 20; i++) {
+        const f = frame({ song: songFrame({ hatLevel: 0.6 }) });
+        engine.accumulate(DT, f, 0, clock.advance(DT, f), sceneId, [spec]);
       }
-      throw new Error("no Hats hit");
+      const f = frame({ song: songFrame({ hat: true, hatLevel: 0.6 }) });
+      const anim = clock.advance(DT, f);
+      engine.accumulate(DT, f, 0, anim, sceneId, [spec]);
+      expect(anim.song.hatOnset).toBe(true);
+      return { drive: engine.forScene(sceneId, [spec], anim).uniformPair("k").drive, level: anim.song.hatLevel };
     };
     expect(landed("fixed").drive).toBe(1);
     const graded = landed("graded");
-    expect(graded.drive).toBeCloseTo(graded.peak, 9);
+    expect(graded.drive).toBeCloseTo(graded.level, 9);
     expect(graded.drive).toBeLessThan(1);
   });
 
   it("Graded on a bare trigger (the metronome) reads 1, like Fixed — it has no size to grade", () => {
     expect(hasHitStrength("anim.metronome")).toBe(false);
-    expect(hasHitStrength("anim.lowOnset")).toBe(true);
+    expect(hasHitStrength("anim.kickOnset")).toBe(true);
   });
 
   it("Fixed on Any hit decays at animClock's own BEAT_PULSE_DECAY_PER_SEC, the same rate its Graded pulse uses", () => {
@@ -1288,14 +1296,15 @@ describe("drives: fired() across multiple sources", () => {
     const spec = patchSetting(sceneId, "k", {
       mix: "add",
       sources: [
-        { choice: "anim.lowOnset", weight: 1 },
-        { choice: "anim.midOnset", weight: 1 },
+        { choice: "anim.kickOnset", weight: 1 },
+        { choice: "anim.chordOnset", weight: 1 },
       ],
     });
     const base = createAnimClock().advance(DT, frame());
-    expect(engine.forScene(sceneId, [spec], { ...base, lowOnset: false, midOnset: false }).fired("k", false)).toBe(false);
-    expect(engine.forScene(sceneId, [spec], { ...base, lowOnset: true, midOnset: false }).fired("k", false)).toBe(true);
-    expect(engine.forScene(sceneId, [spec], { ...base, lowOnset: false, midOnset: true }).fired("k", false)).toBe(true);
+    const withSong = (kickOnset: boolean, chordOnset: boolean) => ({ ...base, song: animSong({ kickOnset, chordOnset }) });
+    expect(engine.forScene(sceneId, [spec], withSong(false, false)).fired("k", false)).toBe(false);
+    expect(engine.forScene(sceneId, [spec], withSong(true, false)).fired("k", false)).toBe(true);
+    expect(engine.forScene(sceneId, [spec], withSong(false, true)).fired("k", false)).toBe(true);
   });
 
   it("gate: fires only when source 0's own edge coincides with the gate being open", () => {
@@ -1304,14 +1313,15 @@ describe("drives: fired() across multiple sources", () => {
     const spec = patchSetting(sceneId, "k", {
       mix: "gate",
       sources: [
-        { choice: "anim.lowOnset", weight: 1 },
+        { choice: "anim.kickOnset", weight: 1 },
         { choice: "anim.mid", weight: 1, when: true },
       ],
     });
     const base = createAnimClock().advance(DT, frame());
-    expect(engine.forScene(sceneId, [spec], { ...base, lowOnset: true, mid: 0.9 }).fired("k", false)).toBe(true);
-    expect(engine.forScene(sceneId, [spec], { ...base, lowOnset: true, mid: 0.1 }).fired("k", false)).toBe(false);
-    expect(engine.forScene(sceneId, [spec], { ...base, lowOnset: false, mid: 0.9 }).fired("k", false)).toBe(false);
+    const kick = animSong({ kickOnset: true });
+    expect(engine.forScene(sceneId, [spec], { ...base, song: kick, mid: 0.9 }).fired("k", false)).toBe(true);
+    expect(engine.forScene(sceneId, [spec], { ...base, song: kick, mid: 0.1 }).fired("k", false)).toBe(false);
+    expect(engine.forScene(sceneId, [spec], { ...base, song: animSong(), mid: 0.9 }).fired("k", false)).toBe(false);
   });
 });
 

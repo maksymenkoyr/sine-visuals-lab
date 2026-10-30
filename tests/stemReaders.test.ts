@@ -35,16 +35,18 @@ describe("wiresReadStems", () => {
     expect(wiresReadStems("stems-none", [GLOW])).toBe(false);
   });
 
-  it("is true once a setting is wired to Hats or Lead", () => {
+  it("is true once a setting is wired to Lead, and not for Hats, which comes from the song layer", () => {
     setDriveSetting("stems-hats", GLOW, driveSettingFromChoice("anim.hats"));
-    expect(wiresReadStems("stems-hats", [GLOW])).toBe(true);
+    expect(wiresReadStems("stems-hats", [GLOW])).toBe(false);
+    setDriveSetting("stems-only-lead", GLOW, driveSettingFromChoice("anim.lead"));
+    expect(wiresReadStems("stems-only-lead", [GLOW])).toBe(true);
     const both: DriveSetting = { mix: "add", sources: [{ choice: "anim.energy", weight: 1 }, { choice: "anim.lead", weight: 0.5 }] };
     setDriveSetting("stems-lead", GLOW, both);
     expect(wiresReadStems("stems-lead", [GLOW])).toBe(true);
   });
 
-  it("ignores a muted Hats source", () => {
-    setDriveSetting("stems-muted", GLOW, driveSettingFromChoice("anim.hats"));
+  it("ignores a muted Lead source", () => {
+    setDriveSetting("stems-muted", GLOW, driveSettingFromChoice("anim.lead"));
     setSourceMuted("stems-muted", GLOW, 0, true);
     expect(wiresReadStems("stems-muted", [GLOW])).toBe(false);
   });

@@ -7,12 +7,9 @@ import { createMetronome, type Metronome } from "./metronome.ts";
 import { createBeatTrimmer, getBeatTrim, type BeatTrimmer } from "./beatTrim.ts";
 import { createTapGuide, type TapGuide } from "./tapTempo.ts";
 import { createBandEnergy, GROUP_TUNING, slewLevel, type BandEnergy } from "./bandEnergy.ts";
-import { createLevelHits } from "./levelHits.ts";
 import { createSectionIntensity, type SectionIntensity } from "./sectionIntensity.ts";
 import { createMusicProfile, type MusicProfile, type DialValues } from "./musicProfile.ts";
 import { createSpectralCentroid, type SpectralCentroid } from "./spectralCentroid.ts";
-import { createBandPick, type BandPick } from "./bandPick.ts";
-import { BAND_SPLIT } from "../audio/bandSplit.ts";
 import { SMOOTHING_DEFAULT, smoothingRateScale } from "../audio/sensitivity.ts";
 import { musicHoldsGate, silenceGateDimmer, type SilenceGateMarks } from "../audio/silenceGate.ts";
 import { hitStrength, pulseDecayScales, UNIT_TAILS, type HitShape, type HitParts, type HitTails } from "../audio/hitStrength.ts";
@@ -33,11 +30,12 @@ import { hitStrength, pulseDecayScales, UNIT_TAILS, type HitShape, type HitParts
 /**
  * FeatureFrame.song as a scene reads it (audio v6, #798). One object per clock,
  * mutated in place each tick, so a reader that wants a past value copies it.
- * The levels ease like `hats` and `lead` but without the silence gate's
- * dimmer: the song layer's figures (#798) were measured undimmed, and its
- * edges carry their own gates. Each pulse is 1 on its edge, then
- * decays as the matching lane's pulse does in bandEnergy.ts. With no song
- * reading, no edge fires and every level eases down to 0.
+ * The levels ease like `hats` and `lead` and carry the silence gate's dimmer
+ * the same way, and an edge counts only while the gate is at least half open
+ * (SONG_EDGE_MIN_DIMMER); a quiet room otherwise reads hiss as hats. Each
+ * pulse is 1 on its counted edge, then decays as the matching lane's pulse
+ * does in bandEnergy.ts. With no song reading, no edge fires and every level
+ * eases down to 0.
  */
 export interface AnimSong {
   /** True only on the tick the song layer fired the edge. */
@@ -60,6 +58,9 @@ export interface AnimSong {
   dropLevel: number;
   playing: number;
 }
+
+/** The gate dimmer a song edge needs: the song layer's edges carry no strength for hitPasses to weigh, so a half-shut gate is the cut-off. */
+const SONG_EDGE_MIN_DIMMER = 0.5;
 
 /** A pulse after `dtSec` of the decay bandEnergy.ts gives the lane's own pulse. */
 function decayLanePulse(pulse: number, lane: "low" | "mid" | "high", dtSec: number, rateScale: number, tails: HitTails): number {
@@ -129,20 +130,10 @@ export interface AnimFrame {
   /** FeatureFrame.hats/lead (src/audio/stemSplit.ts), eased with the same
    *  slew as `low`/`mid`/`high` and multiplied by the silence gate's dimmer
    *  (`gateDimmer`), so a quiet room's hiss never reads as hats or a melody:
-   *  the split's own scale is relative and has no idea what silence is. */
+   *  the split's own scale is relative and has no idea what silence is. Only
+   *  `lead` is a signal now (signals.ts); `hats` stays for the tuning probe. */
   hats: number;
   lead: number;
-  /** Hats as a hit: a peak of `hats` (levelHits.ts, found a tick after it),
-   *  counted only while the engine hears music: talking opens the silence
-   *  gate, and its "s" sounds peak like hats (20 in 10 s through the panel
-   *  before this gate, none after, at the same F against Demucs's hats on
-   *  real songs). `hatsPulse` rings out like the Treble lane's
-   *  pulse; `hatsHit` is the last counted peak, kept for Graded; `hatsPeak`
-   *  is this tick's peak, counted or not, else 0. */
-  hatsOnset: boolean;
-  hatsPulse: number;
-  hatsHit: number;
-  hatsPeak: number;
   /** The song layer's edges, pulses and levels; see AnimSong. */
   song: AnimSong;
   /** One-shot edges, true only on the tick each group's onset fired. JS-side
@@ -152,9 +143,6 @@ export interface AnimFrame {
   lowOnset: boolean;
   midOnset: boolean;
   highOnset: boolean;
-  /** The one low band that pulses most clearly right now, its level (silence-gate dimmed like low/mid/high) and its index — see bandPick.ts. src/render/signals.ts's "Kick band" reads kickBand. */
-  kickBand: number;
-  kickBandIndex: number;
   /** Section-level loudness trend and drop flash — see sectionIntensity.ts. */
   sectionIntensity: number;
   dropPulse: number;
@@ -237,10 +225,8 @@ export interface AnimFrame {
    *  from `gate`/`frame.level` and the frame's engine reading (see
    *  advance()'s own doc). 1 with no gate, a fully open room or music
    *  holding it open, down toward 0 the quieter the room reads. The band
-   *  signals (signals.ts's BAND_SIGNALS) scale by it; a BeatListener's
-   *  "bass"/"mid"/"high" sources are
-   *  gated by construction (lowOnset/midOnset/highOnset are already false
-   *  while this sits near 0). */
+   *  signals (signals.ts's BAND_SIGNALS) scale by it, and so do the song
+   *  levels; the song edges count only while it is at least half open. */
   gateDimmer: number;
   /** Per-group onset diagnostics (bandEnergy.ts's lowDiag/midDiag/highDiag)
    *  — JS-only like `raw`, per-tick readings, NOT edges: unlike
@@ -344,7 +330,6 @@ export function createAnimClock(opts: { lockMeaning?: LockMeaning } = {}): AnimC
   // raw bpm.
   const tapGuide: TapGuide = createTapGuide();
   const bandEnergy: BandEnergy = createBandEnergy();
-  const kickBand: BandPick = createBandPick();
   // AnimFrame.hitTail, cached against the HitShape it was built from.
   let tailShape: HitShape | undefined;
   let tailScales: HitTails = UNIT_TAILS;
@@ -355,9 +340,6 @@ export function createAnimClock(opts: { lockMeaning?: LockMeaning } = {}): AnimC
   let gateMusicHeld = false;
   let beatPulse = 0;
   let hats = 0;
-  const hatsHits = createLevelHits();
-  let hatsPulse = 0;
-  let hatsHit = 0;
   let lead = 0;
   const song: AnimSong = {
     kickOnset: false,
@@ -408,26 +390,19 @@ export function createAnimClock(opts: { lockMeaning?: LockMeaning } = {}): AnimC
       const hitDimmer = gate && hitLevel !== undefined ? silenceGateDimmer(hitLevel, gate, gateMusicHeld) : dimmer;
       const flowPhase = flow.advance(dtSec, frame.energy);
       bandEnergy.advance(dtSec, frame, rateScale, hitDimmer, hit?.shape);
-      kickBand.advance(dtSec, frame.bands, BAND_SPLIT.lowMid);
       hats = slewLevel(hats, frame.hats * dimmer, dtSec, rateScale);
-      const hatsPeak = hatsHits.update(hats) ?? 0;
-      const hatsOnset = hatsPeak > 0 && !!frame.engine?.music;
-      hatsPulse *= Math.exp(-dtSec * GROUP_TUNING.high.pulseDecayRate * rateScale * hitTail.high);
-      if (hatsOnset) {
-        hatsPulse = 1;
-        hatsHit = hatsPeak;
-      }
       lead = slewLevel(lead, frame.lead * dimmer, dtSec, rateScale);
       const heard = frame.song;
-      song.kickOnset = !!heard?.kick;
-      song.clapOnset = !!heard?.clap;
-      song.hatOnset = !!heard?.hat;
-      song.chordOnset = !!heard?.chord;
+      const edgesOpen = dimmer >= SONG_EDGE_MIN_DIMMER;
+      song.kickOnset = edgesOpen && !!heard?.kick;
+      song.clapOnset = edgesOpen && !!heard?.clap;
+      song.hatOnset = edgesOpen && !!heard?.hat;
+      song.chordOnset = edgesOpen && !!heard?.chord;
       song.kickPulse = song.kickOnset ? 1 : decayLanePulse(song.kickPulse, "low", dtSec, rateScale, hitTail);
       song.clapPulse = song.clapOnset ? 1 : decayLanePulse(song.clapPulse, "mid", dtSec, rateScale, hitTail);
       song.hatPulse = song.hatOnset ? 1 : decayLanePulse(song.hatPulse, "high", dtSec, rateScale, hitTail);
       song.chordPulse = song.chordOnset ? 1 : decayLanePulse(song.chordPulse, "mid", dtSec, rateScale, hitTail);
-      for (const key of SONG_LEVELS) song[key] = slewLevel(song[key], heard ? heard[key] : 0, dtSec, rateScale);
+      for (const key of SONG_LEVELS) song[key] = slewLevel(song[key], heard ? heard[key] * dimmer : 0, dtSec, rateScale);
       const beatRatio = frame.engine?.surge ?? 0;
       // Tap tempo (tapTempo.ts's header). The seed lands before either
       // clock advances, so its phase is the tapped beat's at the previous
@@ -521,16 +496,10 @@ export function createAnimClock(opts: { lockMeaning?: LockMeaning } = {}): AnimC
         highPulse: bandEnergy.highPulse,
         hats,
         lead,
-        hatsOnset,
-        hatsPulse,
-        hatsHit,
-        hatsPeak,
         song,
         lowOnset: bandEnergy.lowOnset,
         midOnset: bandEnergy.midOnset,
         highOnset: bandEnergy.highOnset,
-        kickBand: kickBand.value * dimmer,
-        kickBandIndex: kickBand.band,
         sectionIntensity: section.intensity,
         dropPulse: section.dropPulse,
         dropOnset: section.dropOnset,

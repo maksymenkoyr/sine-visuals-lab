@@ -61,7 +61,7 @@ export function createFigure(): Figure {
     out.radii[i] = (CAPSULE_RADII[name] ?? 0) * (TORSO.has(name) ? TORSO_WIDEN : BODY_WIDEN);
   });
   const clocks: MoveClocks = {
-    beatPhase: 0, barPhase: 0, tempoLock: 0, beatPulse: 0, lowPulse: 0,
+    beatPhase: 0, barPhase: 0, tempoLock: 0, beatPulse: 0, kickPulse: 0,
     sectionIntensity: 0, dropPulse: 0, flowPhase: 0, timeSec: 0, bpm: 0, pulse: 0.5,
   };
 
@@ -74,7 +74,7 @@ export function createFigure(): Figure {
       clocks.barPhase = anim.barPhase;
       clocks.tempoLock = anim.tempoLock;
       clocks.beatPulse = anim.beatPulse;
-      clocks.lowPulse = anim.lowPulse;
+      clocks.kickPulse = anim.song.kickPulse;
       clocks.sectionIntensity = anim.sectionIntensity;
       clocks.dropPulse = anim.dropPulse;
       clocks.flowPhase = anim.flowPhase;

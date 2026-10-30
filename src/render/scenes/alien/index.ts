@@ -7,7 +7,7 @@
  *   - Cut: a loop repeats until its wire (Drop by default) makes a climb
  *     that stands out from its everyday ones (the dotted line on its graph,
  *     src/render/standout.ts), then the scene cuts to another loop;
- *   - Bounce: its wire (Bass hit by default) squashes the alien toward the
+ *   - Bounce: its wire (Kick by default) squashes the alien toward the
  *     floor under him and springs him back, on top of the dance (MESH_VERT
  *     in glsl.ts); Bounce smoothness turns that spring from a snap and a
  *     wobble into an ease and a glide;
@@ -192,7 +192,7 @@ export const alienScene: Scene = (() => {
       // (settingMarks.ts); no line while the threshold is off.
       last.cutLine = standoutMarks(reel.cut.detector)?.reach ?? 0;
       publishSettingMarks(ALIEN_ID, "cut", { lines: standoutLine(reel.cut.detector, "reach to cut"), reactionLabel: "cut" }, cut ? 1 : 0);
-      const hit = Math.max(0, Math.min(1, drives.value("bounce", anim.lowPulse, 0)));
+      const hit = Math.max(0, Math.min(1, drives.value("bounce", anim.song.kickPulse, 0)));
       stepBounce(bounce, get("bounce") * BOUNCE_MAX * hit, dt, get("bounceSmooth"));
       last.squash = Math.max(-SQUASH_LIMIT, Math.min(SQUASH_LIMIT, bounce.squash));
 

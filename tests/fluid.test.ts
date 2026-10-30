@@ -278,7 +278,7 @@ function baseInputs(overrides: Partial<EmitterInputs> = {}): EmitterInputs {
   return {
     flowPhase: 0,
     energy: 0.5,
-    lowPulse: 0,
+    kickPulse: 0,
     beatPulse: 0,
     emitStrength: 0.5,
     beatKick: 0.5,
@@ -358,10 +358,10 @@ describe("emitterState", () => {
     }
   });
 
-  it("slot-0 force magnitude strictly increases with lowPulse", () => {
+  it("slot-0 force magnitude strictly increases with kickPulse", () => {
     const mag = (s: Splat) => Math.hypot(s.fx, s.fy);
-    const low = emitterState(baseInputs({ lowPulse: 0 }), freshSplats())[0];
-    const high = emitterState(baseInputs({ lowPulse: 1 }), freshSplats())[0];
+    const low = emitterState(baseInputs({ kickPulse: 0 }), freshSplats())[0];
+    const high = emitterState(baseInputs({ kickPulse: 1 }), freshSplats())[0];
     expect(mag(high)).toBeGreaterThan(mag(low));
   });
 
@@ -412,7 +412,7 @@ describe("emitterState", () => {
   });
 
   it("still injects dye > 0 in full silence (puff 0, energy 0, pulses 0)", () => {
-    const out = emitterState(baseInputs({ energy: 0, lowPulse: 0, beatPulse: 0, puff: 0, dropPulse: 0 }), freshSplats());
+    const out = emitterState(baseInputs({ energy: 0, kickPulse: 0, beatPulse: 0, puff: 0, dropPulse: 0 }), freshSplats());
     expect(out[0].dye).toBeGreaterThan(0);
   });
 });
@@ -560,7 +560,7 @@ describe("SETTINGS weight convention", () => {
   });
 
   it("every `reads` entry names a signal id that actually exists in signals.ts", () => {
-    const validIds: SignalId[] = ["feature.onset", "anim.lowOnset", "anim.dropOnset", "anim.centroid"];
+    const validIds: SignalId[] = ["feature.onset", "anim.kickOnset", "anim.dropOnset", "anim.centroid"];
     for (const s of SETTINGS) {
       if (!s.reads) continue;
       for (const link of s.reads) {
@@ -994,11 +994,11 @@ describe("Post group: the light settings", () => {
     }
   });
 
-  it("dropFlash reads anim.dropOnset and shockwave reads anim.lowOnset + anim.dropOnset", () => {
+  it("dropFlash reads anim.dropOnset and shockwave reads anim.kickOnset + anim.dropOnset", () => {
     const dropFlash = SETTINGS.find((s) => s.key === "dropFlash")!;
     const shockwave = SETTINGS.find((s) => s.key === "shockwave")!;
     expect(dropFlash.reads).toEqual(["anim.dropOnset"]);
-    expect(shockwave.reads).toEqual(["anim.lowOnset", "anim.dropOnset"]);
+    expect(shockwave.reads).toEqual(["anim.kickOnset", "anim.dropOnset"]);
   });
 
   it("buildGlow and beatFlash carry no reads claim beyond their auto weights", () => {

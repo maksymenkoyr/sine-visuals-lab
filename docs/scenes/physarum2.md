@@ -1113,6 +1113,12 @@ configs are used.
   bare number. Attribute only: no change to the sim, the stored values or the
   look.
 - 2026-10-24 — Id, name, settings, panel and gallery record moved to `src/render/scenes/physarum2.card.ts`, so the scene's code loads after the page's first paint. The strain math the panel's widgets share moved to `src/render/scenes/physarum2Strains.ts`. Nothing visible changed. (#536)
+- 2026-10-30, #802: Speed pump's wire moved from the bass hit to the Kick.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 7.14 → 6.75, p95 9.03 → 8.31; silence
+    median 3.03 → 3.21, p95 3.88 → 3.80; hits a minute on the song 410 →
+    428, in silence 0 → 0; main's bass / mid / treble lanes 146 / 138 /
+    242 a minute against kick / clap / hats / chord 118 / 48 / 280 / 120.
 
 ## Tuning notes
 

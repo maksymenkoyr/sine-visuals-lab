@@ -121,7 +121,7 @@ function createEmberScene(): Scene {
 
       const dt = Math.min(Math.max(anim.dtSec, 0), MAX_DT_SEC);
       // Called every frame, unconditionally: fired() must see every frame.
-      const fired = drives.fired("lift", anim.lowOnset);
+      const fired = drives.fired("lift", anim.song.kickOnset);
       const lvl = advanceLift(lift, dt, fired ? drives.hitSize("lift") * setting("lift") : 0);
       swellPhase = (swellPhase + dt * swellRate(setting("swellBars"), anim.tempoBpm, anim.tempoLock)) % 1;
       const swell = swellAt(swellPhase);

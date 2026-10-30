@@ -60,7 +60,7 @@ export const CHAIKIN_SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.6,
     auto: { pulse: 0.3, attack: 0.2 },
-    drive: { default: "anim.lowOnset", hit: { reactionLabel: "birth" } },
+    drive: { default: "anim.kickOnset", hit: { reactionLabel: "birth" } },
   },
   {
     key: "relaunch",

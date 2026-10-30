@@ -25,7 +25,7 @@
  * sanitizeDriveSetting does the conversion for both.
  */
 import { GATE_FORMULA_DEFAULT, GENERIC_SMOOTHNESS_DEFAULT, GENERIC_THRESHOLD_DEFAULT, GENERIC_WINDOW_MAX_DEFAULT, advanceGateTracker, createGateTracker, glideSmoothness, glideStep, parseHitHeight, windowReading, type GateFormula, type GateTrackerState, type HitHeight } from "./gateWindow.ts";
-import { SIGNALS, type SignalId } from "./signals.ts";
+import { currentSignalId, SIGNALS, type SignalId } from "./signals.ts";
 
 /** Length's right end: the longest fall a wire's output can take, in seconds. */
 export const WIRE_LENGTH_MAX_SEC = 1.5;
@@ -138,14 +138,16 @@ export function legacyNodeFrom(raw: unknown): LegacyNode | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
   const { src, windowOn, min, max, smoothOn, smoothness, height, length } = r;
-  if (typeof src !== "string" || !SIGNAL_IDS.has(src)) return null;
+  if (typeof src !== "string") return null;
+  const current = currentSignalId(src);
+  if (!SIGNAL_IDS.has(current)) return null;
   if (typeof windowOn !== "boolean" || typeof smoothOn !== "boolean") return null;
   for (const n of [min, max, smoothness, length]) if (typeof n !== "number" || !Number.isFinite(n)) return null;
   // A node saved "graded" meant the plain pulse, which is Fixed now.
   const legacyHeight = height === "graded" ? "fixed" : parseHitHeight(height);
   if (legacyHeight === null) return null;
   return {
-    src: src as SignalId,
+    src: current as SignalId,
     height: legacyHeight,
     mod: clampWireMod({ windowOn, min: min as number, max: max as number, smoothOn, smoothness: smoothness as number, length: length as number, invert: false }),
   };

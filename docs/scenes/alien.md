@@ -616,6 +616,12 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
     most a day of saved looks lands on a different dance.
   - The bake test now checks the old videos against `clips-v1.bin` and the
     first three views, the library and cameras they were baked from.
+- 2026-10-30, #802: Bounce's wire moved from the bass hit to the Kick.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 0.71 → 0.67, p95 1.22 → 1.24; silence
+    median 0.00 → 0.00, p95 0.00 → 0.00; hits a minute on the song 424 →
+    410, in silence 0 → 0; main's bass / mid / treble lanes 160 / 128 /
+    242 a minute against kick / clap / hats / chord 112 / 32 / 272 / 118.
 
 ## Tuning notes
 

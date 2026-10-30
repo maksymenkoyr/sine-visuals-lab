@@ -97,6 +97,13 @@ addition. `/ref` bundles:
   stamp strength (Reseed) and the hole radius (Bass wipe) by how far the hit
   stood out; Flat, the default, is unchanged.
 - 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/petri.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #802: The Kick wipe and the relief lift moved from the bass
+  hit to the Kick.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 2.22 → 2.10, p95 3.39 → 4.14; silence
+    median 0.46 → 0.25, p95 0.60 → 0.41; hits a minute on the song 408 →
+    416, in silence 0 → 0; main's bass / mid / treble lanes 160 / 128 /
+    242 a minute against kick / clap / hats / chord 112 / 32 / 278 / 122.
 
 ## Tuning notes
 

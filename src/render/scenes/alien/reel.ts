@@ -33,7 +33,7 @@
  * (`bounceSpring`) softens that spring: slower and more damped, so the squash
  * eases in and glides back without a wobble. A softer spring alone would
  * never reach a short hit's depth, so the target is scaled up to match: one
- * Bass hit squashes as deep at any smoothness.
+ * Kick squashes as deep at any smoothness.
  *
  * Pure and DOM/GL-free — tests/alien.test.ts drives it directly.
  */
@@ -243,7 +243,7 @@ export function createBounce(): Bounce {
 export interface BounceSpring {
   hz: number;
   damping: number;
-  /** Scales the target so one Bass hit squashes as deep as at smoothness 0. */
+  /** Scales the target so one Kick squashes as deep as at smoothness 0. */
   gain: number;
 }
 
@@ -252,7 +252,7 @@ let lastSpring: { smooth: number; spring: BounceSpring } | null = null;
 
 /** The spring at `smooth` (0..1): frequency eased from BOUNCE_HZ to
  *  SMOOTH_HZ, damping from BOUNCE_DAMPING to SMOOTH_DAMPING, and the gain
- *  that keeps a hit's depth, measured on one Bass hit (a pulse decaying at
+ *  that keeps a hit's depth, measured on one Kick (a pulse decaying at
  *  the low band's own rate). Smoothness 0 is the spring exactly as before. */
 export function bounceSpring(smooth: number): BounceSpring {
   const s = Math.max(0, Math.min(1, smooth));
@@ -264,7 +264,7 @@ export function bounceSpring(smooth: number): BounceSpring {
   return lastSpring.spring;
 }
 
-/** The deepest squash one unit Bass hit drives a spring to. */
+/** The deepest squash one unit Kick drives a spring to. */
 function hitPeak(hz: number, damping: number): number {
   const b = createBounce();
   const h = 1 / 240;

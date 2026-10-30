@@ -115,6 +115,12 @@ both.
   the whole frame with flat red; the lift's extra push and dye were cut, and
   the glow now flares with each kick so it reads before the fluid answers.
 - 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/ember/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #802: Lift's wire moved from the bass hit to the Kick.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 0.84 → 0.79, p95 2.28 → 2.27; silence
+    median 0.35 → 0.35, p95 0.42 → 0.42; hits a minute on the song 416 →
+    400, in silence 0 → 0; main's bass / mid / treble lanes 146 / 138 /
+    242 a minute against kick / clap / hats / chord 120 / 50 / 276 / 130.
 
 ## Tuning notes
 

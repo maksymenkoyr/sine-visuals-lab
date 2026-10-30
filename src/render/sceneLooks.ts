@@ -84,6 +84,11 @@ import { LEGACY_NODE_ID_RE, legacyNodeFrom, type LegacyNode } from "./wireMod.ts
  * into the plain wire carrying that modifier (driveStore.ts's
  * sanitizeDriveSetting), and a saved Look of that age is converted the same
  * way when the store loads (migrateLegacyLook).
+ *
+ * A saved Look's `drives` go through sanitizeDriveSetting too, when the store
+ * loads and when a Look is applied, so a signal retired from the catalogue
+ * (signals.ts's RETIRED_SIGNALS) lands on its successor in a Look saved before
+ * it. An entry that fails is dropped from that Look alone.
  */
 export interface SceneLook {
   name: string;
@@ -170,12 +175,47 @@ function encodeSource(src: { weight: number; height?: string; when?: true; off?:
   };
 }
 
+const NO_NODES: ReadonlyMap<string, LegacyNode> = new Map();
+
+/** One saved drive setting as the current catalogue reads it (a retired
+ *  signal id moves to its successor), or null when it is not a setting at all. */
+function currentDriveSetting(setting: unknown): DriveSetting | null {
+  try {
+    return sanitizeDriveSetting(encodeDriveSetting(setting as DriveSetting), NO_NODES);
+  } catch {
+    return null;
+  }
+}
+
+/** A saved Look's `drives` entries, each through sanitizeDriveSetting; one
+ *  that fails is dropped from this Look and the rest stay. Returns whether
+ *  anything changed. */
+function cleanLookDrives(look: SceneLook): boolean {
+  if (!look.drives || typeof look.drives !== "object") return false;
+  let changed = false;
+  for (const [key, setting] of Object.entries(look.drives)) {
+    const next = currentDriveSetting(setting);
+    if (next === null) {
+      delete look.drives[key];
+      changed = true;
+    } else if (!sameDriveSetting(next, setting)) {
+      look.drives[key] = next;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 const cache: Store = loadInitial();
 {
   let changed = false;
   for (const list of Object.values(cache)) {
     if (!Array.isArray(list)) continue;
-    for (const look of list) if (look && typeof look === "object" && migrateLegacyLook(look)) changed = true;
+    for (const look of list) {
+      if (!look || typeof look !== "object") continue;
+      if (migrateLegacyLook(look)) changed = true;
+      if (cleanLookDrives(look)) changed = true;
+    }
   }
   if (changed) persist();
 }
@@ -292,8 +332,9 @@ export function applyLook(look: SceneLook, specs: readonly SceneSetting[]): void
       setAutoEnabled(look.sceneId, spec.key, true);
     }
     if (spec.drive) {
-      const setting = look.drives?.[spec.key];
-      if (setting !== undefined) setDriveSetting(look.sceneId, spec, setting);
+      const raw = look.drives?.[spec.key];
+      const setting = raw === undefined ? null : currentDriveSetting(raw);
+      if (setting !== null) setDriveSetting(look.sceneId, spec, setting);
       else resetDriveSetting(look.sceneId, spec);
     }
   }

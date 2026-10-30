@@ -118,7 +118,7 @@ export const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.6,
     auto: { attack: 0.3, pulse: 0.2, density: -0.15 },
-    reads: ["anim.lowOnset", "feature.onset", "anim.dropOnset"],
+    reads: ["anim.kickOnset", "feature.onset", "anim.dropOnset"],
   },
   {
     key: "curl",
@@ -242,7 +242,7 @@ export const SETTINGS: SceneSetting[] = [
   {
     key: "sparkleStyle",
     label: "Style",
-    description: "Glow: brighter line only. Currents: electric dashes riding the flow through dense dye. Grain: dense speckle. Currents + Glow: both. Lightning: branched bolts fired on treble hits",
+    description: "Glow: brighter line only. Currents: electric dashes riding the flow through dense dye. Grain: dense speckle. Currents + Glow: both. Lightning: branched bolts fired on hat hits",
     group: "Look",
     min: 0,
     max: 4,
@@ -344,15 +344,15 @@ export const SETTINGS: SceneSetting[] = [
   },
   {
     key: "shockwave",
-    label: "Bass shockwave",
-    description: "A ring that expands from the emitter on a bass hit or drop",
+    label: "Kick shockwave",
+    description: "A ring that expands from the emitter on a kick or drop",
     group: "Post",
     min: 0,
     max: 1,
     step: 0.05,
     default: 0.5,
     auto: { attack: 0.3, pulse: 0.2 },
-    reads: ["anim.lowOnset", "anim.dropOnset"],
+    reads: ["anim.kickOnset", "anim.dropOnset"],
   },
   {
     key: "buildGlow",

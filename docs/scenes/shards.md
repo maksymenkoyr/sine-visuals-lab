@@ -122,6 +122,13 @@ bpm, 13 beats):
   the same near-coplanar z-fight Tessera hit).
 - 2026-10-11 — Sampler units now go through `GLProgram.setI`; the file's own location cache and its clears are gone. Nothing visible changed: headless before/after shots look the same. (#349)
 - 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/shards/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #802: Cut on's "Bass hit" option now follows the Kick and is
+  named "Kick"; its index is unchanged.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 1.44 → 1.35, p95 28.14 → 31.50; silence
+    median 1.45 → 1.43, p95 1.91 → 1.88; hits a minute on the song 408 →
+    422, in silence 0 → 0; main's bass / mid / treble lanes 140 / 138 /
+    242 a minute against kick / clap / hats / chord 110 / 44 / 276 / 116.
 
 ## Tuning notes
 

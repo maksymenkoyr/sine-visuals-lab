@@ -229,7 +229,7 @@ export const dancersScene = createFullscreenScene(card.id, card.name, FRAG, {
     const world = createRigWorld();
     const boneBuf = createBoneBuffer();
     const clocks: MoveClocks = {
-      beatPhase: 0, barPhase: 0, tempoLock: 0, beatPulse: 0, lowPulse: 0,
+      beatPhase: 0, barPhase: 0, tempoLock: 0, beatPulse: 0, kickPulse: 0,
       sectionIntensity: 0, dropPulse: 0, flowPhase: 0, timeSec: 0, bpm: 0, pulse: 0.5,
     };
 
@@ -262,7 +262,7 @@ export const dancersScene = createFullscreenScene(card.id, card.name, FRAG, {
       clocks.barPhase = anim.barPhase;
       clocks.tempoLock = anim.tempoLock;
       clocks.beatPulse = anim.beatPulse;
-      clocks.lowPulse = anim.lowPulse;
+      clocks.kickPulse = anim.song.kickPulse;
       clocks.sectionIntensity = anim.sectionIntensity;
       clocks.dropPulse = anim.dropPulse;
       clocks.flowPhase = anim.flowPhase;
@@ -275,9 +275,9 @@ export const dancersScene = createFullscreenScene(card.id, card.name, FRAG, {
         bob: getSetting("bob"),
         groove: getSetting("groove"),
         jaw: getSetting("jaw"),
-        jawDrive: drives.value("jaw", anim.lowPulse),
+        jawDrive: drives.value("jaw", anim.song.kickPulse),
         bobBeatDrive: drives.value("bob", anim.beatPulse),
-        bobLowDrive: drives.value("bob", anim.lowPulse),
+        bobLowDrive: drives.value("bob", anim.song.kickPulse),
         family: STYLES[Math.round(getSetting("style"))]?.family ?? null,
         blend: BLENDS[Math.round(getSetting("blend"))]?.mode ?? "crossfade",
       });

@@ -73,7 +73,7 @@ import { FLOAT_HASH_GLSL } from "../noiseHash.ts";
 // changes size — the quality governor moves renderScale at runtime, so the
 // stored size is compared every frame rather than trusted from init.
 //
-// Triggers are rises, not one-shots. anim.lowOnset/dropOnset are true for
+// Triggers are rises, not one-shots. anim.song.kickOnset/dropOnset are true for
 // exactly one rAF tick, and render() is frame-pace-capped, so on a 120Hz
 // display roughly half of them never reach a scene at all — see
 // src/render/renderLatch.ts for the full story. Everything discrete here (the
@@ -232,7 +232,7 @@ export const CHUNK_DEAD_T0 = -1e9;
 // the kicks themselves, so on a steady bass-heavy track `low` never gets far
 // enough above its own average to fire (bandEnergy.ts's header warns about
 // this). The onset pulse and the phrase-level loudness trend don't have that
-// problem — a kick's lowPulse spikes regardless of how loud the last bar
+// problem — a kick's kickPulse spikes regardless of how loud the last bar
 // was, and sectionIntensity says whether we're in a chorus — so a loud
 // section plus a strong pulse is the primary route and the level-vs-baseline
 // test stays as a second one, for a track whose sections never resolve.
@@ -536,7 +536,7 @@ export interface BigHitDetector {
   advance(
     dt: number,
     low: number,
-    lowPulse: number,
+    kickPulse: number,
     sectionIntensity: number,
     lowRose: boolean,
     dropRose: boolean,
@@ -553,10 +553,10 @@ export function createBigHitDetector(): BigHitDetector {
     get baseline() {
       return base;
     },
-    advance(dt, low, lowPulse, sectionIntensity, lowRose, dropRose): number {
+    advance(dt, low, kickPulse, sectionIntensity, lowRose, dropRose): number {
       const d = Number.isFinite(dt) && dt > 0 ? dt : 0;
       const level = Number.isFinite(low) ? low : 0;
-      const pulse = Number.isFinite(lowPulse) ? lowPulse : 0;
+      const pulse = Number.isFinite(kickPulse) ? kickPulse : 0;
       const section = Number.isFinite(sectionIntensity) ? sectionIntensity : 0;
       base += (level - base) * (1 - Math.exp(-d / BIG_HIT_BASE_TAU));
       sinceFire += d;
@@ -1178,9 +1178,9 @@ void main() {
   vec3 toEdge = min(hit - ROOM_MIN, ROOM_MAX - hit) + face * 1e3;
   float edge = min(min(toEdge.x, toEdge.y), toEdge.z);
   float rim = 1.0 - smoothstep(0.0, 0.08, edge);
-  col += vec3(0.030, 0.038, 0.055) * rim * (1.0 + uFlash * flashDrive(2.0 * uLowPulse + 4.0 * uDropPulse));
+  col += vec3(0.030, 0.038, 0.055) * rim * (1.0 + uFlash * flashDrive(2.0 * uKickPulse + 4.0 * uDropPulse));
   // The floor picks up the same punch, so a kick lights the room's ground.
-  col += vec3(0.020, 0.026, 0.045) * onFloor * uFlash * flashDrive(1.2 * uLowPulse + 3.0 * uDropPulse);
+  col += vec3(0.020, 0.026, 0.045) * onFloor * uFlash * flashDrive(1.2 * uKickPulse + 3.0 * uDropPulse);
 
   // Distance fog toward black, and a vignette on the shared room canvas
   // (not on vUv, so a Panorama slice doesn't get its own dark corners).
@@ -1249,7 +1249,7 @@ void main() {
   // Size comes from JS (see pointSizing) so the brightness correction that
   // pairs with it can be computed from the same numbers; the kick swells it
   // for one decay so the punch reads from the back of the room.
-  float grow = (1.0 + 0.25 * kickDrive(uLowPulse) * uKick) * mix(1.0, 1.2, vFloor);
+  float grow = (1.0 + 0.25 * kickDrive(uKickPulse) * uKick) * mix(1.0, 1.2, vFloor);
   gl_PointSize = clamp(uGrainPx * grow * SIZE_DEPTH_REF / max(v.z, 0.5), 1.0, uMaxPointPx * 2.0);
 }
 `;
@@ -1305,7 +1305,7 @@ void main() {
   // One grain in twelve twinkles white on the hats, its own spin phase
   // deciding where in the flash it currently is.
   float pick = step(0.9167, vSeed);
-  float twinkle = pick * uSparkle * sparkleDrive(0.5 * uHigh + 1.5 * uHighPulse)
+  float twinkle = pick * uSparkle * sparkleDrive(0.5 * uHigh + 1.5 * uHatPulse)
                 * (0.5 + 0.5 * sin(vPhase * 6.2831853));
   rgb += vec3(1.0, 0.97, 0.92) * (twinkle * soft * uGrainGain * 3.5 * vDepthFade * uDim);
 
@@ -1678,7 +1678,7 @@ function createPowderScene(): Scene {
       lastFrameTime = frame.time;
 
       // Rises, not one-shots — see the file header.
-      const lowRose = anim.lowPulse > prevLowPulse + 1e-3 || anim.lowOnset;
+      const lowRose = anim.song.kickPulse > prevLowPulse + 1e-3 || anim.song.kickOnset;
       // anim.dropOnset is not the one-shot its name suggests — it is a level
       // test on how fast the section is rising (see sectionIntensity.ts), so
       // it stays true for tens of consecutive frames through one drop. Every
@@ -1689,7 +1689,7 @@ function createPowderScene(): Scene {
       const dropRaw = anim.dropPulse > prevDropPulse + 0.05 || anim.dropOnset;
       const dropRose = dropRaw && sinceDrop >= DROP_REFRACTORY_SEC;
       if (dropRose) sinceDrop = 0;
-      prevLowPulse = anim.lowPulse;
+      prevLowPulse = anim.song.kickPulse;
       prevDropPulse = anim.dropPulse;
 
       const breatheS = resolveSceneSetting(ID, settingFor("breathe"));
@@ -1724,12 +1724,12 @@ function createPowderScene(): Scene {
         bursts.trigger(anim.timeSec, s, seed, true);
         shakeLeft = SHAKE_SEC;
       } else if (kickFired && kickS >= 0.05) {
-        bursts.trigger(anim.timeSec, kickS * (0.5 + 0.7 * anim.lowPulse) * drives.hitSize("kick"), Math.random() * 100);
+        bursts.trigger(anim.timeSec, kickS * (0.5 + 0.7 * anim.song.kickPulse) * drives.hitSize("kick"), Math.random() * 100);
       }
 
       // The detector's baseline is stepped every frame regardless, so turning
       // the cubes back on doesn't fire a stale burst from a cold baseline.
-      const hitStrength = bigHit.advance(dt, anim.low, anim.lowPulse, anim.sectionIntensity, lowRose, dropRose);
+      const hitStrength = bigHit.advance(dt, anim.low, anim.song.kickPulse, anim.sectionIntensity, lowRose, dropRose);
       // A burst per edge, like the kick above: value() alone stays above 0 for
       // many frames on a level or a decaying hit pulse, which would relaunch
       // the whole pool every frame. Called whether or not the cubes are on,
@@ -1755,7 +1755,7 @@ function createPowderScene(): Scene {
       // Camera: pushes in on the kick, shakes for SHAKE_SEC after a drop —
       // two different signals at two different sites, see the "camera"
       // setting's own comment.
-      const push = 1 - 0.06 * drives.value("camera", anim.lowPulse) * cameraS;
+      const push = 1 - 0.06 * drives.value("camera", anim.song.kickPulse) * cameraS;
       eyeBuf[0] = 0;
       eyeBuf[1] = EYE_Y * push;
       eyeBuf[2] = EYE_Z * push;
