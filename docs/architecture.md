@@ -32,7 +32,11 @@ quiet level, fed each tick by `feedSilenceGateMeasurement`, as
 `src/audio/autoGain.ts`'s amount tracks the room's band span; neither resolves
 through `musicProfile.ts`'s dials, and neither is a setting.
 `src/audio/sensitivity.ts`'s Sensitivity/Expansion/Smoothing curves shape the
-bands on top of that, at values `src/render/autoTune.ts` picks from the music. Beside the bands,
+bands on top of that, at values `src/render/autoTune.ts` picks from the music.
+What a scene or a wire sees as Level is not that band mean: `levelOf` in
+`src/render/signals.ts` reads the song layer's Loudness off the frame, and falls
+back to `FeatureFrame.energy` only for a frame with no song reading. The music
+dials, Auto and the flow clock keep reading the band mean. Beside the bands,
 `src/audio/stemSplit.ts` reads the analyser's full FFT bins, before the AGC (which
 would level held sound away): the held part of the mids for Lead (and the hits
 at the top of the spectrum, which no signal reads now: the Hats hit comes from

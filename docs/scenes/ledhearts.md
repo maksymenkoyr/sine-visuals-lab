@@ -140,6 +140,16 @@ has by design.
     8.00 → 8.01, p95 9.24 → 9.20; hits a minute on the song
     358 → 365, in silence 0 → 0; drops a minute on the song
     0 → 2, in silence 0 → 0.
+- 2026-10-30, #804: Level rush's drive on the zoom speed moves with Level,
+  which now reads audio v6's Loudness (the song's loudness on a fixed
+  decibel scale), not the band mean.
+  - tune-real on a real song (around-the-world) then silence, before →
+    after: at full level change median 16.7 → 18.32, p95 22.01 → 23.89 on
+    the song, median 7.96 → 7.93, p95 9.3 → 9.16 in silence; hits a minute
+    406 → 412 on the song, 0 → 0 in silence; with the song 20 dB down change
+    median 16.88 → 16.31, p95 21.71 → 21.52 on the song, median 7.95 → 7.93,
+    p95 9.19 → 9.22 in silence; hits a minute 392 → 402 on the song, 0 → 0
+    in silence.
 
 ## Tuning notes
 

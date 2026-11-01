@@ -121,6 +121,16 @@ layers never overlapped so nothing stacked toward white.
     median 5.48 → 5.48, p95 6.68 → 6.54; hits a minute on the song 408 →
     408, in silence 0 → 0; main's bass / mid / treble lanes 148 / 128 /
     242 a minute against kick / clap / hats / chord 110 / 48 / 276 / 124.
+- 2026-10-30, #804: Band thickness's drive on how tall the slabs stand moves
+  with Level, which now reads audio v6's Loudness (the song's loudness on a
+  fixed decibel scale), not the band mean.
+  - tune-real on a real song (around-the-world) then silence, before →
+    after: at full level change median 10.52 → 10.42, p95 14.32 → 15.04 on
+    the song, median 5.44 → 5.47, p95 6.87 → 6.8 in silence; hits a minute
+    384 → 382 on the song, 0 → 0 in silence; with the song 20 dB down change
+    median 10.61 → 10.18, p95 14.69 → 15.58 on the song, median 5.41 → 5.43,
+    p95 6.8 → 6.68 in silence; hits a minute 378 → 384 on the song, 0 → 0 in
+    silence.
 
 ## Tuning notes
 

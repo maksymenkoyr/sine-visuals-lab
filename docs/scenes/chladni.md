@@ -782,6 +782,16 @@ hexagon and decagon.
     3.27 → 1.70, p95 4.40 → 2.40; hits a minute on the song
     364 → 370, in silence 0 → 0; drops a minute on the song
     0 → 2, in silence 0 → 0.
+- 2026-10-30, #804: Zoom out's drive on the zoom speed and Vibration's drive
+  on the plate shake moves with Level, which now reads audio v6's Loudness
+  (the song's loudness on a fixed decibel scale), not the band mean.
+  - tune-real on a real song (around-the-world) then silence, before →
+    after: at full level change median 12.98 → 13.48, p95 23.59 → 24.25 on
+    the song, median 3.28 → 3.99, p95 3.92 → 5.1 in silence; hits a minute
+    412 → 408 on the song, 0 → 0 in silence; with the song 20 dB down change
+    median 14.1 → 13.03, p95 23.55 → 22.79 on the song, median 4.09 → 4.23,
+    p95 5.1 → 5.24 in silence; hits a minute 408 → 408 on the song, 0 → 0 in
+    silence.
 
 ## Tuning notes
 

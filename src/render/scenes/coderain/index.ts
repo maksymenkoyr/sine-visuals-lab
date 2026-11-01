@@ -43,6 +43,7 @@ import { createFigure, FIGURE_HEIGHT, type Figure } from "./figure.ts";
 import { createExplorer, WALK_PACE, type Explorer } from "./explorer.ts";
 import { BURST_SLOTS, FIGURE_FRAG, FIGURE_VERT, RAIN_FRAG, RAIN_VERT } from "./glsl.ts";
 import { card, SETTINGS } from "./card.ts";
+import { levelOf } from "../../signals.ts";
 
 const ID = card.id;
 
@@ -305,7 +306,7 @@ function createCodeRainScene(): Scene {
       const tilt = resolveSceneSetting(ID, settingFor("tilt"));
 
       // The fall clock, in rows at speed factor 1.
-      const level = rush > 0.001 ? drives.value("rush", frame.energy, 0.5) : 0.5;
+      const level = rush > 0.001 ? drives.value("rush", levelOf(frame), 0.5) : 0.5;
       fallClock += FALL_BASE * speed * fall * Math.max(0.25, 1 + RUSH_GAIN * rush * (level - 0.5)) * dt;
 
       // Bursts: a hit starts fresh heads at the top of the view.

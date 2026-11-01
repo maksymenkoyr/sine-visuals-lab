@@ -1053,6 +1053,7 @@ export function createDriveEngine(): DriveEngine {
     accumulate(dtSec, gainedFrame, driveEnergy, anim, sceneId, settings) {
       driveFrameScratch.energy = driveEnergy;
       driveFrameScratch.level = gainedFrame.level;
+      driveFrameScratch.song = gainedFrame.song;
       driveFrameScratch.bands.set(gainedFrame.bands);
       const expansion = getSceneExpansion();
       const shape = getSceneExpansionShape();

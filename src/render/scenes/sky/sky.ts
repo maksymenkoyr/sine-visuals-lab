@@ -19,6 +19,7 @@ import {
   type SimFormat,
   type Splat,
 } from "../fluidSim.ts";
+import { levelOf } from "../../signals.ts";
 
 // Sky: a real 2D fluid sim driving cloud cover, with three vision illusions
 // layered on top — floaters (in waves), Haidinger's brush and blue-field
@@ -1585,7 +1586,7 @@ function createSkyScene(): Scene {
       // equals, so a stale stored "scene" preference behaves like that
       // default too (drives.ts's header's "Nothing plugged in" paragraph).
       const cloudCoverAmount = liftByDrive(resolveSceneSetting(ID, settingFor("cloudCover")), drives.value("cloudCover", anim.sectionIntensity));
-      const flowSpeedAmount = liftByDrive(resolveSceneSetting(ID, settingFor("flowSpeed")), drives.value("flowSpeed", frame.energy));
+      const flowSpeedAmount = liftByDrive(resolveSceneSetting(ID, settingFor("flowSpeed")), drives.value("flowSpeed", levelOf(frame)));
       const turbulenceAmount = liftByDrive(resolveSceneSetting(ID, settingFor("turbulence")), drives.value("turbulence", anim.low));
 
       // Ambient cloud drift — a real-time clock, deliberately not
@@ -1640,7 +1641,7 @@ function createSkyScene(): Scene {
       }
       const floaterAmount = resolveSceneSetting(ID, settingFor("floaterDensity")) * drives.value("floaterDensity", 1);
       if (drives.fired("floaterDensity", beatFired, undefined, anim.beatPulse)) {
-        const count = spawnFloaters(floaterAmount, drives.value("floaterDensity", floaterCountFromEnergy(frame.energy))) * drives.hitSize("floaterDensity");
+        const count = spawnFloaters(floaterAmount, drives.value("floaterDensity", floaterCountFromEnergy(levelOf(frame)))) * drives.hitSize("floaterDensity");
         if (count > 0) {
           const seed = waveSeedCounter++;
           const stride = BRUSH_STRIDE_MAX * resolveSceneSetting(ID, settingFor("brushMove"));

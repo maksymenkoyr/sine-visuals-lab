@@ -429,6 +429,16 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   identical (they hash with `NOISE_HASH_GLSL`); only which spots the
   floaters and sprites land on moved.
 - 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/sky/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #804: Flow speed's drive and the number of Floaters a beat
+  releases moves with Level, which now reads audio v6's Loudness (the song's
+  loudness on a fixed decibel scale), not the band mean.
+  - tune-real on a real song (around-the-world) then silence, before →
+    after: at full level change median 0.59 → 0.65, p95 0.8 → 0.93 on the
+    song, median 0.2 → 0.2, p95 0.31 → 0.31 in silence; hits a minute 404 →
+    400 on the song, 0 → 0 in silence; with the song 20 dB down change
+    median 0.58 → 0.62, p95 0.84 → 0.84 on the song, median 0.19 → 0.19, p95
+    0.31 → 0.31 in silence; hits a minute 404 → 402 on the song, 0 → 0 in
+    silence.
 
 ## Tuning notes
 

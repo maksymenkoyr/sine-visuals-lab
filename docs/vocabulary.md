@@ -66,7 +66,10 @@ that reshapes an input node's value on its way to that one setting.
   live spectrum over Bass, Mid and Treble, then **Bands**: rows for
   single bands, each named by its Hz. Click a bar
   on the spectrum to give that band its own row and click it again to drop
-  it; a band wired to a setting always shows its row. Then Level, then
+  it; a band wired to a setting always shows its row. Then **Level**, the
+  song's loudness on a fixed decibel scale (a quiet room reads low), which is
+  what a scene and a wire on Level follow; `levelOf` in `src/render/signals.ts`
+  falls back to the band mean for a frame with no song reading. Then
   **Hits**: a drum roll with a track and a jack for Any, then one for each
   instrument the song layer hears (`HIT_TRACKS` in `src/ui/audioMeters.ts`),
   then Onset surge. An instrument's track has two jacks, its hits and the

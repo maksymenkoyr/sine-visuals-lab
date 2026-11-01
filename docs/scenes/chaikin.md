@@ -215,6 +215,16 @@ and `ours-chaikin/cells-ours.json`):
     16.34 → 16.38, p95 17.43 → 17.53; hits a minute on the song
     368 → 371, in silence 0 → 0; drops a minute on the song
     0 → 2, in silence 0 → 0.
+- 2026-10-30, #804: The drives on Speed, Swell and Pull moves with Level,
+  which now reads audio v6's Loudness (the song's loudness on a fixed
+  decibel scale), not the band mean.
+  - tune-real on a real song (around-the-world) then silence, before →
+    after: at full level change median 17.79 → 17.82, p95 19.78 → 20.25 on
+    the song, median 16.12 → 16.12, p95 17.37 → 17.38 in silence; hits a
+    minute 412 → 404 on the song, 0 → 0 in silence; with the song 20 dB down
+    change median 17.77 → 17.51, p95 19.88 → 19.57 on the song, median 16.08
+    → 15.97, p95 17.43 → 17.39 in silence; hits a minute 400 → 408 on the
+    song, 0 → 0 in silence.
 
 ## Tuning notes
 

@@ -6,6 +6,7 @@ import { resolveSceneSetting } from "./autoTune.ts";
 import type { SceneContext, Viewport } from "./scene.ts";
 import type { AnimFrame } from "./animClock.ts";
 import { PASSTHROUGH_DRIVES, type SceneDrives } from "./drives.ts";
+import { levelOf } from "./signals.ts";
 
 /** GLSL uniform declarations every scene (fullscreen or geometry) can rely
  *  on — kept in one place so a new scene path doesn't have to restate them. */
@@ -109,7 +110,7 @@ export function uploadCommonUniforms(
   prog.setV4("uViewport", viewport.x, viewport.y, viewport.w, viewport.h);
   bandsBuf.set(frame.bands);
   prog.setFv("uBands", bandsBuf);
-  prog.setF("uEnergy", frame.energy);
+  prog.setF("uEnergy", levelOf(frame));
   prog.setF("uBeatPulse", anim.beatPulse);
   prog.setF("uBeatPhase", anim.beatPhase);
   prog.setF("uBarPhase", anim.barPhase);

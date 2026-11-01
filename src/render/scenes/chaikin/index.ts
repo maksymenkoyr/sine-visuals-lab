@@ -66,6 +66,7 @@ import {
   type Swell,
 } from "./motion.ts";
 import { card, CHAIKIN_SETTINGS } from "./card.ts";
+import { levelOf } from "../../signals.ts";
 
 /** The longest frame step that still counts as motion; a hidden-tab gap is
  *  clamped so it can't fling the zoom. */
@@ -136,7 +137,7 @@ function step(frame: Frame, anim: Anim, get: (key: string) => number, drives: Dr
     timeSec: anim.timeSec,
     dtSec: Math.min(anim.dtSec, MAX_STEP_SEC),
     speed: get("speed"),
-    speedDrive: drives.value("speed", frame.energy),
+    speedDrive: drives.value("speed", levelOf(frame)),
     relaunch: drop,
     kick,
   });
@@ -144,7 +145,7 @@ function step(frame: Frame, anim: Anim, get: (key: string) => number, drives: Dr
   frontU = out.frontU;
   rate = out.k;
 
-  const height = get("swell") * (SWELL_FLOOR + SWELL_GAIN * drives.value("swell", frame.energy, SWELL_REST));
+  const height = get("swell") * (SWELL_FLOOR + SWELL_GAIN * drives.value("swell", levelOf(frame), SWELL_REST));
   swell =
     height > 0
       ? swellFrame({
@@ -159,7 +160,7 @@ function step(frame: Frame, anim: Anim, get: (key: string) => number, drives: Dr
       : null;
   // Pull's drive rests at 1, so with nothing plugged in the slider alone
   // sets the pull.
-  const pullDrive = drives.value("fliesPull", frame.energy, 1);
+  const pullDrive = drives.value("fliesPull", levelOf(frame), 1);
   fly.dt = Math.min(anim.dtSec, MAX_STEP_SEC);
   fly.pull = get("fliesPull") * pullDrive * pullDrive;
   fly.lock = get("fliesLock");

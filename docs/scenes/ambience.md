@@ -123,6 +123,16 @@ frames were pulled directly with `yt-dlp` and `ffmpeg` rather than through a
     2.92 → 2.48, p95 7.61 → 6.10; hits a minute on the song
     366 → 356, in silence 0 → 0; drops a minute on the song
     0 → 1, in silence 0 → 0.
+- 2026-10-30, #804: The glow of the ground and of the flame move with Level, which now reads
+  audio v6's Loudness (the song's loudness on a fixed decibel scale), not the
+  band mean.
+  - tune-real on a real song (around-the-world) then silence, before →
+    after: at full level change median 8.73 → 8.78, p95 15.65 → 16.64 on the
+    song, median 3.32 → 2.54, p95 8.7 → 5.55 in silence; hits a minute 420 →
+    404 on the song, 0 → 0 in silence; with the song 20 dB down change
+    median 9.92 → 8.57, p95 14.96 → 17.42 on the song, median 2.69 → 2.89,
+    p95 6.97 → 7.63 in silence; hits a minute 402 → 396 on the song, 0 → 0
+    in silence.
 
 ## Tuning notes
 

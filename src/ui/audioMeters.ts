@@ -4,6 +4,7 @@ import {
   BAND_SIGNALS,
   SIGNALS,
   dialSignalId,
+  levelOf,
   surgeAtThreshold,
   type BandSignalId,
   type MeterCardId,
@@ -174,7 +175,8 @@ import { isBandPicked, toggleBandPick } from "./bandPicks.ts";
  * estimator's raw candidate instead of tempoSettle.ts's settled reading.
  * Input level and the beat dot
  * are already raw and don't change. Level has no pre-envelope value threaded
- * through AnimFrame, so its readout is the mean of `rawBands` instead — the
+ * through AnimFrame, so its RAW readout is the mean of `rawBands` instead (the
+ * pre-AGC band mean, not the song loudness the trace follows) — the
  * same pre-AGC/pre-envelope feed app.ts's captureRawBands hands the spectrum
  * strip's own listening-post chip (the Sound card's thin spectrum follows it
  * too). The Sound traces keep recording the signals themselves, so a trace
@@ -1838,7 +1840,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const soundLevel = lineRow({
     label: driveSourceLabel("anim.energy"),
     description:
-      "The sound after auto-gain, which keeps it mid-range whether the room is quiet or loud. This is what the scene reacts to. The shaded floor shows when the silence gate was closing: darker, fewer hits get through.",
+      "The song's loudness on a fixed decibel scale, so a quiet room reads low. This is what the scene reacts to. The shaded floor shows when the silence gate was closing: darker, fewer hits get through.",
     choice: "anim.energy",
     span: soundSpan,
     gateFloor: true,
@@ -2366,7 +2368,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         soundLevel.draw();
         hitsRoll.render(frame, anim, beatDiag, nowMs, text);
         if (text) {
-          const levelVal = raw ? (rawBands ? meanOf(rawBands) : null) : frame ? frame.energy : null;
+          const levelVal = raw ? (rawBands ? meanOf(rawBands) : null) : frame ? levelOf(frame) : null;
           soundLevel.setReadout(levelVal === null ? "--" : pct(levelVal), levelVal === null ? IDLE : {});
           for (const { row, id } of soundRows) {
             const v = frame && anim ? SIGNALS[id].read(frame, anim) : null;

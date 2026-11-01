@@ -197,6 +197,16 @@ onsets (106 in the window, ≈6.6/s):
     0.11 → 0.11, p95 1.28 → 1.23; hits a minute on the song
     368 → 368, in silence 0 → 0; drops a minute on the song
     0 → 2, in silence 0 → 0.
+- 2026-10-30, #804: Heat's drive moves with Level, which now reads audio
+  v6's Loudness (the song's loudness on a fixed decibel scale), not the band
+  mean.
+  - tune-real on a real song (around-the-world) then silence, before →
+    after: at full level change median 1.66 → 1.57, p95 3.95 → 3.98 on the
+    song, median 0.25 → 0.24, p95 1.72 → 1.8 in silence; hits a minute 420 →
+    420 on the song, 0 → 0 in silence; with the song 20 dB down change
+    median 1.47 → 1.7, p95 3.39 → 3.92 on the song, median 0.24 → 0.24, p95
+    1.75 → 1.74 in silence; hits a minute 414 → 416 on the song, 0 → 0 in
+    silence.
 
 ## Tuning notes
 

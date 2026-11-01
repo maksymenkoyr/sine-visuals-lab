@@ -28,6 +28,7 @@ import { createFluidSim, detectSimFormat, MIRROR_OFF, sameSimSize, simResolution
 import { buildDisplayFrag } from "./glsl.ts";
 import { advanceLift, BURNERS, burnerAt, createLiftState, STIRRERS, stirrerAt, swellAt, swellRate } from "./motion.ts";
 import { card, SETTINGS } from "./card.ts";
+import { levelOf } from "../../signals.ts";
 
 const ID = card.id;
 
@@ -151,7 +152,7 @@ function createEmberScene(): Scene {
       // At rest the fluid churns as much as the silent reference does; louder
       // sections add to it.
       const churn = setting("churn") * (0.9 + 0.5 * drives.value("churn", anim.sectionIntensity));
-      const pace = 1 + 0.3 * drives.value("rise", frame.energy);
+      const pace = 1 + 0.3 * drives.value("rise", levelOf(frame));
       const steps = warmSec < WARM_SEC ? WARM_STEPS : 1;
       warmSec += dt;
       for (let n = 0; n < steps; n++) {

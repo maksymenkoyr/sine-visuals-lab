@@ -48,6 +48,7 @@ import {
   zoomShrink,
   type ZoomLayer,
 } from "./chladniZoom.ts";
+import { levelOf } from "../signals.ts";
 
 export { MAX_ORDER, MODE_TABLE, buildModeTable, type PlateMode } from "./chladniPlates.ts";
 
@@ -2045,7 +2046,7 @@ function createChladniScene(): Scene {
       // card's Scale: Scale 0 stops the zoom but keeps its frame.
       const zoomSetting = resolveSceneSetting(ID, settingFor("zoomOut"));
       const zoomOn = zoomWanted();
-      const zoomStep = zoomOn ? zoomPhaseStep(dt, zoomSetting, drives.value("zoomOut", frame.energy)) : 0;
+      const zoomStep = zoomOn ? zoomPhaseStep(dt, zoomSetting, drives.value("zoomOut", levelOf(frame))) : 0;
       zoomPhase = (zoomPhase + zoomStep) % 1;
       zoomTotal += zoomStep;
       const layers = zoomLayers(zoomPhase, zoomBuf);
@@ -2053,7 +2054,7 @@ function createChladniScene(): Scene {
       if (zoomOn) maxOrder *= zoomFinestScale(layers);
       lastRawDrive = rawPlateDrive(
         resolveSceneSetting(ID, settingFor("shake")),
-        drives.value("shake", frame.energy),
+        drives.value("shake", levelOf(frame)),
         resolveSceneSetting(ID, settingFor("kick")),
         drives.value("kick", anim.song.kickPulse),
       );
