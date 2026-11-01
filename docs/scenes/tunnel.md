@@ -44,6 +44,16 @@ None — original design.
   the tempo's, so a tempo change only changes how fast the camera goes. At a
   steady BPM the motion is the same as before.
 - 2026-10-24 — Id, name, minQuality and gallery record moved to `src/render/scenes/tunnel.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #804: The brightness of the glow lines moves with Level, which now reads audio
+  v6's Loudness (the song's loudness on a fixed decibel scale), not the band
+  mean.
+  - tune-real on a real song (around-the-world) then silence, before →
+    after: at full level change median 6.43 → 5.97, p95 15.87 → 15.82 on the
+    song, median 0.95 → 0.94, p95 1.13 → 1.14 in silence; hits a minute 418
+    → 418 on the song, 0 → 0 in silence; with the song 20 dB down change
+    median 6.07 → 6.2, p95 16.38 → 16.91 on the song, median 0.94 → 0.94,
+    p95 1.13 → 1.15 in silence; hits a minute 412 → 406 on the song, 0 → 0
+    in silence.
 
 ## Tuning notes
 

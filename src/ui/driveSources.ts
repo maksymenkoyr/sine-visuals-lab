@@ -115,7 +115,7 @@ const SIGNAL_SOURCE_DESCRIPTION: Record<SignalId, string> = {
   "anim.keys": "how loud the keys are, found while music plays.",
   "anim.playing": "whether music is playing: up while it is, down when it stops.",
   "anim.dropLevel": "what rises at a drop's start, the level Drop is picked from.",
-  "anim.energy": "overall loudness across every band.",
+  "anim.energy": "how loud the song is overall, on a fixed scale so a quiet room reads low.",
   "anim.sectionIntensity": "how intense this part of the song is, over the last few seconds.",
   "anim.centroid": "where the sound's energy sits, from dark and low to bright and high.",
   "anim.beatWave": "a smooth swing that peaks once every beat (or every few, with its own divider), fading out once the metronome stops.",

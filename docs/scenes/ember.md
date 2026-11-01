@@ -121,6 +121,16 @@ both.
     median 0.35 → 0.35, p95 0.42 → 0.42; hits a minute on the song 416 →
     400, in silence 0 → 0; main's bass / mid / treble lanes 146 / 138 /
     242 a minute against kick / clap / hats / chord 120 / 50 / 276 / 130.
+- 2026-10-30, #804: Rise speed's drive on the pace of the rise moves with
+  Level, which now reads audio v6's Loudness (the song's loudness on a fixed
+  decibel scale), not the band mean.
+  - tune-real on a real song (around-the-world) then silence, before →
+    after: at full level change median 0.82 → 0.83, p95 2.21 → 2.46 on the
+    song, median 0.35 → 0.35, p95 0.43 → 0.43 in silence; hits a minute 424
+    → 406 on the song, 0 → 0 in silence; with the song 20 dB down change
+    median 0.82 → 0.8, p95 2.21 → 2.27 on the song, median 0.35 → 0.36, p95
+    0.41 → 0.43 in silence; hits a minute 408 → 398 on the song, 0 → 0 in
+    silence.
 
 ## Tuning notes
 

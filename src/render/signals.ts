@@ -5,6 +5,19 @@ import { bandCenterHz, formatHz, nominalBandEdgesHz } from "../audio/bandScale.t
 import { DIAL_LABELS, MUSIC_DIALS, type MusicDial } from "./musicProfile.ts";
 
 /**
+ * What every scene and wire sees as Level: the song layer's Loudness when the
+ * frame carries a song reading, else the band mean. The frame's own
+ * `song.loudness`, not AnimFrame.song's, because that one is dimmed by the
+ * silence gate and Loudness already reads a quiet room low on its fixed
+ * decibel scale. The fallback keeps a frame with no song layer (an older host
+ * in a room, a frame built by hand) moving. FeatureFrame.energy itself stays
+ * the band mean for the music dials, Auto and the flow clock.
+ */
+export function levelOf(frame: FeatureFrame): number {
+  return frame.song ? frame.song.loudness : frame.energy;
+}
+
+/**
  * The seam between the meters (src/ui/audioMeters.ts), scene settings
  * (src/render/sceneSettings.ts's `reads` field) and the drive system
  * (src/render/drives.ts): a catalogue of the live values a scene's own
@@ -71,7 +84,7 @@ import { DIAL_LABELS, MUSIC_DIALS, type MusicDial } from "./musicProfile.ts";
  * envelope read — only its edge-latched `fired()` needs the raw boolean.
  *
  * "Level" (`anim.energy`) and "Input level" (`feature.level`) are the two
- * entries whose `read()` actually uses its `frame` argument (`frame.energy`
+ * entries whose `read()` actually uses its `frame` argument (`levelOf(frame)`
  * and `frame.level`, not anything off `anim`) — every other entry but the
  * band entries below ignores `frame` entirely. drives.ts feeds them the sensitivity-applied frame
  * (matching what a scene's own `uEnergy` sees — see that file's header), so
@@ -456,9 +469,9 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "anim.energy",
     label: "Level",
     description:
-      "The plain mean of every band (FeatureFrame.energy) — see this file's header for why this is the one entry whose read() actually uses its `frame` argument.",
+      "The song's loudness on a fixed decibel scale (audio v6's song layer, via levelOf), ranged inside the song layer; the plain mean of every band (FeatureFrame.energy) where a frame has no song reading. See this file's header for why this is one of two entries whose read() uses its `frame` argument.",
     kind: "level",
-    read: (frame) => frame.energy,
+    read: (frame) => levelOf(frame),
     monitor: { card: "sound", row: "energy" },
     bandRange: "all",
   }),

@@ -24,7 +24,7 @@ import { routeWheelByHalves } from "./wheelHalves.ts";
 import "./widgets/index.ts";
 import { getWidget, type LinkedSetting, type WidgetCtx } from "./widgets/registry.ts";
 import { formatMixedSummary } from "./widgets/itemSelection.ts";
-import { SIGNALS, type SignalId, type SignalSpec } from "../render/signals.ts";
+import { levelOf, SIGNALS, type SignalId, type SignalSpec } from "../render/signals.ts";
 import { takeSettingMarks } from "../render/settingMarks.ts";
 import { NUM_BANDS, type FeatureFrame } from "../audio/types.ts";
 import { BAND_SPLIT } from "../audio/bandSplit.ts";
@@ -6683,10 +6683,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       for (const row of sceneRowHandles) row.updateSignalPills(frame, anim);
       // The tick is FeatureFrame.level: absolute, fixed-window loudness that
       // Auto-gain doesn't touch, so it reads the room. The fill starts from
-      // .energy (which Auto-gain shapes) and runs the render path's
-      // sensitivity+expansion curve, so it shows what the scene reacts to.
+      // Level (levelOf) and runs the render path's sensitivity+expansion
+      // curve, so it shows what the scene reacts to.
       const tick = Math.min(1, Math.max(0, frame?.level ?? 0));
-      const energy = Math.min(1, Math.max(0, frame?.energy ?? 0));
+      const energy = Math.min(1, Math.max(0, frame ? levelOf(frame) : 0));
       const sceneId = deps.currentSceneId();
       const sensitivity = deps.resolveSensitivityValue(sceneId);
       const expansion = deps.resolveExpansionValue(sceneId);

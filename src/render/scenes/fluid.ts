@@ -1229,6 +1229,8 @@ function createFluidScene(): Scene {
       // look; only Auto drift itself (and the drop-triggered reconfigure it
       // gates) is switched off outside Auto (drift: 0 below never advances
       // holdLeft to zero — see advanceFold).
+      // Every frame.energy read below is the solver's own push and clock, not a
+      // setting on Level, so it stays the band mean.
       advanceFold(fold, dt, {
         energy: frame.energy,
         dropOnset: anim.dropOnset,

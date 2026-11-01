@@ -32,6 +32,15 @@ was.
   was renamed to `moire2.ts` / "Moiré 2" and kept unchanged otherwise (PR
   #104).
 - 2026-10-24: Id, name and gallery record moved to `src/render/scenes/moire2.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #804: The colour phase moves with Level, which now reads audio v6's Loudness
+  (the song's loudness on a fixed decibel scale), not the band mean.
+  - tune-real on a real song (around-the-world) then silence, before →
+    after: at full level change median 14.88 → 15.41, p95 17.84 → 18.88 on
+    the song, median 3.47 → 3.45, p95 4.25 → 4.28 in silence; hits a minute
+    400 → 402 on the song, 0 → 0 in silence; with the song 20 dB down change
+    median 14.98 → 15.26, p95 17.82 → 18.57 on the song, median 3.48 → 3.47,
+    p95 4.35 → 4.2 in silence; hits a minute 414 → 392 on the song, 0 → 0 in
+    silence.
 
 ## Tuning notes
 

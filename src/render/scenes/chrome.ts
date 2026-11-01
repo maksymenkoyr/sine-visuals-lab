@@ -25,6 +25,7 @@
 import { createFullscreenScene } from "../fullscreenScene.ts";
 import { NOISE_HASH_GLSL, NOISE_MASK, wrapFlow } from "../noiseHash.ts";
 import { card } from "./chrome.card.ts";
+import { levelOf } from "../signals.ts";
 
 /** Octaves of every fbm in FRAG. */
 export const FBM_OCTAVES = 4;
@@ -218,7 +219,7 @@ export const chromeScene = createFullscreenScene(card.id, card.name, FRAG, {
     let ph = 0;
     let shine = 0;
     return (frame, anim, getSetting, drives) => {
-      ph = advanceChromePhase(ph, anim.dtSec, getSetting("flow"), getSetting("rush"), drives.value("rush", frame.energy));
+      ph = advanceChromePhase(ph, anim.dtSec, getSetting("flow"), getSetting("rush"), drives.value("rush", levelOf(frame)));
       const hit = drives.fired("shine", anim.onset);
       shine = advanceShine(shine, anim.dtSec, hit ? drives.hitSize("shine") : 0);
       const bandPhase = ph * BAND_RATE;

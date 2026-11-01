@@ -331,6 +331,16 @@ from 4 s, and an in-page probe of the reactions' state over 90 s).
     median 1.97 → 1.94, p95 2.96 → 2.97; hits a minute on the song 412 →
     418, in silence 0 → 0; main's bass / mid / treble lanes 154 / 128 /
     244 a minute against kick / clap / hats / chord 108 / 44 / 278 / 120.
+- 2026-10-30, #804: Glow's drive on the nebula's brightness moves with
+  Level, which now reads audio v6's Loudness (the song's loudness on a fixed
+  decibel scale), not the band mean.
+  - tune-real on a real song (around-the-world) then silence, before →
+    after: at full level change median 4.97 → 4.96, p95 7.01 → 6.88 on the
+    song, median 2.04 → 2.13, p95 3.06 → 3.15 in silence; hits a minute 374
+    → 370 on the song, 0 → 0 in silence; with the song 20 dB down change
+    median 5.05 → 5.02, p95 6.81 → 6.95 on the song, median 2.32 → 1.91, p95
+    2.99 → 2.96 in silence; hits a minute 370 → 386 on the song, 0 → 0 in
+    silence.
 
 - 2026-10-30 — The owner asked for new audio reactions. Four were
   prototyped in a live page running a copy of the scene's march, glare and

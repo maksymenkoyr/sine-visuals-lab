@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { BAND_SIGNALS, DIAL_SIGNALS, RETIRED_SIGNALS, SIGNALS, bandSignalId, dialSignalId, type SignalId } from "../src/render/signals.ts";
-import { NUM_BANDS } from "../src/audio/types.ts";
+import { BAND_SIGNALS, DIAL_SIGNALS, RETIRED_SIGNALS, SIGNALS, bandSignalId, dialSignalId, levelOf, type SignalId } from "../src/render/signals.ts";
+import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
+import { songFrame } from "./songFrame.ts";
 import { MUSIC_DIALS } from "../src/render/musicProfile.ts";
 import type { AnimFrame } from "../src/render/animClock.ts";
 import { listScenes } from "../src/render/scene.ts";
@@ -189,5 +190,27 @@ describe("signals registry", () => {
     for (const id of Object.values(SOURCE_SIGNAL)) {
       expect(SIGNALS[id!]).toBeDefined();
     }
+  });
+
+  it("Level reads the frame's song loudness, and the band mean where it has no song reading", () => {
+    const base: FeatureFrame = {
+      time: 0,
+      bands: new Float32Array(NUM_BANDS),
+      energy: 0.3,
+      level: 0,
+      hats: 0,
+      lead: 0,
+      onset: false,
+      pulseOnset: false,
+      bpm: 0,
+      onsetPhase: 0,
+      engine: null,
+      song: null,
+    };
+    expect(levelOf(base)).toBe(0.3);
+    expect(SIGNALS["anim.energy"].read(base, {} as AnimFrame)).toBe(0.3);
+    const withSong = { ...base, song: songFrame({ loudness: 0.8 }) };
+    expect(levelOf(withSong)).toBe(0.8);
+    expect(SIGNALS["anim.energy"].read(withSong, {} as AnimFrame)).toBe(0.8);
   });
 });

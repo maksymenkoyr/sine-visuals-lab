@@ -58,6 +58,7 @@ import {
   type SwarmParams,
 } from "./swarmSim.ts";
 import { card, SETTINGS } from "./card.ts";
+import { levelOf } from "../../signals.ts";
 
 const ID = card.id;
 
@@ -260,7 +261,7 @@ function createSwarmScene(): Scene {
         startCollapse(collapse);
       }
 
-      const heatLevel = clamp01(drives.value("heat", frame.energy, 0.5));
+      const heatLevel = clamp01(drives.value("heat", levelOf(frame), 0.5));
       params.phaseCoupling = DEFAULT_SWARM_PARAMS.phaseCoupling * sync;
       params.omegaSpread = DEFAULT_SWARM_PARAMS.omegaSpread * drifters;
       params.breath = DEFAULT_SWARM_PARAMS.breath * breath;

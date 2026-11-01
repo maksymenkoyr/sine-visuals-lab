@@ -114,6 +114,14 @@ describe("drives: catalogue identity", () => {
     }
   });
 
+  it("a wire on Level reads the song loudness when the gained frame carries a song reading", () => {
+    const anim = createAnimClock().advance(DT, frame());
+    const engine = createDriveEngine();
+    engine.accumulate(DT, frame({ song: songFrame({ loudness: 0.7 }) }), 0.42, anim, "level-song-scene", []);
+    const drives = engine.forScene("level-song-scene", [settingWithDrive("k", "anim.energy")], anim);
+    expect(drives.value("k", -999)).toBe(0.7);
+  });
+
   it("kind: edge entries' fired() reads the paired render-latched boolean off anim", () => {
     const clock = createAnimClock();
     const anim = clock.advance(DT, frame({ onset: true, engine: heard(0, true) }));

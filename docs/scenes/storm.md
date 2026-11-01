@@ -199,6 +199,16 @@ Studied, not copied, across two look references:
     0.19 → 0.19, p95 0.23 → 0.23; hits a minute on the song
     376 → 356, in silence 0 → 0; drops a minute on the song
     0 → 2, in silence 0 → 0.
+- 2026-10-30, #804: Ambient glow's drive on the cloud's resting brightness
+  moves with Level, which now reads audio v6's Loudness (the song's loudness
+  on a fixed decibel scale), not the band mean.
+  - tune-real on a real song (around-the-world) then silence, before →
+    after: at full level change median 6.43 → 6.85, p95 8.55 → 9 on the
+    song, median 0.2 → 0.2, p95 0.24 → 0.23 in silence; hits a minute 402 →
+    402 on the song, 0 → 0 in silence; with the song 20 dB down change
+    median 6.72 → 6.39, p95 8.85 → 8.69 on the song, median 0.2 → 0.2, p95
+    0.24 → 0.23 in silence; hits a minute 414 → 418 on the song, 0 → 0 in
+    silence.
 
 ## Tuning notes
 
