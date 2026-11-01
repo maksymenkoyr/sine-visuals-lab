@@ -14,7 +14,11 @@
  * (the `/ref` bundles `violet-filament` and `violet-loop`); nothing in it
  * reacts to sound, so every reaction here is this scene's own design: the
  * cloud glows brighter with the music's loudness (Glow), its edges flare on
- * hits (Flare), and the flight speeds up as a section builds (Surge).
+ * hits (Flare), the flight speeds up as a section builds (Surge), the melody
+ * lights the gas from inside (Inner light), a drop sends a burning wave
+ * through it (Drop shock), the colours lean with the sound's brightness
+ * (Colour tilt), and the hats make the stars flash (Twinkle); reactions.ts
+ * holds those four's state.
  * docs/scenes/nebula.md has the record: the measurements, the decisions,
  * and what is still to tune.
  */
@@ -41,8 +45,19 @@ import {
   uploadCommonUniforms,
 } from "../../sceneCommon.ts";
 import { card, SETTINGS } from "./card.ts";
-import { advanceFlight, cameraUniforms, createFlight, hueWander, pathUniforms, type Flight } from "./flight.ts";
+import { advanceFlight, cameraUniforms, cameraWorld, createFlight, hueWander, pathUniforms, type Flight } from "./flight.ts";
 import { EXTRA_UNIFORMS, FOV_TAN, GAS_BODY, OCCLUDE, OUT_BODY, T_MAX } from "./glsl.ts";
+import {
+  advanceReactions,
+  createReactions,
+  igniteAmp,
+  shockAmp,
+  shockUniforms,
+  triggerShock,
+  triggerTwinkle,
+  twinkleUniforms,
+  type Reactions,
+} from "./reactions.ts";
 import { buildStars, STAR_COUNT, STAR_FRAG, STAR_INSTANCES, STAR_STRIDE, starVert } from "./stars.ts";
 import { bakeVolume } from "./volume.ts";
 
@@ -91,6 +106,9 @@ function createNebulaScene(): Scene {
   let volume: WebGLTexture | null = null;
   let baked = false;
   let flight: Flight = createFlight();
+  let reactions: Reactions = createReactions();
+  const shockAt = new Float32Array(4);
+  const tw = new Float32Array(4);
   const cam = new Float32Array(16);
   const path = new Float32Array(8);
   const bandsBuf = new Float32Array(NUM_BANDS);
@@ -134,6 +152,7 @@ function createNebulaScene(): Scene {
       gl.bindVertexArray(null);
       maxPointSize = gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE)[1];
       flight = createFlight();
+      reactions = createReactions();
       baked = false;
     },
 
@@ -151,6 +170,12 @@ function createNebulaScene(): Scene {
       advanceFlight(flight, dt, BASE_SPEED * setting("speed") * surge, setting("drift"), setting("gasDrift"));
       cameraUniforms(flight, setting("spin"), cam);
       pathUniforms(flight, path);
+      const camPos = cameraWorld(flight);
+      // fired() consumes the edge, so both are read every frame whatever their settings.
+      if (drives.fired("twinkle", anim.hatsOnset)) triggerTwinkle(reactions, drives.hitSize("twinkle"));
+      if (drives.fired("shock", anim.dropOnset)) triggerShock(reactions, camPos, [cam[12], cam[13], cam[14]]);
+      advanceReactions(reactions, dt, drives.value("inner", anim.lead), drives.value("tilt", anim.centroid));
+      shockUniforms(reactions, camPos, shockAt);
       const hueDrift = hueWander(flight);
 
       const tgt = sizedTarget(gl, ctx.quality.preset);
@@ -162,6 +187,11 @@ function createNebulaScene(): Scene {
       gasProg.setF("uHueDrift", hueDrift);
       gasProg.setF("uChurn", flight.churn);
       gasProg.setV2("uFlow", flight.flowX, flight.flowY);
+      gasProg.setV4v("uShockAt", shockAt);
+      gasProg.setF("uShockAmp", setting("shock") * shockAmp(reactions));
+      gasProg.setF("uIgnite", setting("shock") * igniteAmp(reactions));
+      gasProg.setF("uInnerLevel", reactions.inner);
+      gasProg.setF("uTiltLean", reactions.tilt);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_3D, volume);
       gasProg.setI("uVol", 0);
@@ -186,6 +216,8 @@ function createNebulaScene(): Scene {
         starProg.setV4("uViewport", viewport.x, viewport.y, viewport.w, viewport.h);
         starProg.setF("uStars", setting("stars"));
         starProg.setF("uMaxPt", maxPointSize);
+        starProg.setV4v("uTw", twinkleUniforms(reactions, tw));
+        starProg.setF("uTwAmt", setting("twinkle"));
         starProg.setI("uGasTex", 0);
         // Screen blend: a star brightens the gas under it without clipping it to white.
         gl.enable(gl.BLEND);

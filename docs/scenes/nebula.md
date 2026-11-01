@@ -3,8 +3,11 @@
 A slow flight through a glowing gas cloud: violet, blue and magenta masses
 whose edges burn white-blue with a red-orange fringe, fine veins inside
 them, and dark voids full of stars ahead. The music brightens the cloud
-(Glow), flares its edges white on hits (Flare) and speeds the flight up as a
-section builds (Surge); in silence it only drifts, the gas streaming past
+(Glow), flares its edges white on hits (Flare), speeds the flight up as a
+section builds (Surge), lights the gas from inside with the melody (Inner
+light), sends a burning wave through it on a drop (Drop shock), leans the
+colours with how bright the sound is (Colour tilt) and makes the stars
+flash on the hats (Twinkle); in silence it only drifts, the gas streaming past
 and slowly changing shape (Gas drift), and its colours wander round the
 wheel over most of an hour. In development.
 
@@ -38,7 +41,17 @@ wheel over most of an hour. In development.
   jump at the camera's wrap, deterministic stars.
 - Drives (src/render/drives.ts): `glow` on `anim.energy`, `flare` on
   `anim.lowOnset` (read as a level in GLSL), `surge` on
-  `anim.sectionIntensity` (read in JS through `drives.value`).
+  `anim.sectionIntensity` (read in JS through `drives.value`), `inner` on
+  `anim.lead` and `tilt` on `anim.centroid` (both read in JS through
+  `drives.value`), `shock` on `anim.dropOnset` and `twinkle` on `anim.hats`
+  (both hit drivers read through `drives.fired`; Twinkle's flash is sized by
+  `drives.hitSize`).
+- `src/render/scenes/nebula/reactions.ts` — the JS-side state of Twinkle,
+  Drop shock and Colour tilt: the two flash slots, the burst's centre and
+  clock, the centroid's running mean and the lean.
+- `tests/nebulaReactions.test.ts` — Twinkle's slots and flash, the drop's
+  front and burn, the lean's direction, and bounded uniforms over a long
+  session.
 
 ## References
 
@@ -200,6 +213,35 @@ vs ours.
   Song over silence at p95 2.2×. Silence alone, 20 s from 4 s, by Gas
   drift: 0 1.74 / 2.36, 1 1.93 / 2.97, 8 3.07 / 3.64.
 
+2026-11-01, the four music reactions (Levitating; `tools/tune-real.mjs`, 30 s
+from 4 s, and an in-page probe of the reactions' state over 90 s).
+
+- `tools/tune-real.mjs`, the four new settings at their defaults, then all
+  four at 0, same session:
+
+  | source | change med | change p95 | hits/min | energy | fps |
+  |---|---|---|---|---|---|
+  | song, reactions on | 4.94 | 6.61 | 324 | 0.66 | 120 |
+  | silence, reactions on | 1.98 | 2.95 | 0 | 0.00 | 119 |
+  | song, reactions off | 4.80 | 6.57 | 308 | 0.66 | 119 |
+  | silence, reactions off | 1.97 | 3.01 | 0 | 0.00 | 119 |
+
+  The frame-change metric hardly moves: the reactions change light and
+  colour, not where things are, and the flight dominates it.
+- What they hear over 90 s: Twinkle fired 155 times (about 1.7 a second),
+  Drop shock once. Lead sat at p05 0.61, p50 0.82, p95 0.98; the centroid at
+  p05 0.01, p50 0.19, p95 0.69.
+- Read raw, Inner light was a near-constant lift and Colour tilt sat warm
+  (median lean +0.71, p95 pinned at +1). Read against the song's own recent
+  level (reactions.ts's `Swing`): Inner light's level p05 0.23, p50 0.34,
+  p95 0.98; the lean p05 −0.94, p50 +0.30, p95 +1, changing side about
+  every six seconds.
+- The same nine sheet frames, song, reactions on against off: luma mean
+  0.313 against 0.267, p50 0.330 against 0.258, saturation of lit pixels
+  0.57 against 0.58, lit hue p50 274° against 263°. The bodies glow
+  brighter with the lead, as on the prototype; the owner's call whether to
+  lower it.
+
 ## Decisions and pivots
 
 - 2026-10-21 — Sync hypotheses from the scan: no trigger at all (silent
@@ -282,6 +324,27 @@ vs ours.
   gentle pace under the flight's own; my call, not yet confirmed by the
   owner.
 
+- 2026-10-30 — The owner asked for new audio reactions. Four were
+  prototyped in a live page running a copy of the scene's march, glare and
+  stars (https://claude.ai/artifact/D39meUNZGjwpdh9mbqtJuB), each on a
+  signal the scene didn't use yet. The owner kept Twinkle (Hats), Inner
+  light (Lead) and Colour tilt (Centroid) as shown. Drop shock's first
+  version also drew a thin lit shell around the burst, which read as a
+  "donut" and was rejected, while the wave through the clouds was liked; a
+  second round showed five waves (Front, Push, Echo, Ignite, Away from us)
+  and the owner picked Ignite, the front that leaves the gas burning behind
+  it. The camera's lurch on a drop went at the owner's word ("just the wave
+  through the gases"): the flight keeps its pace. Inner light's first try
+  lifted the fill as much as the veins and turned the bodies milky; most of
+  its gain now goes to the veins.
+- 2026-11-01 — On a real song Lead stayed high the whole way and the
+  centroid's spread was several times the prototype's, so read raw Inner
+  light only told music from silence and Colour tilt sat warm. Both now read
+  their signal against its own median over the last half-minute, in units
+  of its spread there (reactions.ts's header). A mean was tried first and
+  the centroid's rare bright spikes kept the lean warm; a median stepped
+  toward took most of a minute to settle.
+
 ## Tuning notes
 
 - Judge the look at rest (ref-shoot on the silent bundle) against the
@@ -292,6 +355,8 @@ vs ours.
   Colour turn rotates every colour about the grey axis (0 is the
   reference's violet); Colour drift sets how fast the wander runs; Gas drift how fast the
   gas streams past and reshapes on its own (0 holds it still).
+- Inner light and Colour tilt swing against the song's own recent level,
+  so judge them a half-minute into a song; at its start they ease in.
 
 ## Known issues and next steps
 
@@ -321,6 +386,8 @@ vs ours.
   `hues.py` (hue shares of lit pixels), `loop.py` (loop period and colour
   over the video), `ca.py` (lens-split test), `pair.py` (reference over
   ours tiles), `shot.mjs` (synthetic-audio screenshots, first PR).
+- The reactions' prototype: the private page
+  https://claude.ai/artifact/D39meUNZGjwpdh9mbqtJuB (versions 1 to 3).
 - The reference video, frames and comparison sheets: the local `/ref` cache
   and the private archive (`tools/ref-archive.py violet-filament
   violet-loop`).

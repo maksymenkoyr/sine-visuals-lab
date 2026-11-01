@@ -14,6 +14,8 @@
  * - Gas between the camera and a star dims and reddens it gradually, blue first, rather than cutting
  *   it off at one depth. The gas's optical depth climbs over EXT_RAMP to the depth where the gas turns
  *   opaque (glsl.ts's header), read from the gas target's alpha.
+ * - Twinkle (reactions.ts): a hat makes a fresh share of the stars, picked by the hat's seed, flash
+ *   brighter for a moment.
  *
  * Each star is wrapped to the repeat nearest the camera: ahead of it in z (stars behind are never
  * seen), and around it in x and y, drawn once per neighbouring repeat (`TILES`) so the far edges of the
@@ -21,6 +23,7 @@
  * (1 - a)·e^-b closely enough for points.
  */
 
+import { NOISE_HASH_GLSL } from "../../noiseHash.ts";
 import { PERIOD } from "./flight.ts";
 
 /** Stars per repeat. Most are faint dust, so the count is high and only a small share read as bright. */
@@ -75,6 +78,10 @@ const BLOOM = 0.6;
 const CORE_GAMMA = 0.5;
 /** Gain on the stretched core, so the faintest drawn stars sit just above the void's floor. */
 const CORE_GAIN = 1.5;
+/** Twinkle: the share of stars one hat lights, and how many times brighter they burn at the flash's
+ *  peak at Twinkle 1. */
+const TWINKLE_SHARE = 0.32;
+const TWINKLE_GAIN = 9;
 
 const f = (x: number, d = 4) => x.toFixed(d);
 
@@ -180,10 +187,19 @@ uniform vec4 uViewport;
 uniform sampler2D uGasTex;
 uniform float uStars;
 uniform float uMaxPt;
+uniform vec4 uTw;
+uniform float uTwAmt;
 out vec3 vColor;
 out float vCore, vR, vHalo, vSpike, vSpikeL, vSize;
 
 ${BLACKBODY_GLSL}
+
+${NOISE_HASH_GLSL}
+
+// Whether a hat with this seed lights this star: the same stars for one hat, a fresh draw for the next.
+float lit(float seed) {
+  return float(uhash(uint(gl_VertexID) ^ uhash(uint(seed)))) * (1.0 / 4294967296.0) < ${f(TWINKLE_SHARE)} ? 1.0 : 0.0;
+}
 
 void cull() {
   gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
@@ -215,6 +231,7 @@ void main() {
   float tOcc = textureLod(uGasTex, uv, 0.0).a * ${f(tMax)};
   float b = min(${f(LMIN)} * pow(max(1.0 - aStar.w, 1e-4), -2.0 / 3.0), ${f(L_CAP)})
     * ${f(D_REF * D_REF)} / max(dist * dist, ${f(NEAR_D2)});
+  b *= 1.0 + ${f(TWINKLE_GAIN)} * uTwAmt * (uTw.y * lit(uTw.x) + uTw.w * lit(uTw.z));
   float fade = smoothstep(${f(NEAR)}, ${f(NEAR + 1.0)}, dist) * smoothstep(${f(FAR)}, ${f(FAR * 0.5)}, dist);
   float tau = ${f(-Math.log(occlude))} * max(dist - tOcc + ${f(EXT_RAMP)}, 0.0) / ${f(EXT_RAMP)};
   vec3 ext = exp(-tau * vec3(${f(REDDEN[0])}, ${f(REDDEN[1])}, ${f(REDDEN[2])}));
