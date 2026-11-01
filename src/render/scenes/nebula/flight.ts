@@ -130,6 +130,13 @@ export function hueWander(f: Flight): number {
   return sum(HUE_WANDER, f.hueClock);
 }
 
+/** The camera's position in world units, not reduced into a repeat: for JS-side geometry that the
+ *  shader only ever gets as a small offset from the camera (reactions.ts's drop shock). */
+export function cameraWorld(f: Flight): [number, number, number] {
+  const [x, y] = pathAt(f.travel);
+  return [x, y, f.travel];
+}
+
 /**
  * The camera this frame, packed as vec4s for glsl.ts's `uCam`:
  * [0] position reduced into one repeat (PERIOD, PERIOD, PERIOD_Z); [1] right, [2] up,

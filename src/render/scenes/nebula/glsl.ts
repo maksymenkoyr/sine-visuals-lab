@@ -35,6 +35,11 @@
  * the depth where the gas turns opaque, which stars.ts reads to hide the
  * stars behind it.
  *
+ * Four music reactions ride on the march (reactions.ts holds their state): Inner light scales the
+ * shells, veins and fill; Drop shock's front, a sphere around uShockAt, swells the gas it crosses
+ * and multiplies the light of the rims, shells and veins there, and the gas behind it burns on as
+ * embers; Colour tilt adds to the hue turn. Twinkle is in stars.ts.
+ *
  * Every TS number that reaches the shader goes through `.toFixed()`, so
  * GLSL never sees an int where it wants a float. Nothing that grows with
  * the session reaches a noise coordinate (flight.ts's header).
@@ -127,6 +132,24 @@ const BLOOM_GAIN = 0.8;
  *  size (docs/scenes/nebula.md): high's `GAS_HEIGHT` target came out about as crisp as a march at
  *  the screen's full height, at a fraction of the cost; twice this turned the gas grainy. */
 const SHARPEN = 0.5;
+/** Inner light: how many times brighter the shells and veins glow, and the dim fill, at full drive at
+ *  Inner light 1. Most of it goes to the veins: lifting the fill as much turned the bodies milky in
+ *  the prototype (docs/scenes/nebula.md, 2026-10-30). */
+const INNER_GAIN = 4.5;
+const INNER_FILL = 1.2;
+/** Drop shock's front: its half-width (world units), how far it swells the gas (density units), how
+ *  many times brighter the rims, shells and veins it crosses burn, and the light it gives the body. */
+const SHOCK_W = 0.22;
+const SHOCK_SWELL = 0.02;
+const SHOCK_GAIN = 6.0;
+const SHOCK_BODY = 0.3;
+/** Behind the front the gas keeps burning, cooling from white through orange to deep red over
+ *  IGNITE_LEN world units: its gain on the rims and on the body. */
+const IGNITE_LEN = 4.0;
+const IGNITE_RIM = 2.5;
+const IGNITE_FILL = 0.6;
+/** Colour tilt: degrees of hue at a full lean at Colour tilt 1. */
+const TILT_DEG = 42;
 
 const f = (x: number, d = 4) => x.toFixed(d);
 
@@ -147,6 +170,11 @@ uniform vec4 uPath[2];
 uniform float uHueDrift;
 uniform float uChurn;
 uniform vec2 uFlow;
+uniform vec4 uShockAt;
+uniform float uShockAmp;
+uniform float uIgnite;
+uniform float uInnerLevel;
+uniform float uTiltLean;
 `;
 
 const VIEW_RAY = `
@@ -166,6 +194,8 @@ const vec3 ROSE = vec3(1.00, 0.25, 0.50);
 const vec3 WARM = vec3(1.00, 0.92, 0.85);
 const vec3 HOT = vec3(0.75, 0.85, 1.00);
 const vec3 BLUE = vec3(0.22, 0.34, 1.00);
+const vec3 SHOCK_WHITE = vec3(0.95, 0.90, 1.00);
+const vec3 EMBER = vec3(0.55, 0.06, 0.12);
 // The gas's own colour drifts across space between these three, as the reference's does.
 const vec3 BODY_BLUE = vec3(0.16, 0.16, 0.90);
 const vec3 BODY_VIOLET = vec3(0.31, 0.11, 0.82);
@@ -212,6 +242,9 @@ void main() {
   float th = mix(0.69, 0.55, uGas);
   float hot = 1.0 + ${f(FLARE_GAIN)} * uFlare * flareDrive(uLowPulse);
   float bright = uGlow * (1.0 + ${f(GLOW_GAIN)} * glowDrive(uEnergy));
+  float innerLit = uInner * uInnerLevel;
+  float innerK = 1.0 + ${f(INNER_GAIN)} * innerLit;
+  float innerFill = 1.0 + ${f(INNER_FILL)} * innerLit;
   vec3 churn = ${f(CHURN_R)} * vec3(cos(uChurn), sin(uChurn), 0.0);
 
   // Interleaved gradient noise: a fixed per-pixel start offset that turns step banding into fine grain.
@@ -247,6 +280,15 @@ void main() {
     float rad = ${f(TUNNEL_R)} * (1.0 + pathR(rel.z));
     float carve = ${f(TUNNEL_DEPTH)} * (0.5 + 0.5 * smoothstep(${f(TUNNEL_FAR)}, ${f(TUNNEL_NEAR)}, rel.z));
     dens -= carve * exp(-dot(rel.xy - axis, rel.xy - axis) / (rad * rad));
+
+    // Drop shock: where this sample sits against the front, negative behind it. The front swells the gas it crosses.
+    float sr = 99.0;
+    float front = 0.0;
+    if (uShockAmp > 0.002 || uIgnite > 0.002) {
+      sr = length(rel - uShockAt.xyz) - uShockAt.w;
+      front = uShockAmp * exp(-sr * sr / ${f(SHOCK_W * SHOCK_W)});
+      dens += ${f(SHOCK_SWELL)} * front;
+    }
 
     float e = (dens - th) / ${f(BAND)};
     // Most steps lie in empty space, where every erf below sits on its clamp; branching to the clamped
@@ -286,12 +328,21 @@ void main() {
       float inside = 0.5 * (fill + fillPrev);
       float edge = clamp(${f(EDGE_RATE)} * dt / max(abs(de), 1e-3), ${f(EDGE_MIN)}, ${f(EDGE_MAX)});
       float burn = smoothstep(1.0, 1.3, heat);
+      float shockHot = 1.0 + ${f(SHOCK_GAIN)} * front;
       vec3 emit = DUST * avg.x * ${f(BAND_GAIN[0])}
         + (mix(ROSE, FRINGE, burn) * avg.y * ${f(BAND_GAIN[1])}
           + mix(mix(HOT, body, 0.2), WARM, burn) * avg.z * ${f(BAND_GAIN[2])} * hot
-          + mix(BLUE, body, 0.2) * avg.w * ${f(BAND_GAIN[3])}) * heat * edge
-        + mix(body, BLUE, 0.7 * burn) * inside * ${f(FILL_GAIN)} * (1.0 + ${f(FILL_HOT)} * burn)
-        + mix(VEIN, body, 0.4) * (dot(avgS, SHELL_GAIN) * heat + avgV * ${f(VEIN_GAIN)} * heat * smoothstep(-1.0, 1.0, e));
+          + mix(BLUE, body, 0.2) * avg.w * ${f(BAND_GAIN[3])}) * heat * edge * shockHot
+        + mix(body, BLUE, 0.7 * burn) * inside * ${f(FILL_GAIN)} * (1.0 + ${f(FILL_HOT)} * burn) * innerFill
+        + mix(mix(VEIN, body, 0.4), WARM, 0.25 * innerLit) * (dot(avgS, SHELL_GAIN) * heat + avgV * ${f(VEIN_GAIN)} * heat * smoothstep(-1.0, 1.0, e)) * innerK * shockHot
+        + SHOCK_WHITE * front * inside * ${f(SHOCK_BODY)};
+      // Ignite: the gas the front has crossed keeps burning, cooling from white to orange to deep red with distance behind it.
+      if (sr < 0.0 && uIgnite > 0.002) {
+        float cool = clamp(-sr / ${f(IGNITE_LEN)}, 0.0, 1.0);
+        vec3 ember = cool < 0.3 ? mix(WARM, FRINGE, cool / 0.3) : mix(FRINGE, EMBER, (cool - 0.3) / 0.7);
+        float rims = (avg.y * ${f(BAND_GAIN[1])} + avg.z * ${f(BAND_GAIN[2])} + avg.w * ${f(BAND_GAIN[3])}) * heat * edge;
+        emit += ember * uIgnite * pow(1.0 - cool, 1.5) * (rims * ${f(IGNITE_RIM)} + inside * ${f(IGNITE_FILL)});
+      }
       col += T * emit * (${f(EMIT)} * fade * bright * dt);
       T *= exp(-0.5 * (sigma + sigmaPrev) * dt);
       if (T < ${f(OCCLUDE)} && tOcc >= ${f(T_MAX)}) tOcc = t;
@@ -309,7 +360,7 @@ void main() {
   }
 
   col += GROUND * T;
-  col = max(hueTurn(col, uHue + uHueDrift), 0.0);
+  col = max(hueTurn(col, uHue + uHueDrift + ${f(TILT_DEG)} * uTilt * uTiltLean), 0.0);
   // Mapping each channel on its own bleaches every bright colour toward white;
   // mapping by the brightest channel keeps the reference's saturated blues and
   // magentas, and a share of the per-channel map still whitens the hottest cores.
