@@ -1,11 +1,12 @@
 # LED Hearts (`ledhearts`)
 
 In development, on main. Glowing magenta hearts on a wall of round LEDs, zooming out from the
-centre forever. Most hearts face the viewer and rock; a few turn all the way
-round and show violet edge-on. Near hearts swell, soften to dim red and fade.
+centre forever. Most hearts face the viewer and rock; a few keep turning,
+narrowing and leaning violet but never thinning to a line. Near hearts swell,
+soften to dim red and fade.
 The music speeds the zoom and lifts the glow with its level, kicks push the
 zoom, hits set the hearts spinning, and a drop sends a wave of light out from
-the centre. First pass, not on main yet: it sits in this PR.
+the centre.
 
 ## Where the code is
 
@@ -150,6 +151,28 @@ has by design.
     median 16.88 → 16.31, p95 21.71 → 21.52 on the song, median 7.95 → 7.93,
     p95 9.19 → 9.22 in silence; hits a minute 392 → 402 on the song, 0 → 0
     in silence.
+- 2026-11-04, the owner: "I just don't like current LED hearts at all … why
+  can't it be the same as the original but without the lines." Three things
+  read as lines. The old heart (a diamond with two discs) had a distance
+  field that was wrong outside the shape, so every heart's haze trailed a
+  point below its tip. Haze and soft edges reached past what the lattice's
+  2×2 lookup reads, so the lookup's cell edges cut them off in straight
+  seams. A heart turning edge-on became a one-LED violet streak; the
+  reference has these too, but the owner wants them gone. Now
+  the heart is each lobe disc joined to a small tip disc along their
+  tangents, with an exact distance field and only the tip rounded (rounding
+  the whole outline filled the cleft, and small hearts read as blobs). Every
+  heart's light fades out by `LOOKUP_REACH`. A turning heart stops at
+  `MIN_WIDTH`. `EDGE` went under one LED, so a heart a few LEDs tall keeps
+  its cleft and tip. `tools/tune-real.mjs ledhearts` on Levitating, 30 s
+  from 4 s, change in % of full scale per 100 ms:
+
+  | build | song med | song p95 | silence med | silence p95 |
+  |---|---:|---:|---:|---:|
+  | before (main) | 14.81 | 22.89 | 7.96 | 9.19 |
+  | true heart | 16.09 | 23.10 | 8.19 | 9.49 |
+
+  Reactions unchanged; no hit fired on silence.
 
 ## Tuning notes
 
@@ -193,3 +216,4 @@ has by design.
 
 - #654: first pass (draft).
 - 2026-10-24 (#682) — Bass and Treble hits also fire on the engine's band-level jumps; no code in this scene changed (see Decisions)
+- 2026-11-04 — a true heart shape; no haze seams, tip stems or edge-on streaks (see Decisions)
