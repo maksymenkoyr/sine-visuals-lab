@@ -1,8 +1,10 @@
 // LED Hearts' endless zoom (src/render/scenes/ledhearts/motion.ts's header):
 // the layers grow together, wrap back to the smallest size unseen and with a
-// new seed, and the spin clock's wrap never shows on a heart.
+// new seed, the spin clock's wrap never shows on a heart, and a heart's light
+// ends inside the cells its lattice lookup reads (glsl.ts).
 
 import { describe, it, expect } from "vitest";
+import { A_MAX, HEART_REACH, LOOKUP_REACH } from "../src/render/scenes/ledhearts/glsl.ts";
 import { LAYER_STEP, LAYERS, MIN_SCALE, SPIN_RATE_UNIT, layerAt, wrapSpin } from "../src/render/scenes/ledhearts/motion.ts";
 
 describe("LED Hearts zoom layers", () => {
@@ -58,5 +60,11 @@ describe("LED Hearts spin clock", () => {
         expect(Math.cos(wrapSpin(phase) * rate)).toBeCloseTo(Math.cos(phase * rate), 6);
       }
     }
+  });
+});
+
+describe("LED Hearts lattice lookup", () => {
+  it("fits the biggest heart inside the reach the 2×2 lookup sees, with room for its glow to fade", () => {
+    expect(HEART_REACH * A_MAX).toBeLessThan(LOOKUP_REACH - 0.15);
   });
 });
