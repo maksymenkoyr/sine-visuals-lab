@@ -2,7 +2,7 @@
 // The beat grid's switch-on line (gridPulse.ts's GRID_LOCK_ON), the
 // metronome's follow line (metronome.ts's FOLLOW_LOCK), the tempo settle's
 // retune rule (tempoSettle.ts's RETUNE_LOCK), the music profile's pulse dial
-// (musicProfile.ts), the Lock row and many scenes read it. It can mean one of
+// (musicProfile.ts), the Beat card's Lock ring and many scenes read it. It can mean one of
 // three things:
 // - stability: how small the clock's recent phase corrections are
 //   (src/audio/engine/clock.ts's follow()), the meaning the old phase comb had.
