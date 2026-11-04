@@ -128,6 +128,13 @@ describe("Nebula reactions", () => {
     let nextHat = 0;
     let nextDrop = 0;
     const cam = [0, 0, 0];
+    // Extremes, asserted once after the loop: an expect per frame ran past vitest's 5 s limit on CI.
+    // A NaN carries through Math.min/max and fails the asserts below.
+    let innerMin = Number.POSITIVE_INFINITY;
+    let innerMax = Number.NEGATIVE_INFINITY;
+    let seedMax = 0;
+    let tiltMax = 0;
+    let allFinite = true;
     for (let t = 0; t < 600; t += DT) {
       cam[2] = t * 0.22;
       if (t >= nextHat) {
@@ -139,12 +146,17 @@ describe("Nebula reactions", () => {
         nextDrop += 8;
       }
       advanceReactions(r, DT, 0.8 + 0.2 * Math.sin(0.7 * t), 0.5 + 0.3 * Math.sin(t));
-      expect(r.inner).toBeGreaterThanOrEqual(0);
-      expect(r.inner).toBeLessThanOrEqual(1);
-      for (const v of twinkleUniforms(r)) expect(Number.isFinite(v)).toBe(true);
-      for (const v of shockUniforms(r, cam)) expect(Number.isFinite(v)).toBe(true);
-      expect(r.twinkle[0].seed).toBeLessThan(65536);
-      expect(Math.abs(r.tilt)).toBeLessThanOrEqual(1);
+      innerMin = Math.min(innerMin, r.inner);
+      innerMax = Math.max(innerMax, r.inner);
+      for (const v of twinkleUniforms(r)) allFinite &&= Number.isFinite(v);
+      for (const v of shockUniforms(r, cam)) allFinite &&= Number.isFinite(v);
+      seedMax = Math.max(seedMax, r.twinkle[0].seed);
+      tiltMax = Math.max(tiltMax, Math.abs(r.tilt));
     }
+    expect(innerMin).toBeGreaterThanOrEqual(0);
+    expect(innerMax).toBeLessThanOrEqual(1);
+    expect(allFinite).toBe(true);
+    expect(seedMax).toBeLessThan(65536);
+    expect(tiltMax).toBeLessThanOrEqual(1);
   });
 });
