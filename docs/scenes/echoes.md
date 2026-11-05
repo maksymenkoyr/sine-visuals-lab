@@ -349,3 +349,4 @@ music we get":
   more Shape chips and their trails in depth (closed unmerged after it
   conflicted with main's In development section, replaced by #400).
 - #400 — the same rebased onto main again.
+- #817 — 3D and 4D figures take the music harder, so every shape reacts about the same.
