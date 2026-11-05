@@ -30,7 +30,7 @@
 // and its changes of shape are the performer typing — so each reaction here
 // is a plain wire the user can move: Breathe swings the size once a bar
 // (the reference's timer swung about once every three bars at its tempo),
-// Kick pops it outward on a bass hit (a ripple that runs down the fan), and
+// Kick pops it outward on every kick (a ripple that runs down the fan), and
 // Flow spreads the echoes further apart as the mids get louder. Shockwave and
 // the Mirror and Age tint looks are additions of ours with no counterpart in
 // the reference: a hit sends a bright ring down the fan (the display pass
@@ -290,7 +290,7 @@ function createEchoesScene(): Scene {
       ringCount = kept;
       // fired() every frame, even at Shockwave 0: the hit driver's detector
       // learns from every frame it sees (drives.ts's header, "Hit drivers").
-      const shockFired = drives.fired("shock", anim.lowOnset);
+      const shockFired = drives.fired("shock", anim.song.kickOnset);
       if (shock > 0 && shockFired) {
         if (ringCount === MAX_RINGS) {
           ringStart.copyWithin(0, 1);

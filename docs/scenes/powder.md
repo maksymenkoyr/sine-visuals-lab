@@ -122,6 +122,32 @@ shells thrown outward on bass hits. Reference frames were pulled ad hoc with
   | #682 | 3.11 | 4.41 | 0.00 | 0.01 |
 
   Back to the old lanes' motion. No hit fired on silence.
+- 2026-10-30, #802: Bass kick, Chunk burst, Camera move and Beat flash moved
+  from the bass hit to the Kick, and Sparkle's hit part from the treble hit
+  to the Hats.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 3.17 → 2.82, p95 4.64 → 4.32; silence
+    median 0.00 → 0.00, p95 0.01 → 0.01; hits a minute on the song 416 →
+    404, in silence 0 → 0; main's bass / mid / treble lanes 158 / 128 /
+    242 a minute against kick / clap / hats / chord 110 / 40 / 276 / 126.
+- 2026-10-30, #803: the scene's drop reaction now fires when audio v6's
+  drop level crosses its mark (`DROP_MARK`, `src/render/animClock.ts`), not
+  on the Section trend's old drop detector.
+  - tune-real on a real song (around-the-world, 60 s) then silence, the
+    commit before → this change, one run each: song change median
+    2.34 → 2.50, p95 4.15 → 3.84; silence median
+    0.00 → 0.00, p95 0.01 → 0.01; hits a minute on the song
+    360 → 365, in silence 0 → 0; drops a minute on the song
+    0 → 2, in silence 0 → 0.
+- 2026-10-30, #804: Turbulence's drive on how hard the air churns moves with
+  Level, which now reads audio v6's Loudness (the song's loudness on a fixed
+  decibel scale), not the band mean.
+  - tune-real on a real song (around-the-world) then silence, before →
+    after: at full level change median 2.45 → 2.47, p95 3.88 → 4.06 on the
+    song, median 0 → 0, p95 0.01 → 0 in silence; hits a minute 380 → 372 on
+    the song, 0 → 0 in silence; with the song 20 dB down change median 2.58
+    → 2.77, p95 3.97 → 4.47 on the song, median 0 → 0, p95 0 → 0.04 in
+    silence; hits a minute 370 → 386 on the song, 0 → 0 in silence.
 
 ## Tuning notes
 

@@ -108,11 +108,11 @@ export function sourceEdge(source: BeatSource, anim: AnimFrame, prevBarPhase: nu
     case "beat":
       return anim.onset;
     case "bass":
-      return anim.lowOnset;
+      return anim.song.kickOnset;
     case "mid":
-      return anim.midOnset;
+      return anim.song.chordOnset;
     case "high":
-      return anim.highOnset;
+      return anim.song.hatOnset;
     case "drop":
       return anim.dropOnset;
     case "bar":
@@ -197,11 +197,12 @@ export function createBeatListener(spec: BeatListenerSpec): BeatListener {
 
 /** Which SIGNALS entry (src/render/signals.ts) a source corresponds to, for
  *  a setting row's `reads` — only where one already exists (see signals.ts's
- *  own "populate on demand" rule): "mid"/"high" have no registered signal
- *  yet (nothing reads them today), and "bar" isn't a single live signal at
- *  all (it's a wrap derived from two ticks). */
+ *  own "populate on demand" rule): "mid"/"high" have none yet (nothing reads
+ *  them today), and "bar" isn't a single live signal at all (it's a wrap
+ *  derived from two ticks). "bass", "mid" and "high" read the song layer's
+ *  Kick, Chord and Hats edges (AnimFrame.song), not the band lanes. */
 export const SOURCE_SIGNAL: Partial<Record<BeatSource, SignalId>> = {
   beat: "feature.onset",
-  bass: "anim.lowOnset",
+  bass: "anim.kickOnset",
   drop: "anim.dropOnset",
 };

@@ -180,8 +180,8 @@ export {
 //  - Beat trigger: a low-band onset or a broadband beat fires one strike; the
 //    pool's refractory window folds the two into a single strike when they
 //    land on adjacent frames (they usually do).
-//  - Beats are detected as *rises* in anim.beatPulse / lowPulse / dropPulse
-//    rather than from the one-shot flags (frame.onset, anim.lowOnset,
+//  - Beats are detected as *rises* in anim.beatPulse / kickPulse / dropPulse
+//    rather than from the one-shot flags (frame.onset, anim.song.kickOnset,
 //    anim.dropOnset), and the pool is aged by this scene's own render
 //    interval rather than anim.dtSec. Both were written for the same reason:
 //    app.ts/tv.ts advance the anim clock on every rAF tick but rate-cap
@@ -2394,8 +2394,8 @@ void main() {
   float lit = (0.18 * ambientFloor() * AMB_FLOOR_NORM
       + 0.9 * uAmbient * (0.5 + ambientDrive(uEnergy)) * (0.45 + 0.55 * height))
     * depthFade(view.z) * spectrumGain(p, viewToRoomNdc(view)) * sectionGain(p);
-  // Treble shimmer: scattered nodes and wires glint on high-band hits.
-  float shimmer = uSpark * sparkDrive(uHighPulse) * step(0.93, hash11(seed * 7.1 + floor(uTime * 12.0)));
+  // Treble shimmer: scattered nodes and wires glint on hat hits.
+  float shimmer = uSpark * sparkDrive(uHatPulse) * step(0.93, hash11(seed * 7.1 + floor(uTime * 12.0)));
 
   vColor = (wire * lit
     + flashTint(boltColor(), light) * light
@@ -2585,8 +2585,8 @@ void main() {
   // the same depthFade the lattice uses.
   float ambient = uAmbient * (0.5 + ambientDrive(uEnergy)) * heightShade * depthFade(view.z) * (0.7 + 0.3 * hash11(seed * 3.7))
     * spectrumGain(p, viewToRoomNdc(view)) * sectionGain(p);
-  // Treble sparks: a scattered few particles glint on high-band hits.
-  float spark = uSpark * sparkDrive(uHighPulse) * step(0.96, hash11(seed * 7.1 + floor(t * 10.0)));
+  // Treble sparks: a scattered few particles glint on hat hits.
+  float spark = uSpark * sparkDrive(uHatPulse) * step(0.96, hash11(seed * 7.1 + floor(t * 10.0)));
 
   vec3 base = mix(vec3(0.32, 0.34, 0.5), palette(0.6 + 0.1 * seed, uPalA, uPalB, uPalC, uPalD), 0.5) * 0.4;
   vColor = base * ambient + flashTint(boltColor(), light) * light + vec3(1.0) * spark;
@@ -2732,7 +2732,7 @@ void main() {
   float heightShade = 0.55 + 0.45 * clamp((aPos.y + EXTENT_Y) / (2.0 * EXTENT_Y), 0.0, 1.0);
   float ambient = uAmbient * (0.5 + ambientDrive(uEnergy)) * heightShade * depthFade(view.z)
     * (0.7 + 0.3 * hash11(aSeed * 3.7)) * spectrumGain(p, viewToRoomNdc(view)) * sectionGain(p);
-  float spark = uSpark * sparkDrive(uHighPulse) * step(0.96, hash11(aSeed * 7.1 + floor(uTime * 10.0)));
+  float spark = uSpark * sparkDrive(uHatPulse) * step(0.96, hash11(aSeed * 7.1 + floor(uTime * 10.0)));
 
   // A hair is faint on its own and the tangle is bright where it bunches, so
   // the gain stays low and the overlap does the work. Detail is what a 1px
@@ -3110,24 +3110,24 @@ export const stormScene: Scene = (() => {
       // one clock, and the one this scene actually draws at.
       cells.tick(dt);
       const beatRose = anim.beatPulse > prevBeatPulse + 1e-3 || frame.onset;
-      const lowRose = anim.lowPulse > prevLowPulse + 1e-3 || anim.lowOnset;
+      const lowRose = anim.song.kickPulse > prevLowPulse + 1e-3 || anim.song.kickOnset;
       const dropRose = anim.dropPulse > prevDropPulse + 1e-3 || anim.dropOnset;
       // The upper bands get the same rise detection, for the sections alone:
       // they are what keeps the cloud flickering section by section between
       // beats instead of only on them.
-      const bandRose = anim.midPulse > prevMidPulse + 1e-3 || anim.highPulse > prevHighPulse + 1e-3;
+      const bandRose = anim.song.chordPulse > prevMidPulse + 1e-3 || anim.song.hatPulse > prevHighPulse + 1e-3;
       prevBeatPulse = anim.beatPulse;
-      prevLowPulse = anim.lowPulse;
+      prevLowPulse = anim.song.kickPulse;
       prevDropPulse = anim.dropPulse;
-      prevMidPulse = anim.midPulse;
-      prevHighPulse = anim.highPulse;
+      prevMidPulse = anim.song.chordPulse;
+      prevHighPulse = anim.song.hatPulse;
 
       // The shape morph rides the very rises the strikes do — the same
       // booleans, so the lurch and the lightning are the same beat rather
       // than two detections that could disagree. beatAmp is non-zero only on
       // the frame a pulse rose, which is what makes the kick a step per beat
       // instead of a shove for as long as the pulse stays up.
-      const beatAmp = dropRose ? 1 : lowRose || beatRose ? Math.min(1, 0.7 + 0.5 * (lowRose ? anim.lowPulse : 0)) : 0;
+      const beatAmp = dropRose ? 1 : lowRose || beatRose ? Math.min(1, 0.7 + 0.5 * (lowRose ? anim.song.kickPulse : 0)) : 0;
       morphPhase = advanceMorphPhase(morphPhase, dt, morphSpeed, morphBeat, drives.value("morphBeat", beatAmp));
 
       // Where the cloud sits between its silhouettes: the slider spans the
@@ -3148,8 +3148,8 @@ export const stormScene: Scene = (() => {
       };
       // Single catalogue source wouldn't cover the bass-or-beat union the
       // ordinary strike needs — see the "strike" setting's own comment.
-      if (drives.fired("strike", lowRose || beatRose, undefined, Math.max(anim.lowPulse, anim.beatPulse))) {
-        lightStruck(pool.trigger((0.7 + 0.5 * (lowRose ? anim.lowPulse : 0)) * drives.hitSize("strike"), false));
+      if (drives.fired("strike", lowRose || beatRose, undefined, Math.max(anim.song.kickPulse, anim.beatPulse))) {
+        lightStruck(pool.trigger((0.7 + 0.5 * (lowRose ? anim.song.kickPulse : 0)) * drives.hitSize("strike"), false));
       }
       // On top of whatever the strike lit: a beat picks its own sections, so
       // the cloud answers the beat even where no bolt reached, and a mid or

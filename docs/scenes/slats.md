@@ -115,6 +115,22 @@ layers never overlapped so nothing stacked toward white.
 - 2026-10-08 — Beat kick became a hit driver (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the peak of the onset envelope (advanceOnsetEnvelope now takes true, false or a 0..1 size) by how far the hit stood out; Flat, the default, is unchanged.
 - 2026-10-11 — Sampler units now go through `GLProgram.setI`; the file's own location cache and its clears are gone. Nothing visible changed: headless before/after shots look the same. (#349)
 - 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/slats/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #802: Kick dip moved from the bass hit to the Kick.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 10.32 → 10.39, p95 13.99 → 14.49; silence
+    median 5.48 → 5.48, p95 6.68 → 6.54; hits a minute on the song 408 →
+    408, in silence 0 → 0; main's bass / mid / treble lanes 148 / 128 /
+    242 a minute against kick / clap / hats / chord 110 / 48 / 276 / 124.
+- 2026-10-30, #804: Band thickness's drive on how tall the slabs stand moves
+  with Level, which now reads audio v6's Loudness (the song's loudness on a
+  fixed decibel scale), not the band mean.
+  - tune-real on a real song (around-the-world) then silence, before →
+    after: at full level change median 10.52 → 10.42, p95 14.32 → 15.04 on
+    the song, median 5.44 → 5.47, p95 6.87 → 6.8 in silence; hits a minute
+    384 → 382 on the song, 0 → 0 in silence; with the song 20 dB down change
+    median 10.61 → 10.18, p95 14.69 → 15.58 on the song, median 5.41 → 5.43,
+    p95 6.8 → 6.68 in silence; hits a minute 378 → 384 on the song, 0 → 0 in
+    silence.
 
 ## Tuning notes
 

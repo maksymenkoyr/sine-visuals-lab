@@ -1113,6 +1113,22 @@ configs are used.
   bare number. Attribute only: no change to the sim, the stored values or the
   look.
 - 2026-10-24 — Id, name, settings, panel and gallery record moved to `src/render/scenes/physarum2.card.ts`, so the scene's code loads after the page's first paint. The strain math the panel's widgets share moved to `src/render/scenes/physarum2Strains.ts`. Nothing visible changed. (#536)
+- 2026-10-30, #802: Speed pump's wire moved from the bass hit to the Kick.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 7.14 → 6.75, p95 9.03 → 8.31; silence
+    median 3.03 → 3.21, p95 3.88 → 3.80; hits a minute on the song 410 →
+    428, in silence 0 → 0; main's bass / mid / treble lanes 146 / 138 /
+    242 a minute against kick / clap / hats / chord 118 / 48 / 280 / 120.
+- 2026-10-30, #804: The fourth strain's default driver and the level the
+  Speed pump reads moves with Level, which now reads audio v6's Loudness
+  (the song's loudness on a fixed decibel scale), not the band mean.
+  - tune-real on a real song (around-the-world) then silence, before →
+    after: at full level change median 6.24 → 7.48, p95 8.07 → 8.92 on the
+    song, median 3.25 → 2.84, p95 3.71 → 3.76 in silence; hits a minute 410
+    → 392 on the song, 0 → 0 in silence; with the song 20 dB down change
+    median 7.16 → 6.95, p95 8.75 → 8.64 on the song, median 2.93 → 3.14, p95
+    3.79 → 3.79 in silence; hits a minute 398 → 418 on the song, 0 → 0 in
+    silence.
 
 ## Tuning notes
 

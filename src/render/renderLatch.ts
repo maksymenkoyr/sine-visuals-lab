@@ -1,4 +1,4 @@
-import type { AnimFrame } from "./animClock.ts";
+import type { AnimFrame, AnimSong } from "./animClock.ts";
 
 // app.ts/tv.ts advance the anim clock on every rAF tick, but scene.render()
 // is gated behind shouldRenderFrame() (framePace.ts, 60fps cap / 30 on the
@@ -18,6 +18,9 @@ import type { AnimFrame } from "./animClock.ts";
 // seconds since the last consume, and the pending set cleared. A scene that
 // only reads AnimFrame's one-shot fields (never FeatureFrame's) can no
 // longer miss one, regardless of render cap or refresh rate.
+//
+// The four song edges (AnimSong.kickOnset and the rest) are latched the same
+// way, into a song object the latch owns, so consume() makes none.
 //
 // metronome.ts's own metronomeBeat/metronomeBar are latched exactly like
 // onset/lowOnset above — they're one-shot edges off the same render loop, so
@@ -51,7 +54,11 @@ export function createRenderLatch(): RenderLatch {
   let pendingMidOnset = false;
   let pendingHighOnset = false;
   let pendingDropOnset = false;
-  let pendingHatsOnset = false;
+  let pendingSongKick = false;
+  let pendingSongClap = false;
+  let pendingSongHat = false;
+  let pendingSongChord = false;
+  const mergedSong = {} as AnimSong;
   let pendingMetronomeBeat = false;
   let pendingMetronomeBar = false;
   let lastConsumeMs: number | null = null;
@@ -63,7 +70,10 @@ export function createRenderLatch(): RenderLatch {
       pendingMidOnset ||= anim.midOnset;
       pendingHighOnset ||= anim.highOnset;
       pendingDropOnset ||= anim.dropOnset;
-      pendingHatsOnset ||= anim.hatsOnset;
+      pendingSongKick ||= anim.song.kickOnset;
+      pendingSongClap ||= anim.song.clapOnset;
+      pendingSongHat ||= anim.song.hatOnset;
+      pendingSongChord ||= anim.song.chordOnset;
       pendingMetronomeBeat ||= anim.metronomeBeat;
       pendingMetronomeBar ||= anim.metronomeBar;
     },
@@ -74,15 +84,21 @@ export function createRenderLatch(): RenderLatch {
       const dtSec = lastConsumeMs === null ? anim.dtSec : Math.max(1e-4, (nowMs - lastConsumeMs) / 1000);
       lastConsumeMs = nowMs;
 
+      Object.assign(mergedSong, anim.song);
+      mergedSong.kickOnset = pendingSongKick;
+      mergedSong.clapOnset = pendingSongClap;
+      mergedSong.hatOnset = pendingSongHat;
+      mergedSong.chordOnset = pendingSongChord;
+
       const merged: AnimFrame = {
         ...anim,
+        song: mergedSong,
         dtSec,
         onset: pendingOnset,
         lowOnset: pendingLowOnset,
         midOnset: pendingMidOnset,
         highOnset: pendingHighOnset,
         dropOnset: pendingDropOnset,
-        hatsOnset: pendingHatsOnset,
         metronomeBeat: pendingMetronomeBeat,
         metronomeBar: pendingMetronomeBar,
       };
@@ -92,7 +108,10 @@ export function createRenderLatch(): RenderLatch {
       pendingMidOnset = false;
       pendingHighOnset = false;
       pendingDropOnset = false;
-      pendingHatsOnset = false;
+      pendingSongKick = false;
+      pendingSongClap = false;
+      pendingSongHat = false;
+      pendingSongChord = false;
       pendingMetronomeBeat = false;
       pendingMetronomeBar = false;
 

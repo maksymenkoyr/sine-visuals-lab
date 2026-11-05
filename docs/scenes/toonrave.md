@@ -173,6 +173,22 @@ and are not recorded here yet.
   later (Energy drop's drain at its default).
 - 2026-10-08 — Drop hits, Dance and Energy pump became hit drivers (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the energy pump's kick (EnergyInputs.pumpSize) by how far the hit stood out; Flat, the default, is unchanged. Drop hits is flat-only: a drop either starts or it doesn't. Dance is flat-only: the dance only uses when each hit lands, not how big it was.
 - 2026-10-24 — Id, name, settings, panel and gallery record moved to `src/render/scenes/toonrave/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #802: Dance and the energy pump moved from the bass hit to the
+  Kick.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 8.67 → 8.20, p95 26.49 → 23.76; silence
+    median 0.00 → 0.00, p95 0.00 → 0.00; hits a minute on the song 420 →
+    418, in silence 0 → 0; main's bass / mid / treble lanes 146 / 138 /
+    242 a minute against kick / clap / hats / chord 114 / 44 / 278 / 132.
+- 2026-10-30, #803: the scene's drop reaction now fires when audio v6's
+  drop level crosses its mark (`DROP_MARK`, `src/render/animClock.ts`), not
+  on the Section trend's old drop detector.
+  - tune-real on a real song (around-the-world, 60 s) then silence, the
+    commit before → this change, one run each: song change median
+    8.41 → 8.90, p95 26.32 → 23.36; silence median
+    0.00 → 0.00, p95 0.00 → 0.00; hits a minute on the song
+    369 → 356, in silence 0 → 0; drops a minute on the song
+    0 → 2, in silence 0 → 0.
 
 ## Tuning notes
 

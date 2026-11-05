@@ -10,6 +10,7 @@ import { CUT_LISTENER } from "../src/render/scenes/shards/layout.ts";
 import { SIGNALS } from "../src/render/signals.ts";
 import type { AnimFrame } from "../src/render/animClock.ts";
 import type { OnsetDiag } from "../src/audio/onsetDiag.ts";
+import { animSong } from "./songFrame.ts";
 import { UNIT_TAILS, type HitParts } from "../src/audio/hitStrength.ts";
 
 const NULL_DIAG: OnsetDiag = { ratio: 0, gated: false, blocked: false, sinceOnsetSec: Infinity };
@@ -25,10 +26,7 @@ function frame(overrides: Partial<AnimFrame> = {}): AnimFrame {
     beatPulse: 0,
     hats: 0,
     lead: 0,
-    hatsOnset: false,
-    hatsPulse: 0,
-    hatsHit: 0,
-    hatsPeak: 0,
+    song: animSong(),
     onset: false,
     beatRatio: 0,
     beatPhase: 0,
@@ -45,8 +43,6 @@ function frame(overrides: Partial<AnimFrame> = {}): AnimFrame {
     lowOnset: false,
     midOnset: false,
     highOnset: false,
-    kickBand: 0,
-    kickBandIndex: 0,
     sectionIntensity: 0,
     dropPulse: 0,
     dropOnset: false,
@@ -77,10 +73,12 @@ function frame(overrides: Partial<AnimFrame> = {}): AnimFrame {
 describe("sourceEdge", () => {
   it("reads the matching AnimFrame one-shot for beat/bass/mid/high/drop", () => {
     expect(sourceEdge("beat", frame({ onset: true }), null)).toBe(true);
-    expect(sourceEdge("beat", frame({ lowOnset: true }), null)).toBe(false);
-    expect(sourceEdge("bass", frame({ lowOnset: true }), null)).toBe(true);
-    expect(sourceEdge("mid", frame({ midOnset: true }), null)).toBe(true);
-    expect(sourceEdge("high", frame({ highOnset: true }), null)).toBe(true);
+    expect(sourceEdge("beat", frame({ song: animSong({ kickOnset: true }) }), null)).toBe(false);
+    expect(sourceEdge("bass", frame({ song: animSong({ kickOnset: true }) }), null)).toBe(true);
+    expect(sourceEdge("mid", frame({ song: animSong({ chordOnset: true }) }), null)).toBe(true);
+    expect(sourceEdge("high", frame({ song: animSong({ hatOnset: true }) }), null)).toBe(true);
+    // The band lanes are no longer what a source listens to.
+    expect(sourceEdge("bass", frame({ lowOnset: true }), null)).toBe(false);
     expect(sourceEdge("drop", frame({ dropOnset: true }), null)).toBe(true);
   });
 
@@ -175,7 +173,7 @@ describe("createBeatListener", () => {
 
   it("an explicit source overrides the spec's default for that call only", () => {
     const listener = createBeatListener({ source: "beat" });
-    const r = listener.advance(frame({ lowOnset: true }), "bass");
+    const r = listener.advance(frame({ song: animSong({ kickOnset: true }) }), "bass");
     expect(r.fired).toBe(true);
   });
 
@@ -212,6 +210,10 @@ describe("createBeatListener", () => {
 });
 
 describe("SOURCE_SIGNAL", () => {
+  it("bass is the Kick hit", () => {
+    expect(SOURCE_SIGNAL.bass).toBe("anim.kickOnset");
+  });
+
   it("every entry resolves in SIGNALS", () => {
     for (const id of Object.values(SOURCE_SIGNAL)) {
       expect(SIGNALS[id!]).toBeDefined();

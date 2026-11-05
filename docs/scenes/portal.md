@@ -79,6 +79,12 @@ about 0.38–0.42 s in its goal. The report's own figures are the ones above;
   | #682 | 6.66 | 13.04 | 0.32 | 0.38 |
 
   The steady motion fell by about half on #683 and is back to the old lanes'. No hit fired on silence.
+- 2026-10-30, #802: The look change moved from the bass hit to the Kick.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 5.53 → 4.49, p95 14.96 → 13.57; silence
+    median 0.32 → 0.32, p95 0.39 → 0.38; hits a minute on the song 416 →
+    430, in silence 0 → 0; main's bass / mid / treble lanes 142 / 138 /
+    242 a minute against kick / clap / hats / chord 114 / 38 / 278 / 130.
 
 ## Tuning notes
 

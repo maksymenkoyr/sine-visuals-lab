@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { createRenderLatch } from "../src/render/renderLatch.ts";
 import type { AnimFrame } from "../src/render/animClock.ts";
 import type { OnsetDiag } from "../src/audio/onsetDiag.ts";
+import { animSong } from "./songFrame.ts";
 import { UNIT_TAILS, type HitParts } from "../src/audio/hitStrength.ts";
 
 const NULL_DIAG: OnsetDiag = { ratio: 0, gated: false, blocked: false, sinceOnsetSec: Infinity };
@@ -17,10 +18,7 @@ function frame(overrides: Partial<AnimFrame> = {}): AnimFrame {
     beatPulse: 0,
     hats: 0,
     lead: 0,
-    hatsOnset: false,
-    hatsPulse: 0,
-    hatsHit: 0,
-    hatsPeak: 0,
+    song: animSong(),
     onset: false,
     beatRatio: 0,
     beatPhase: 0,
@@ -37,8 +35,6 @@ function frame(overrides: Partial<AnimFrame> = {}): AnimFrame {
     lowOnset: false,
     midOnset: false,
     highOnset: false,
-    kickBand: 0,
-    kickBandIndex: 0,
     sectionIntensity: 0,
     dropPulse: 0,
     dropOnset: false,
@@ -80,9 +76,9 @@ describe("createRenderLatch", () => {
     latch.accumulate(frame({ lowOnset: true }));
     latch.accumulate(frame({ dropOnset: true }));
     latch.accumulate(frame({ highOnset: true }));
-    latch.accumulate(frame({ hatsOnset: true }));
+    latch.accumulate(frame({ song: animSong({ hatOnset: true }) }));
     const rendered = latch.consume(frame(), 20);
-    expect(rendered.hatsOnset).toBe(true);
+    expect(rendered.song.hatOnset).toBe(true);
     expect(rendered.lowOnset).toBe(true);
     expect(rendered.dropOnset).toBe(true);
     expect(rendered.highOnset).toBe(true);
@@ -102,6 +98,17 @@ describe("createRenderLatch", () => {
     const next = latch.consume(frame(), 30);
     expect(next.metronomeBeat).toBe(false);
     expect(next.metronomeBar).toBe(false);
+  });
+
+  it("a song edge survives skipped ticks and then clears", () => {
+    const latch = createRenderLatch();
+    latch.accumulate(frame({ song: animSong({ kickOnset: true, kickPulse: 1 }) })); // never renders
+    latch.accumulate(frame({ song: animSong({ chordOnset: true, kickPulse: 0.5 }) })); // neither does this
+    latch.accumulate(frame({ song: animSong({ keys: 0.7 }) }));
+    const rendered = latch.consume(frame({ song: animSong({ keys: 0.7 }) }), 20);
+    expect(rendered.song).toMatchObject({ kickOnset: true, chordOnset: true, clapOnset: false, hatOnset: false, keys: 0.7 });
+    latch.accumulate(frame());
+    expect(latch.consume(frame(), 30).song).toMatchObject({ kickOnset: false, chordOnset: false });
   });
 
   it("consume clears the pending set — the next consume starts clean", () => {

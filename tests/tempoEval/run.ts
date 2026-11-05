@@ -235,6 +235,7 @@ function followerFrame(buffer: JitterBuffer, targetMs: number, scratch: EngineRe
     hats: s.hats,
     lead: s.lead,
     engine,
+    song: null,
   };
 }
 

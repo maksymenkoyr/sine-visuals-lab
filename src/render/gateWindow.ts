@@ -16,7 +16,7 @@
  * and drives.ts imports both: importing a value from drives.ts here would
  * form a runtime cycle. This file imports nothing from drives.ts.
  */
-import { type AnimFrame, BEAT_PULSE_DECAY_PER_SEC } from "./animClock.ts";
+import { type AnimFrame, BEAT_PULSE_DECAY_PER_SEC, DROP_PULSE_DECAY_PER_SEC } from "./animClock.ts";
 import { GROUP_TUNING } from "./bandEnergy.ts";
 import { HIT_KNEE_DEFAULT, hitStandout, type HitLane } from "../audio/hitStrength.ts";
 import { SIGNALS, type SignalId } from "./signals.ts";
@@ -81,12 +81,6 @@ const GLIDE_TAU_MAX_SEC = 0.6;
 const FALL_TAU_MAX_SEC = 1.2;
 const RISE_TAU_SEC = 0.01;
 const SMOOTH_FIRST_TAU_MAX_SEC = 0.4;
-
-// matches src/render/sectionIntensity.ts's own DROP_PULSE_DECAY (kept in
-// step by hand — that module doesn't export it, same convention as
-// LINE_DRIVE_RELEASE_PER_SEC in drives.ts until animClock's own constant was
-// exported for GRID_PULSE_DECAY_PER_SEC).
-const DROP_PULSE_DECAY_PER_SEC = 2.5;
 
 function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
@@ -239,15 +233,15 @@ export function glideStep(y: number, target: number, s: number, dtSec: number): 
 
 /** Which Length row (AnimFrame.hitTail) stretches a hit-kind source's
  *  Graded release — the lane whose pulse edgeDecayPerSec below borrows
- *  its rate from. Null for Drop: its slow pulse (sectionIntensity.ts) is a
+ *  its rate from. Null for Drop: its slow pulse (animClock.ts's DROP_PULSE_DECAY_PER_SEC) is a
  *  section swell, not a hit's ring-out, so no Length row stretches it. */
 function edgeTailLane(id: SignalId): HitLane | null {
   switch (id) {
-    case "anim.lowOnset":
+    case "anim.kickOnset":
       return "low";
-    case "anim.midOnset":
+    case "anim.clapOnset":
+    case "anim.chordOnset":
       return "mid";
-    case "anim.highOnset":
     case "anim.hats":
       return "high";
     case "anim.dropOnset":
@@ -264,11 +258,11 @@ function edgeDecayPerSec(id: SignalId): number {
   switch (id) {
     case "feature.onset":
       return BEAT_PULSE_DECAY_PER_SEC;
-    case "anim.lowOnset":
+    case "anim.kickOnset":
       return GROUP_TUNING.low.pulseDecayRate;
-    case "anim.midOnset":
+    case "anim.clapOnset":
+    case "anim.chordOnset":
       return GROUP_TUNING.mid.pulseDecayRate;
-    case "anim.highOnset":
     case "anim.hats":
       return GROUP_TUNING.high.pulseDecayRate;
     case "anim.dropOnset":
@@ -294,30 +288,29 @@ export function parseHitHeight(raw: unknown): HitHeight | null {
   return raw === "loud" ? "graded" : null;
 }
 
-/** Hits whose detector reads how far the hit cleared its firing line, so a
- *  Graded height has something to grade; every other hit-kind entry (the
- *  metronome, Drop) is a bare trigger and Graded would only repeat Fixed. */
-const GRADED_EDGES: ReadonlySet<SignalId> = new Set<SignalId>(["feature.onset", "anim.lowOnset", "anim.midOnset", "anim.highOnset", "anim.hats"]);
+/** Hits that have a level to grade against, so a Graded height has something
+ *  to grade; every other hit-kind entry (the metronome, Drop) is a bare
+ *  trigger and Graded would only repeat Fixed. */
+const GRADED_EDGES: ReadonlySet<SignalId> = new Set<SignalId>(["feature.onset", "anim.kickOnset", "anim.clapOnset", "anim.hats", "anim.chordOnset"]);
 
 export function hasHitStrength(id: SignalId): boolean {
   return GRADED_EDGES.has(id);
 }
 
-/** Graded height's target on a hit-kind entry's edge: the stand-out of the
- *  hit that just fired (hitStrength.ts's hitStandout on the engine's ratio),
- *  the strongest of the lanes that fired for Any hit, and for Hats how high
- *  its peak went (already against its loudest recent hit). A bare trigger
- *  reads 1. */
+/** Graded height's target on a hit-kind entry's edge: for an instrument, its
+ *  own level jack's value at the edge (the level it was picked from); for Any
+ *  hit, the stand-out of the strongest lane that fired (hitStrength.ts's
+ *  hitStandout on the engine's ratio). A bare trigger reads 1. */
 function edgeGradedLevel(id: SignalId, anim: AnimFrame): number {
   switch (id) {
-    case "anim.lowOnset":
-      return hitStandout(anim.hits.low.ratio, HIT_KNEE_DEFAULT);
-    case "anim.midOnset":
-      return hitStandout(anim.hits.mid.ratio, HIT_KNEE_DEFAULT);
-    case "anim.highOnset":
-      return hitStandout(anim.hits.high.ratio, HIT_KNEE_DEFAULT);
+    case "anim.kickOnset":
+      return anim.low;
+    case "anim.clapOnset":
+      return anim.song.clapLevel;
     case "anim.hats":
-      return anim.hatsHit;
+      return anim.song.hatLevel;
+    case "anim.chordOnset":
+      return anim.song.chordLevel;
     case "feature.onset": {
       let best = 0;
       if (anim.lowOnset) best = Math.max(best, hitStandout(anim.hits.low.ratio, HIT_KNEE_DEFAULT));

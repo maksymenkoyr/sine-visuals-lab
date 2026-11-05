@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { BAND_SIGNALS, DIAL_SIGNALS, SIGNALS, bandSignalId, dialSignalId, type SignalId } from "../src/render/signals.ts";
-import { NUM_BANDS } from "../src/audio/types.ts";
+import { BAND_SIGNALS, DIAL_SIGNALS, RETIRED_SIGNALS, SIGNALS, bandSignalId, dialSignalId, levelOf, type SignalId } from "../src/render/signals.ts";
+import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
+import { songFrame } from "./songFrame.ts";
 import { MUSIC_DIALS } from "../src/render/musicProfile.ts";
 import type { AnimFrame } from "../src/render/animClock.ts";
 import { listScenes } from "../src/render/scene.ts";
@@ -31,9 +32,10 @@ describe("signals registry", () => {
       "section",
       "tempo",
       "hitAny",
-      "hitLow",
-      "hitMid",
-      "hitHigh",
+      "hitKick",
+      "hitClap",
+      "hitHats",
+      "hitChord",
       "surge",
       "wave",
       "lock",
@@ -42,9 +44,10 @@ describe("signals registry", () => {
       "low",
       "mid",
       "high",
-      "kick",
       "lead",
-      "hats",
+      "keys",
+      "playing",
+      "drop",
       ...DIAL_SIGNALS,
       ...BAND_SIGNALS,
     ]);
@@ -52,6 +55,53 @@ describe("signals registry", () => {
       if (!spec.monitor) continue;
       expect(knownCards.has(spec.monitor.card)).toBe(true);
       expect(knownRows.has(spec.monitor.row)).toBe(true);
+    }
+  });
+
+  it("each instrument is a hit reading its song pulse, with its level on the same Sound row", () => {
+    const song = {
+      kickPulse: 0.1, clapPulse: 0.2, hatPulse: 0.3, chordPulse: 0.4,
+      kickOnset: true, clapOnset: false, hatOnset: true, chordOnset: false,
+      clapLevel: 0.5, hatLevel: 0.6, chordLevel: 0.7,
+    };
+    const anim = { song, low: 0.8 } as unknown as AnimFrame;
+    const tracks = [
+      { hit: "anim.kickOnset", level: "anim.kickLevel", row: "hitKick", pulse: 0.1, edge: true, value: 0.8 },
+      { hit: "anim.clapOnset", level: "anim.clapLevel", row: "hitClap", pulse: 0.2, edge: false, value: 0.5 },
+      { hit: "anim.hats", level: "anim.hatsLevel", row: "hitHats", pulse: 0.3, edge: true, value: 0.6 },
+      { hit: "anim.chordOnset", level: "anim.chordLevel", row: "hitChord", pulse: 0.4, edge: false, value: 0.7 },
+    ] as const;
+    for (const t of tracks) {
+      const hit = SIGNALS[t.hit];
+      const level = SIGNALS[t.level];
+      expect(hit.kind).toBe("edge");
+      expect(hit.read({} as never, anim)).toBe(t.pulse);
+      expect(hit.edge!(anim)).toBe(t.edge);
+      expect(level.kind).toBe("level");
+      expect(level.read({} as never, anim)).toBe(t.value);
+      expect(hit.monitor).toEqual({ card: "sound", row: t.row });
+      expect(level.monitor).toEqual({ card: "sound", row: t.row });
+    }
+  });
+
+  it("Keys and Playing read the song layer's levels, Drop is an edge with its level on the same Song row", () => {
+    const anim = { song: { keys: 0.3, playing: 0.9, dropLevel: 0.6 }, dropPulse: 0.5, dropOnset: true } as unknown as AnimFrame;
+    expect(SIGNALS["anim.keys"].read({} as never, anim)).toBe(0.3);
+    expect(SIGNALS["anim.keys"].monitor).toEqual({ card: "stems", row: "keys" });
+    expect(SIGNALS["anim.playing"].read({} as never, anim)).toBe(0.9);
+    expect(SIGNALS["anim.playing"].monitor).toEqual({ card: "song", row: "playing" });
+    expect(SIGNALS["anim.dropOnset"].kind).toBe("edge");
+    expect(SIGNALS["anim.dropOnset"].read({} as never, anim)).toBe(0.5);
+    expect(SIGNALS["anim.dropOnset"].edge!(anim)).toBe(true);
+    expect(SIGNALS["anim.dropLevel"].read({} as never, anim)).toBe(0.6);
+    expect(SIGNALS["anim.dropOnset"].monitor).toEqual({ card: "song", row: "drop" });
+    expect(SIGNALS["anim.dropLevel"].monitor).toEqual({ card: "song", row: "drop" });
+  });
+
+  it("the retired band hits and Kick band are gone from the catalogue", () => {
+    for (const id of ["anim.lowOnset", "anim.midOnset", "anim.highOnset", "anim.kickBand"]) {
+      expect(Object.keys(SIGNALS)).not.toContain(id);
+      expect(SIGNALS[RETIRED_SIGNALS[id]!]).toBeDefined();
     }
   });
 
@@ -125,7 +175,7 @@ describe("signals registry", () => {
     expect(links.length).toBe(2);
 
     const idsOf = links.map((l) => (typeof l === "string" ? l : l.signal));
-    expect(idsOf.sort()).toEqual(["anim.lowOnset", "feature.onset"].sort());
+    expect(idsOf.sort()).toEqual(["anim.kickOnset", "feature.onset"].sort());
 
     // Bass hit (CUT_MODE.BASS) switches which signal is "active"; the two
     // links must disagree at every mode, not just report both as live.
@@ -140,5 +190,27 @@ describe("signals registry", () => {
     for (const id of Object.values(SOURCE_SIGNAL)) {
       expect(SIGNALS[id!]).toBeDefined();
     }
+  });
+
+  it("Level reads the frame's song loudness, and the band mean where it has no song reading", () => {
+    const base: FeatureFrame = {
+      time: 0,
+      bands: new Float32Array(NUM_BANDS),
+      energy: 0.3,
+      level: 0,
+      hats: 0,
+      lead: 0,
+      onset: false,
+      pulseOnset: false,
+      bpm: 0,
+      onsetPhase: 0,
+      engine: null,
+      song: null,
+    };
+    expect(levelOf(base)).toBe(0.3);
+    expect(SIGNALS["anim.energy"].read(base, {} as AnimFrame)).toBe(0.3);
+    const withSong = { ...base, song: songFrame({ loudness: 0.8 }) };
+    expect(levelOf(withSong)).toBe(0.8);
+    expect(SIGNALS["anim.energy"].read(withSong, {} as AnimFrame)).toBe(0.8);
   });
 });

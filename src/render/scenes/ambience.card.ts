@@ -71,10 +71,10 @@ export const SETTINGS: SceneSetting[] = [
     default: 1,
     // Punchy, transient-heavy material gets bigger blobs.
     auto: { attack: 0.3, pulse: 0.2 },
-    // Spawns a swell on a bass hit OR a beat hit, unconditionally (render())
+    // Spawns a swell on a kick OR a beat hit, unconditionally (render())
     // — no single catalogue source covers that union, so the default is
     // Scene. A drop's own burst is unconditional, independent of this choice.
-    drive: { default: "scene", sceneLabel: "Scene: bass or beat hit", sceneSources: ["anim.lowOnset", "feature.onset"], hit: { reactionLabel: "swell" } },
+    drive: { default: "scene", sceneLabel: "Scene: kick or beat hit", sceneSources: ["anim.kickOnset", "feature.onset"], hit: { reactionLabel: "swell" } },
   },
   {
     key: "swellSpeed",

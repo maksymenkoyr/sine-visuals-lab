@@ -82,6 +82,16 @@ The silence row's change is the boil the scene has by design.
   the boil (p95 14.6 vs median 13.2), so a hit now also widens the glints
   (`flash` in FRAG). After that, p95 rose to 19.7 against a median of 16.7.
 - 2026-10-24: Id, name, settings and gallery record moved to `src/render/scenes/chrome.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #804: Rush's drive on the flow speed moves with Level, which
+  now reads audio v6's Loudness (the song's loudness on a fixed decibel
+  scale), not the band mean.
+  - tune-real on a real song (around-the-world) then silence, before →
+    after: at full level change median 17.97 → 18.24, p95 21.32 → 21.38 on
+    the song, median 6.5 → 6.53, p95 7.35 → 7.34 in silence; hits a minute
+    410 → 432 on the song, 0 → 0 in silence; with the song 20 dB down change
+    median 17.78 → 17.83, p95 21.1 → 21.12 on the song, median 6.51 → 6.51,
+    p95 7.38 → 7.37 in silence; hits a minute 402 → 406 on the song, 0 → 0
+    in silence.
 
 ## Tuning notes
 

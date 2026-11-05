@@ -1,4 +1,4 @@
-import { HIT_KINDS, type HitKind, NUM_BANDS } from "../audio/types.ts";
+import { HIT_KINDS, type HitKind, NUM_BANDS, SONG_EDGES, SONG_LEVELS, type SongFrame } from "../audio/types.ts";
 import type { WaveEnvelope, WireEngine } from "./protocol.ts";
 
 export interface TimedFrame {
@@ -17,6 +17,9 @@ export interface TimedFrame {
   /** The sender's engine reading (protocol.ts's engine tail), its beat ages
    *  against this frame's roomTimeMs; null, or absent, when it sent none. */
   engine?: WireEngine | null;
+  /** The sender's song reading (protocol.ts's song tail); null, or absent,
+   *  when it sent none. */
+  song?: SongFrame | null;
   /** FeatureFrame.gateOff. */
   gateOff?: boolean;
 }
@@ -39,6 +42,10 @@ export interface Sample {
    *  tracker's state from the latest frame at or before the instant, its beat
    *  ages measured to the instant itself. null when the feed sends none. */
   engine: WireEngine | null;
+  /** The song reading at this instant: levels interpolated, each edge
+   *  one-shot (true on the one sample after it came due). null when the feed
+   *  sends none. */
+  song: SongFrame | null;
   /** FeatureFrame.gateOff of the frame at or before this instant. */
   gateOff: boolean;
 }
@@ -120,6 +127,7 @@ export class JitterBuffer {
   private lastFiredPulseRoomTimeMs = -Infinity;
   private bpm = 0;
   private readonly hits: Record<HitKind, HitQueue> = { kick: new HitQueue(), snare: new HitQueue(), hat: new HitQueue() };
+  private readonly songEdges: Record<(typeof SONG_EDGES)[number], HitQueue> = { kick: new HitQueue(), clap: new HitQueue(), hat: new HitQueue(), chord: new HitQueue() };
 
   // Reused across sampleAt() calls to avoid a per-render-tick allocation.
   // Safe because sampleAt() is called at most once per tick (from
@@ -144,7 +152,31 @@ export class JitterBuffer {
     beatAgoMs: 0,
     downbeatAgoMs: 0,
   };
-  private readonly scratchSample: Sample = { bands: this.scratchBands, energy: 0, bpm: 0, level: 0.5, hats: 0, lead: 0, wave: null, engine: null, gateOff: false };
+  private readonly scratchSong: SongFrame = {
+    kick: false,
+    clap: false,
+    hat: false,
+    chord: false,
+    clapLevel: 0,
+    hatLevel: 0,
+    chordLevel: 0,
+    keys: 0,
+    loudness: 0,
+    dropLevel: 0,
+    playing: 0,
+  };
+  private readonly scratchSample: Sample = {
+    bands: this.scratchBands,
+    energy: 0,
+    bpm: 0,
+    level: 0.5,
+    hats: 0,
+    lead: 0,
+    wave: null,
+    engine: null,
+    song: null,
+    gateOff: false,
+  };
 
   push(frame: TimedFrame): void {
     // Network delivery can reorder; insert in timestamp order rather than
@@ -161,6 +193,8 @@ export class JitterBuffer {
     if (frame.bpm > 0) this.bpm = frame.bpm;
     const e = frame.engine;
     if (e) for (const kind of HIT_KINDS) if (e[kind] > 0) this.hits[kind].add(frame.roomTimeMs, e[kind], frame.level);
+    const song = frame.song;
+    if (song) for (const edge of SONG_EDGES) if (song[edge]) this.songEdges[edge].add(frame.roomTimeMs, 1, frame.level);
   }
 
   sampleAt(targetMs: number): Sample | null {
@@ -192,6 +226,7 @@ export class JitterBuffer {
     this.scratchSample.lead = a.lead + (b.lead - a.lead) * t;
     this.scratchSample.wave = b.wave ?? null;
     this.scratchSample.engine = this.engineAt(a, b, t, targetMs);
+    this.scratchSample.song = this.songAt(a, b, t, targetMs);
     this.scratchSample.gateOff = a.gateOff === true;
     return this.scratchSample;
   }
@@ -205,6 +240,7 @@ export class JitterBuffer {
     this.scratchSample.lead = f.lead;
     this.scratchSample.wave = f.wave ?? null;
     this.scratchSample.engine = this.engineAt(f, f, 0, targetMs);
+    this.scratchSample.song = this.songAt(f, f, 0, targetMs);
     this.scratchSample.gateOff = f.gateOff === true;
     return this.scratchSample;
   }
@@ -236,6 +272,19 @@ export class JitterBuffer {
     out.updates = state.updates;
     out.beatAgoMs = targetMs - (stateMs - state.beatAgoMs);
     out.downbeatAgoMs = targetMs - (stateMs - state.downbeatAgoMs);
+    return out;
+  }
+
+  /** The song reading at `targetMs`, `t` of the way from frame `a` to `b`. */
+  private songAt(a: TimedFrame, b: TimedFrame, t: number, targetMs: number): SongFrame | null {
+    const sa = a.song ?? null;
+    const sb = b.song ?? null;
+    const from = sa ?? sb;
+    if (!from) return null;
+    const to = sb ?? from;
+    const out = this.scratchSong;
+    for (const key of SONG_LEVELS) out[key] = from[key] + (to[key] - from[key]) * t;
+    for (const edge of SONG_EDGES) out[edge] = this.songEdges[edge].take(targetMs) > 0;
     return out;
   }
 

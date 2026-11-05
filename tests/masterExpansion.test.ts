@@ -21,6 +21,7 @@ const FRAME: FeatureFrame = {
   bpm: 120,
   onsetPhase: 0,
   engine: null,
+  song: null,
 };
 const ANIM = createAnimClock().advance(DT, FRAME);
 const SPEC: SceneSetting = { key: "amt", label: "Amount", min: 0, max: 1, step: 0.05, default: 0, drive: { default: "anim.energy" } };

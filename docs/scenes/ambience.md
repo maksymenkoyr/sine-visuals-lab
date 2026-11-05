@@ -107,6 +107,32 @@ frames were pulled directly with `yt-dlp` and `ffmpeg` rather than through a
   | #682 | 9.28 | 12.33 | 3.28 | 9.07 |
 
   Little changed. The silence rows are the scene's own drift: no hit fires on silence in any build, so their spread isn't this change. No hit fired on silence.
+- 2026-10-30, #802: The swell's wire moved from the bass hit (or the beat
+  hit) to the Kick (or the beat hit).
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 9.09 → 10.54, p95 13.56 → 18.10; silence
+    median 2.52 → 2.47, p95 6.32 → 6.15; hits a minute on the song 410 →
+    406, in silence 0 → 0; main's bass / mid / treble lanes 144 / 138 /
+    242 a minute against kick / clap / hats / chord 110 / 40 / 278 / 130.
+- 2026-10-30, #803: the scene's drop reaction now fires when audio v6's
+  drop level crosses its mark (`DROP_MARK`, `src/render/animClock.ts`), not
+  on the Section trend's old drop detector.
+  - tune-real on a real song (around-the-world, 60 s) then silence, the
+    commit before → this change, one run each: song change median
+    8.99 → 8.23, p95 14.10 → 15.56; silence median
+    2.92 → 2.48, p95 7.61 → 6.10; hits a minute on the song
+    366 → 356, in silence 0 → 0; drops a minute on the song
+    0 → 1, in silence 0 → 0.
+- 2026-10-30, #804: The glow of the ground and of the flame move with Level, which now reads
+  audio v6's Loudness (the song's loudness on a fixed decibel scale), not the
+  band mean.
+  - tune-real on a real song (around-the-world) then silence, before →
+    after: at full level change median 8.73 → 8.78, p95 15.65 → 16.64 on the
+    song, median 3.32 → 2.54, p95 8.7 → 5.55 in silence; hits a minute 420 →
+    404 on the song, 0 → 0 in silence; with the song 20 dB down change
+    median 9.92 → 8.57, p95 14.96 → 17.42 on the song, median 2.69 → 2.89,
+    p95 6.97 → 7.63 in silence; hits a minute 402 → 396 on the song, 0 → 0
+    in silence.
 
 ## Tuning notes
 

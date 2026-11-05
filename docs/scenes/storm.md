@@ -182,6 +182,33 @@ Studied, not copied, across two look references:
   is unchanged.
 - 2026-10-11 — Sampler uniforms that were looked up with a raw `getUniformLocation` on every call now go through `GLProgram.setI`. Nothing visible changed: headless before/after shots look the same. (#349)
 - 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/storm.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #802: The strike and the lurch moved from the bass hit to the
+  Kick, the shimmer and sparks from the treble hit to the Hats, and the Dark
+  sections flicker from the mid and treble hits to the Chord and the Hats.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 6.36 → 6.50, p95 8.47 → 8.39; silence
+    median 0.20 → 0.20, p95 0.23 → 0.24; hits a minute on the song 418 →
+    428, in silence 0 → 0; main's bass / mid / treble lanes 154 / 128 /
+    242 a minute against kick / clap / hats / chord 114 / 44 / 282 / 124.
+- 2026-10-30, #803: the scene's drop reaction now fires when audio v6's
+  drop level crosses its mark (`DROP_MARK`, `src/render/animClock.ts`), not
+  on the Section trend's old drop detector.
+  - tune-real on a real song (around-the-world, 60 s) then silence, the
+    commit before → this change, one run each: song change median
+    6.19 → 6.24, p95 8.60 → 8.64; silence median
+    0.19 → 0.19, p95 0.23 → 0.23; hits a minute on the song
+    376 → 356, in silence 0 → 0; drops a minute on the song
+    0 → 2, in silence 0 → 0.
+- 2026-10-30, #804: Ambient glow's drive on the cloud's resting brightness
+  moves with Level, which now reads audio v6's Loudness (the song's loudness
+  on a fixed decibel scale), not the band mean.
+  - tune-real on a real song (around-the-world) then silence, before →
+    after: at full level change median 6.43 → 6.85, p95 8.55 → 9 on the
+    song, median 0.2 → 0.2, p95 0.24 → 0.23 in silence; hits a minute 402 →
+    402 on the song, 0 → 0 in silence; with the song 20 dB down change
+    median 6.72 → 6.39, p95 8.85 → 8.69 on the song, median 0.2 → 0.2, p95
+    0.24 → 0.23 in silence; hits a minute 414 → 418 on the song, 0 → 0 in
+    silence.
 
 ## Tuning notes
 

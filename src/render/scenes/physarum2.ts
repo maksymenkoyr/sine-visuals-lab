@@ -52,6 +52,8 @@ import {
   type StrainDriveValues,
   type StrainRawValues,
 } from "./physarum2Strains.ts";
+import type { FeatureFrame } from "../../audio/types.ts";
+import { levelOf } from "../signals.ts";
 export { ATTRACT_ROWS };
 
 // Physarum 2: a second slime-mould scene, after Michael Fogleman's
@@ -384,7 +386,7 @@ export function createCrawlPumpState(): CrawlPumpState {
 }
 
 /** Advances Speed pump's velocity in place: `input` (0..1, whatever the
- *  "speedPump" driver is wired to — a bass hit's decaying envelope by default)
+ *  "speedPump" driver is wired to — a kick's decaying envelope by default)
  *  accelerates `vel` by `CRAWL_PUMP_ACCEL * amount * input * dtSec`, then `vel`
  *  decays exponentially toward 0 with time constant CRAWL_PUMP_RELEASE_SEC and
  *  is capped at CRAWL_PUMP_VEL_CAP. `amount` is the Speed pump slider (0..1);
@@ -1873,11 +1875,11 @@ function createPhysarum2Scene(): Scene {
    *  these bypass uploadCommonUniforms) and `drives.value(key, sceneDefault,
    *  rest?)` (the JS twin of the generated `<key>Drive(sceneDefault)` GLSL
    *  helper — see drives.ts's header), one strain at a time. */
-  function resolveStrains(dt: number, frame: { energy: number }, anim: { low: number; mid: number; high: number; beatPulse: number }, drives: Parameters<Scene["render"]>[5]): void {
+  function resolveStrains(dt: number, frame: FeatureFrame, anim: { low: number; mid: number; high: number; beatPulse: number }, drives: Parameters<Scene["render"]>[5]): void {
     const d = drives ?? PASSTHROUGH_DRIVES;
     const rivalry = resolveSceneSetting(ID, settingFor("rivalry"));
     for (let k = 0; k < SPECIES_COUNT; k++) {
-      const bandDefault = k === 0 ? anim.low : k === 1 ? anim.mid : k === 2 ? anim.high : frame.energy;
+      const bandDefault = k === 0 ? anim.low : k === 1 ? anim.mid : k === 2 ? anim.high : levelOf(frame);
       const raw: StrainRawValues = {
         nutrient: resolveSceneSetting(ID, nutrientSettings[k]!),
         excite: resolveSceneSetting(ID, exciteSettings[k]!),
@@ -2081,12 +2083,12 @@ function createPhysarum2Scene(): Scene {
       // stepper is fixed-rate, not a GLSL uniform.
       const d = drives ?? PASSTHROUGH_DRIVES;
       const pumpSpec = settingFor("speedPump");
-      advanceCrawlPump(crawlPump, dt, d.value(pumpSpec.key, anim.lowPulse), resolveSceneSetting(ID, pumpSpec));
+      advanceCrawlPump(crawlPump, dt, d.value(pumpSpec.key, anim.song.kickPulse), resolveSceneSetting(ID, pumpSpec));
       const boostSpec = settingFor("speedBoost");
       const stepRate = crawlStepRate({
         speed: resolveSceneSetting(ID, settingFor("speed")),
         boost: resolveSceneSetting(ID, boostSpec),
-        level: d.value(boostSpec.key, frame.energy),
+        level: d.value(boostSpec.key, levelOf(frame)),
         pumpVel: crawlPump.vel,
       });
       const { steps, acc } = stepAccumulator(stepAcc, dt, stepRate);

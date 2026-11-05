@@ -1,6 +1,6 @@
 import { WORKER_ORIGIN } from "./config.ts";
 import { encodeFeatureFrame, decodeFeatureFrame, toWireEngine, type EncodableFrame, type WaveEnvelope, type WireEngine } from "./protocol.ts";
-import type { EngineReading } from "../audio/types.ts";
+import type { EngineReading, SongFrame } from "../audio/types.ts";
 import { ClockSync } from "./clock.ts";
 import { JitterBuffer, type TimedFrame } from "./jitterBuffer.ts";
 import { SlewLimiter } from "./slewLimiter.ts";
@@ -76,6 +76,9 @@ export interface VisualSample {
    *  beat times on `timeSec`'s timeline; null when the feed sends none.
    *  Reused between calls, like the rest of the sample. */
   engine: EngineReading | null;
+  /** The feed's song reading at this instant (JitterBuffer.sampleAt); null
+   *  when the feed sends none. Reused between calls, like the rest of the sample. */
+  song: SongFrame | null;
   /** FeatureFrame.gateOff (JitterBuffer.sampleAt). */
   gateOff: boolean;
 }
@@ -420,7 +423,7 @@ abstract class RoomConnectionBase {
     const engine = frame.engine ?? null;
     this.pushFrame({ ...frame, roomTimeMs, wave: null, engine: engine ? toWireEngine(engine, frame.time ?? 0) : null });
 
-    const d = this.decimator.offer(roomTimeMs, frame.onset, frame.pulseOnset, wave, engine, frame.level);
+    const d = this.decimator.offer(roomTimeMs, frame.onset, frame.pulseOnset, wave, engine, frame.level, frame.song ?? null);
     if (!d.send) return;
     // The latches are cleared even when nothing goes out (socket not open, no
     // follower), so a stale hit isn't replayed on reconnect or when a follower
@@ -428,7 +431,7 @@ abstract class RoomConnectionBase {
     const view = this.rosterView;
     if (this.keyed && view && view.records.has(this.deviceId) && followersOf(view.records, this.deviceId).length === 0) return;
     if (!this.keyed && this.rosterHasRenderer === false) return;
-    this.sendRaw(encodeFeatureFrame({ ...frame, level: Math.max(frame.level, d.hitLevel), onset: d.onset, pulseOnset: d.pulseOnset, engine: d.engine }, roomTimeMs, d.wave));
+    this.sendRaw(encodeFeatureFrame({ ...frame, level: Math.max(frame.level, d.hitLevel), onset: d.onset, pulseOnset: d.pulseOnset, engine: d.engine, song: d.song }, roomTimeMs, d.wave));
   }
 
   /** Forget every frame this device has buffered or is about to send, as if
@@ -517,6 +520,7 @@ abstract class RoomConnectionBase {
       lead: s.lead,
       wave: s.wave,
       engine: s.engine ? this.sampleEngine(s.engine, timeSec) : null,
+      song: s.song,
       gateOff: s.gateOff,
     };
   }

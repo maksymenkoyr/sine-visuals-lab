@@ -15,11 +15,12 @@ import {
   smoothingRateScale,
 } from "../src/audio/sensitivity.ts";
 import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
+import { songFrame } from "./songFrame.ts";
 
 function frame(bands: number[], energy: number): FeatureFrame {
   const arr = new Float32Array(NUM_BANDS);
   bands.forEach((v, i) => (arr[i] = v));
-  return { time: 1.5, bands: arr, energy, onset: true, pulseOnset: true, bpm: 120, onsetPhase: 0.3, level: 0.6, hats: 0, lead: 0, engine: null };
+  return { time: 1.5, bands: arr, energy, onset: true, pulseOnset: true, bpm: 120, onsetPhase: 0.3, level: 0.6, hats: 0, lead: 0, engine: null, song: null };
 }
 
 describe("smoothingRateScale", () => {
@@ -190,5 +191,13 @@ describe("applySensitivity", () => {
     // musicProfile.ts), so shaping it here would feed the gain stage its
     // own output.
     expect(out.level).toBe(f.level);
+  });
+
+  it("shapes the song reading's loudness as it shapes energy, and passes the rest of the song through", () => {
+    const f = { ...frame([0.5], 0.4), song: songFrame({ loudness: 0.4, keys: 0.3, kick: true }) };
+    const out = applySensitivity(f, 1.6, 1.4);
+    expect(out.song?.loudness).toBeCloseTo(out.energy, 6);
+    expect(out.song?.keys).toBe(0.3);
+    expect(out.song?.kick).toBe(true);
   });
 });

@@ -28,7 +28,7 @@ import { FLOAT_HASH_GLSL } from "../noiseHash.ts";
 //    elapsed time — the reference's scripted fade-in from a flat grating)
 //    and by the current energy, with `beatDip` briefly dipping it on each
 //    beat — the reference's own early contrast pulses.
-//  - `blackout` is the chance a bass hit (never an ordinary broadband onset)
+//  - `blackout` is the chance a kick (never an ordinary broadband onset)
 //    also fires the whole-field half-period phase jump the reference's rare
 //    dark frames show; a section drop always fires it (advanceBlackout).
 //  - `curtain` is how readily a sustained quiet passage — sectionIntensity
@@ -94,7 +94,7 @@ const ENERGY_DEPTH_FLOOR = 0.6; // share of Warp depth kept at zero energy; the 
 // Blackout (a whole-field half-period phase jump) ---------------------------
 const BLACKOUT_SEC = 0.05; // how long the phase jump holds before releasing
 const BLACKOUT_PHASE_OFFSET = 0.5; // half a period — flips every gap to ink and every ink run to a gap
-const LOW_ONSET_BLACKOUT_CHANCE = 0.015; // per-lowOnset base chance at blackout=1, kept small so these stay as rare as the reference's
+const KICK_ONSET_BLACKOUT_CHANCE = 0.015; // per-kickOnset base chance at blackout=1, kept small so these stay as rare as the reference's
 
 // Curtain (quiet-passage reveal) --------------------------------------------
 const QUIET_HOLD_SEC = 4; // how long sectionIntensity must stay under threshold before the curtain starts rising
@@ -301,9 +301,9 @@ export function createBlackoutState(): BlackoutState {
 }
 
 /**
- * A drop always fires the phase jump; an ordinary lowOnset fires it with a
+ * A drop always fires the phase jump; an ordinary kickOnset fires it with a
  * small chance scaled by `blackout` (0 disables it outright, without ever
- * consulting `rng`) — see LOW_ONSET_BLACKOUT_CHANCE. `dropOnset`/`lowOnset`
+ * consulting `rng`) — see KICK_ONSET_BLACKOUT_CHANCE. `dropOnset`/`kickOnset`
  * are read as the already edge-latched booleans animClock.ts hands scenes,
  * the same contract caustics.ts's ripple pool uses for its own beat-triggered
  * rings — no re-detection here. `rng` defaults to Math.random and exists
@@ -314,11 +314,11 @@ export function advanceBlackout(
   st: BlackoutState,
   dtSec: number,
   dropOnset: boolean,
-  lowOnset: boolean,
+  kickOnset: boolean,
   blackout: number,
   rng: () => number = Math.random,
 ): number {
-  const fire = dropOnset || (lowOnset && blackout > 0 && rng() < blackout * LOW_ONSET_BLACKOUT_CHANCE);
+  const fire = dropOnset || (kickOnset && blackout > 0 && rng() < blackout * KICK_ONSET_BLACKOUT_CHANCE);
   if (fire) st.timer = BLACKOUT_SEC;
   else st.timer = Math.max(0, st.timer - dtSec);
   return st.timer > 0 ? BLACKOUT_PHASE_OFFSET : 0;
@@ -512,7 +512,7 @@ export const moireScene = createFullscreenScene(card.id, card.name, FRAG, {
       const seed = advanceFlicker(flicker, anim.dtSec, getSetting("flicker"), drift);
       const depthEnv =
         introRamp(elapsedSec) * (ENERGY_DEPTH_FLOOR + (1 - ENERGY_DEPTH_FLOOR) * frame.energy) * (1 - getSetting("beatDip") * drives.value("beatDip", anim.beatPulse));
-      const blackoutPhase = advanceBlackout(blackout, anim.dtSec, anim.dropOnset, drives.fired("blackout", anim.lowOnset), getSetting("blackout"));
+      const blackoutPhase = advanceBlackout(blackout, anim.dtSec, anim.dropOnset, drives.fired("blackout", anim.song.kickOnset), getSetting("blackout"));
       const curtainLevel = advanceCurtain(curtain, anim.dtSec, drives.value("curtain", anim.sectionIntensity), getSetting("curtain"), anim.dropOnset);
       const wanderOut = advanceWander(
         wander,

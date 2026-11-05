@@ -1,4 +1,4 @@
-import { NUM_BANDS, type FeatureFrame } from "./types.ts";
+import { NUM_BANDS, type FeatureFrame, type SongFrame } from "./types.ts";
 
 /**
  * Sensitivity, Expansion and Smoothing: three visual stages on top of
@@ -93,11 +93,25 @@ export function smoothingRateScale(smoothing: number): number {
 
 // Reused across calls to avoid a per-frame allocation in the render loop.
 const scratchBands = new Float32Array(NUM_BANDS);
+const scratchSong: SongFrame = {
+  kick: false,
+  clap: false,
+  hat: false,
+  chord: false,
+  clapLevel: 0,
+  hatLevel: 0,
+  chordLevel: 0,
+  keys: 0,
+  loudness: 0,
+  dropLevel: 0,
+  playing: 0,
+};
 
 /**
  * Applies the sensitivity gain and then the expansion curve to a frame's
- * [0,1] band/energy values. onset/pulseOnset/bpm/onsetPhase/time/level/hats/
- * lead/engine pass through untouched — both are a visual gain, not a beat-detection
+ * [0,1] band/energy values, and to the song reading's loudness, since Level
+ * reads it (src/render/signals.ts's levelOf). onset/pulseOnset/bpm/onsetPhase/
+ * time/level/hats/lead/engine and the rest of the song reading pass through untouched — both are a visual gain, not a beat-detection
  * threshold, and `level` specifically must stay the raw, un-gained reading:
  * it's auto mode's input signal for driving these very sliders (see
  * musicProfile.ts), so shaping it here would feed the gain stage its own
@@ -122,5 +136,12 @@ export function applySensitivity(frame: FeatureFrame, sensitivity: number, expan
     hats: frame.hats,
     lead: frame.lead,
     engine: frame.engine,
+    song: frame.song ? shapeSongLoudness(frame.song, sensitivity, expansion) : null,
   };
+}
+
+function shapeSongLoudness(song: SongFrame, sensitivity: number, expansion: number): SongFrame {
+  Object.assign(scratchSong, song);
+  scratchSong.loudness = shapeExpansion(shapeLevel(song.loudness, sensitivity), expansion);
+  return scratchSong;
 }

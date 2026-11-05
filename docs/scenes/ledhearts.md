@@ -124,6 +124,32 @@ has by design.
   | #682 | 19.17 | 22.83 | 7.95 | 9.27 |
 
   Back to the old lanes' motion. No hit fired on silence.
+- 2026-10-30, #802: Push moved from the bass hit to the Kick and Spin from
+  the mid hit to the Chord.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 17.87 → 16.57, p95 21.61 → 21.26; silence
+    median 7.97 → 7.95, p95 9.19 → 9.21; hits a minute on the song 426 →
+    416, in silence 0 → 0; main's bass / mid / treble lanes 142 / 138 /
+    242 a minute against kick / clap / hats / chord 106 / 48 / 282 / 124.
+- 2026-10-30, #803: the scene's drop reaction now fires when audio v6's
+  drop level crosses its mark (`DROP_MARK`, `src/render/animClock.ts`), not
+  on the Section trend's old drop detector.
+  - tune-real on a real song (around-the-world, 60 s) then silence, the
+    commit before → this change, one run each: song change median
+    16.18 → 16.33, p95 21.45 → 21.91; silence median
+    8.00 → 8.01, p95 9.24 → 9.20; hits a minute on the song
+    358 → 365, in silence 0 → 0; drops a minute on the song
+    0 → 2, in silence 0 → 0.
+- 2026-10-30, #804: Level rush's drive on the zoom speed moves with Level,
+  which now reads audio v6's Loudness (the song's loudness on a fixed
+  decibel scale), not the band mean.
+  - tune-real on a real song (around-the-world) then silence, before →
+    after: at full level change median 16.7 → 18.32, p95 22.01 → 23.89 on
+    the song, median 7.96 → 7.93, p95 9.3 → 9.16 in silence; hits a minute
+    406 → 412 on the song, 0 → 0 in silence; with the song 20 dB down change
+    median 16.88 → 16.31, p95 21.71 → 21.52 on the song, median 7.95 → 7.93,
+    p95 9.19 → 9.22 in silence; hits a minute 392 → 402 on the song, 0 → 0
+    in silence.
 
 ## Tuning notes
 

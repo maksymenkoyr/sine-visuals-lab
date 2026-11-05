@@ -64,6 +64,32 @@ hear run but ~106.7 on the ref-shoot run.
 - 2026-10-26 — The straight glide became an explorer on foot (`explorer.ts`): it walks a gently curving path with a step bob, eases to a stop, looks one way, the other and up into the rain, then walks off where it last looked. The dancer stays ahead of where it walks, so a look round sweeps off the dancer and back. One new setting, Speed, scales the explorer's clock and the fall clock together; Glide is gone (an old look's `glide` is ignored). `tools/tune-real.mjs`, Around the World then silence, 30 s, change med / p95: main 2.60 / 3.40 song, 1.62 / 2.11 silence (1.6x); explorer 3.96 / 5.10 song, 2.92 / 3.88 silence (1.3x); hits/min unchanged (406 vs 402, 0 in silence). The walk adds steady motion under both, so the music's share of the motion is smaller.
 - 2026-10-26 — User: head movement "a bit more interesting", "more verticality". The head now turns to a gaze point, holds it, and turns to the next (a critically damped spring with a capped turn rate) instead of smooth sine sweeps; it tips its roll now and then and sways with each step. Look rounds reach high into the rain and down below; a new rise leg floats up or sinks through the columns while gazing that way, and walks roll over low hills. Tilt plus the explorer's pitch is capped (`PITCH_MAX`). `tools/tune-real.mjs`, same song and length: 3.73 / 4.89 song, 3.09 / 4.22 silence (1.2x); hits/min 408, 0 in silence.
 - 2026-10-26 — User: "walk straight evenly all the time … faster or slower but no stops or interruptions". The explorer never stops now: each leg has its own pace (`WALK_SPEED`, `LOOK_SPEED`, `RISE_SPEED`) and the walk glides between them (`PACE_TAU`); a look round strolls on and ends looking ahead, so the heading no longer snaps to where it last looked. `tools/tune-real.mjs`, same song and length: 3.53 / 4.82 song, 2.87 / 4.11 silence (1.2x); hits/min 404, 0 in silence.
+- 2026-10-30, #802: Downpour and Hit glow moved from the bass hit to the
+  Kick.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 3.58 → 3.64, p95 4.76 → 4.93; silence
+    median 2.83 → 2.79, p95 4.00 → 3.99; hits a minute on the song 406 →
+    422, in silence 0 → 0; main's bass / mid / treble lanes 152 / 126 /
+    242 a minute against kick / clap / hats / chord 120 / 48 / 278 / 120.
+- 2026-10-30, #803: the scene's drop reaction now fires when audio v6's
+  drop level crosses its mark (`DROP_MARK`, `src/render/animClock.ts`), not
+  on the Section trend's old drop detector.
+  - tune-real on a real song (around-the-world, 60 s) then silence, the
+    commit before → this change, one run each: song change median
+    3.66 → 3.54, p95 4.94 → 4.98; silence median
+    2.65 → 2.68, p95 3.78 → 3.77; hits a minute on the song
+    372 → 380, in silence 0 → 0; drops a minute on the song
+    0 → 2, in silence 0 → 0.
+- 2026-10-30, #804: Rush's drive on the fall speed moves with Level, which
+  now reads audio v6's Loudness (the song's loudness on a fixed decibel
+  scale), not the band mean.
+  - tune-real on a real song (around-the-world) then silence, before →
+    after: at full level change median 3.75 → 3.71, p95 5.34 → 5.26 on the
+    song, median 2.79 → 2.8, p95 3.92 → 4.09 in silence; hits a minute 422 →
+    418 on the song, 0 → 0 in silence; with the song 20 dB down change
+    median 3.71 → 3.6, p95 5.21 → 5.15 on the song, median 2.81 → 2.77, p95
+    4.01 → 4.03 in silence; hits a minute 414 → 408 on the song, 0 → 0 in
+    silence.
 
 ## Known issues and next steps
 

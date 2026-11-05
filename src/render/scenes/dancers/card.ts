@@ -81,7 +81,7 @@ export const SETTINGS: SceneSetting[] = [
   {
     key: "jaw",
     label: "Jaw chatter",
-    description: "How far bass hits open the jaw.",
+    description: "How far kicks open the jaw.",
     group: "Motion",
     min: 0,
     max: 1,
@@ -89,9 +89,9 @@ export const SETTINGS: SceneSetting[] = [
     default: 0.5,
     advanced: true,
     auto: { brightness: -0.25, attack: 0.2 },
-    // clocks.lowPulse directly (choreo.ts's mulBoneEuler jaw term) — a
-    // plain Bass hit default.
-    drive: { default: "anim.lowOnset" },
+    // clocks.kickPulse directly (choreo.ts's mulBoneEuler jaw term) — a
+    // plain Kick default.
+    drive: { default: "anim.kickOnset" },
   },
   {
     key: "skin",
@@ -154,11 +154,11 @@ export const SETTINGS: SceneSetting[] = [
     default: 0.4,
     auto: { attack: 0.3, pulse: 0.15, tempo: -0.2 },
     // Two different signals at two different sites — dolly/tilt read the
-    // beat, roll reads the bass — so the default is Scene.
+    // beat, roll reads the kick — so the default is Scene.
     drive: {
       default: "scene",
-      sceneLabel: "Scene: beat (dolly/tilt) and bass hit (roll)",
-      sceneSources: ["feature.onset", "anim.lowOnset"],
+      sceneLabel: "Scene: beat (dolly/tilt) and kick (roll)",
+      sceneSources: ["feature.onset", "anim.kickOnset"],
     },
   },
 ];

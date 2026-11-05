@@ -28,6 +28,7 @@ import { createFluidSim, detectSimFormat, MIRROR_OFF, sameSimSize, simResolution
 import { buildDisplayFrag } from "./glsl.ts";
 import { advanceLift, BURNERS, burnerAt, createLiftState, STIRRERS, stirrerAt, swellAt, swellRate } from "./motion.ts";
 import { card, SETTINGS } from "./card.ts";
+import { levelOf } from "../../signals.ts";
 
 const ID = card.id;
 
@@ -121,7 +122,7 @@ function createEmberScene(): Scene {
 
       const dt = Math.min(Math.max(anim.dtSec, 0), MAX_DT_SEC);
       // Called every frame, unconditionally: fired() must see every frame.
-      const fired = drives.fired("lift", anim.lowOnset);
+      const fired = drives.fired("lift", anim.song.kickOnset);
       const lvl = advanceLift(lift, dt, fired ? drives.hitSize("lift") * setting("lift") : 0);
       swellPhase = (swellPhase + dt * swellRate(setting("swellBars"), anim.tempoBpm, anim.tempoLock)) % 1;
       const swell = swellAt(swellPhase);
@@ -151,7 +152,7 @@ function createEmberScene(): Scene {
       // At rest the fluid churns as much as the silent reference does; louder
       // sections add to it.
       const churn = setting("churn") * (0.9 + 0.5 * drives.value("churn", anim.sectionIntensity));
-      const pace = 1 + 0.3 * drives.value("rise", frame.energy);
+      const pace = 1 + 0.3 * drives.value("rise", levelOf(frame));
       const steps = warmSec < WARM_SEC ? WARM_STEPS : 1;
       warmSec += dt;
       for (let n = 0; n < steps; n++) {

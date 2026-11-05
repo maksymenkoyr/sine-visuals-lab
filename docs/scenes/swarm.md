@@ -181,6 +181,32 @@ onsets (106 in the window, ≈6.6/s):
   default, is unchanged. Re-collapse is flat-only: a re-collapse either
   starts or it doesn't.
 - 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/swarm/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #802: Scatter, Beat flash and Thump moved from the bass hit to
+  the Kick.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 1.69 → 1.46, p95 3.61 → 3.56; silence
+    median 0.25 → 0.24, p95 1.77 → 1.73; hits a minute on the song 406 →
+    396, in silence 0 → 0; main's bass / mid / treble lanes 146 / 126 /
+    242 a minute against kick / clap / hats / chord 118 / 48 / 270 / 118.
+- 2026-10-30, #803: the scene's drop reaction now fires when audio v6's
+  drop level crosses its mark (`DROP_MARK`, `src/render/animClock.ts`), not
+  on the Section trend's old drop detector.
+  - tune-real on a real song (around-the-world, 60 s) then silence, the
+    commit before → this change, one run each: song change median
+    1.34 → 1.53, p95 3.10 → 4.06; silence median
+    0.11 → 0.11, p95 1.28 → 1.23; hits a minute on the song
+    368 → 368, in silence 0 → 0; drops a minute on the song
+    0 → 2, in silence 0 → 0.
+- 2026-10-30, #804: Heat's drive moves with Level, which now reads audio
+  v6's Loudness (the song's loudness on a fixed decibel scale), not the band
+  mean.
+  - tune-real on a real song (around-the-world) then silence, before →
+    after: at full level change median 1.66 → 1.57, p95 3.95 → 3.98 on the
+    song, median 0.25 → 0.24, p95 1.72 → 1.8 in silence; hits a minute 420 →
+    420 on the song, 0 → 0 in silence; with the song 20 dB down change
+    median 1.47 → 1.7, p95 3.39 → 3.92 on the song, median 0.24 → 0.24, p95
+    1.75 → 1.74 in silence; hits a minute 414 → 416 on the song, 0 → 0 in
+    silence.
 
 ## Tuning notes
 

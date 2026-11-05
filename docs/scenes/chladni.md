@@ -766,6 +766,32 @@ hexagon and decagon.
   | #682 | 13.49 | 17.07 | 2.07 | 2.57 |
 
   A little livelier than either older build. The silence rows are the scene's own motion: no hit fires on silence in any build. No hit fired on silence.
+- 2026-10-30, #802: The shake moved from the bass hit to the Kick, and
+  Glow's hit part from the treble hit to the Hats.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 12.28 → 12.17, p95 16.44 → 16.72; silence
+    median 3.96 → 2.12, p95 4.79 → 2.71; hits a minute on the song 418 →
+    414, in silence 0 → 0; main's bass / mid / treble lanes 150 / 138 /
+    242 a minute against kick / clap / hats / chord 114 / 48 / 280 / 122.
+- 2026-10-30, #803: the scene's drop reaction now fires when audio v6's
+  drop level crosses its mark (`DROP_MARK`, `src/render/animClock.ts`), not
+  on the Section trend's old drop detector.
+  - tune-real on a real song (around-the-world, 60 s) then silence, the
+    commit before → this change, one run each: song change median
+    10.47 → 12.81, p95 14.78 → 23.42; silence median
+    3.27 → 1.70, p95 4.40 → 2.40; hits a minute on the song
+    364 → 370, in silence 0 → 0; drops a minute on the song
+    0 → 2, in silence 0 → 0.
+- 2026-10-30, #804: Zoom out's drive on the zoom speed and Vibration's drive
+  on the plate shake moves with Level, which now reads audio v6's Loudness
+  (the song's loudness on a fixed decibel scale), not the band mean.
+  - tune-real on a real song (around-the-world) then silence, before →
+    after: at full level change median 12.98 → 13.48, p95 23.59 → 24.25 on
+    the song, median 3.28 → 3.99, p95 3.92 → 5.1 in silence; hits a minute
+    412 → 408 on the song, 0 → 0 in silence; with the song 20 dB down change
+    median 14.1 → 13.03, p95 23.55 → 22.79 on the song, median 4.09 → 4.23,
+    p95 5.1 → 5.24 in silence; hits a minute 408 → 408 on the song, 0 → 0 in
+    silence.
 
 ## Tuning notes
 

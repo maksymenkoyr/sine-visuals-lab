@@ -88,7 +88,7 @@ export const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.5,
-    drive: { default: "anim.lowOnset", hit: { reactionLabel: "downpour" } },
+    drive: { default: "anim.kickOnset", hit: { reactionLabel: "downpour" } },
   },
   {
     key: "flicker",
@@ -120,7 +120,7 @@ export const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.5,
-    drive: { default: "anim.lowOnset" },
+    drive: { default: "anim.kickOnset" },
   },
   {
     key: "colour",

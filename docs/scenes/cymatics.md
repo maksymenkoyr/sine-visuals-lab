@@ -43,6 +43,14 @@ modeling (Chladni plate modes) but no video or image was studied.
   literal band count; it is now `NUM_BANDS` (the `uBands` array was already
   sized from it), and the header no longer counts bands.
 - 2026-10-24 — Id, name and gallery record moved to `src/render/scenes/cymatics.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #804: The width of the still lines moves with Level, which now reads audio v6's
+  Loudness (the song's loudness on a fixed decibel scale), not the band mean.
+  - tune-real on a real song (around-the-world) then silence, before →
+    after: at full level change median 1.7 → 1.73, p95 2.55 → 2.67 on the
+    song, median 0 → 0, p95 0 → 0 in silence; hits a minute 408 → 402 on the
+    song, 0 → 0 in silence; with the song 20 dB down change median 1.68 →
+    1.61, p95 2.53 → 2.54 on the song, median 0 → 0, p95 0 → 0 in silence;
+    hits a minute 408 → 408 on the song, 0 → 0 in silence.
 
 ## Tuning notes
 

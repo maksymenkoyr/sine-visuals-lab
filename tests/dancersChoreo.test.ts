@@ -32,7 +32,7 @@ function run(
       barPhase: (beats / 4) % 1,
       tempoLock: 1,
       beatPulse: Math.exp(-6 * (beatPhase * 60) / bpm),
-      lowPulse: 0,
+      kickPulse: 0,
       sectionIntensity: 0.5,
       dropPulse: 0,
       flowPhase: t * 1.2,
@@ -59,7 +59,7 @@ describe("dancers choreographer", () => {
     framesA.forEach((a, i) => expect([...a]).toEqual([...framesB[i]]));
     // And that free dance is sway itself once the slew has settled.
     const expected = createPose();
-    sway({ beatPhase: 0, barPhase: 0, tempoLock: 0, beatPulse: 0, lowPulse: 0, sectionIntensity: 1, dropPulse: 0, flowPhase: (3 * 60 - 1) * DT * 1.2, timeSec: 0, bpm: 128, pulse: 0.5 }, PARAMS.energy, expected);
+    sway({ beatPhase: 0, barPhase: 0, tempoLock: 0, beatPulse: 0, kickPulse: 0, sectionIntensity: 1, dropPulse: 0, flowPhase: (3 * 60 - 1) * DT * 1.2, timeSec: 0, bpm: 128, pulse: 0.5 }, PARAMS.energy, expected);
     const lastA = framesA[framesA.length - 1];
     for (let k = 0; k < expected.length; k++) expect(lastA[k]).toBeCloseTo(expected[k], 1);
   });
@@ -99,7 +99,7 @@ describe("dancers choreographer", () => {
       (t) => {
         if (Math.abs(t - 6) < DT / 2) drop = 1;
         drop *= Math.exp(-DT * 2.5);
-        return { sectionIntensity: t < 7 ? t / 7 : 1 - (t - 7) / 7, dropPulse: drop, lowPulse: t > 9 && t < 9.2 ? 1 : 0 };
+        return { sectionIntensity: t < 7 ? t / 7 : 1 - (t - 7) / 7, dropPulse: drop, kickPulse: t > 9 && t < 9.2 ? 1 : 0 };
       },
       PARAMS,
       (_t, f) => {
@@ -133,7 +133,7 @@ describe("dancers choreographer", () => {
   });
 
   it("keeps the camera still when bob is 0, however hard the beat hits", () => {
-    const last = run(4, () => ({ beatPulse: 1, lowPulse: 1 }), { ...PARAMS, bob: 0 });
+    const last = run(4, () => ({ beatPulse: 1, kickPulse: 1 }), { ...PARAMS, bob: 0 });
     expect(last.camDolly).toBe(0);
     expect(last.camTilt).toBe(0);
     expect(last.camRoll).toBe(0);

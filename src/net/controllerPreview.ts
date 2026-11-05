@@ -18,7 +18,7 @@
 import type { ConnState, VisualSample } from "./room.ts";
 
 /** The sample with the audio taken out: no level, no bands, no waveform, no
- *  onsets, no engine reading and no tempo (a bpm of zero is "unknown" to the
+ *  onsets, no engine or song reading and no tempo (a bpm of zero is "unknown" to the
  *  beat grid), time left running. */
 export function silentSample(s: VisualSample): VisualSample {
   return {
@@ -34,6 +34,7 @@ export function silentSample(s: VisualSample): VisualSample {
     lead: 0,
     wave: null,
     engine: null,
+    song: null,
     gateOff: s.gateOff,
   };
 }

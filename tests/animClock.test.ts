@@ -1,11 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { createAnimClock, type AnimClock, type AnimFrame } from "../src/render/animClock.ts";
+import { createAnimClock, DROP_MARK, type AnimClock, type AnimFrame } from "../src/render/animClock.ts";
 import { LOCK_MEANINGS } from "../src/render/lockMeaning.ts";
 import { FOLLOW_LOCK } from "../src/render/metronome.ts";
 import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
 import { SILENCE_GATE_MUSIC_CLOSE, SILENCE_GATE_MUSIC_OPEN, type SilenceGateMarks } from "../src/audio/silenceGate.ts";
 import { UNIT_TAILS, type HitShape } from "../src/audio/hitStrength.ts";
 import { engineReading } from "./engineReading.ts";
+import { songFrame } from "./songFrame.ts";
 
 /** One engine hit of each kind given, with no other reading. */
 const HIT = (kinds: { kick?: number; snare?: number; hat?: number }) => engineReading(kinds);
@@ -34,9 +35,128 @@ function frame(overrides: Partial<FeatureFrame> = {}): FeatureFrame {
     bpm: 0,
     onsetPhase: 0,
     engine: null,
+    song: null,
     ...overrides,
   };
 }
+
+describe("the song reading on the anim clock", () => {
+  it("sets an edge's onset for one tick, then its pulse decays", () => {
+    const clock = createAnimClock();
+    const fired = clock.advance(DT, frame({ song: songFrame({ clap: true, hat: true }) }));
+    expect(fired.song.clapOnset).toBe(true);
+    expect(fired.song.hatOnset).toBe(true);
+    expect(fired.song.kickOnset).toBe(false);
+    expect(fired.song.clapPulse).toBe(1);
+    expect(fired.song.hatPulse).toBe(1);
+    const after = clock.advance(DT, frame({ song: songFrame() }));
+    expect(after.song.clapOnset).toBe(false);
+    expect(after.song.clapPulse).toBeLessThan(1);
+    expect(after.song.clapPulse).toBeGreaterThan(0);
+    // The Treble lane's pulse falls faster than the Mid lane's.
+    expect(after.song.hatPulse).toBeLessThan(after.song.clapPulse);
+  });
+
+  it("decays the kick as the Bass lane and the chord as the Mid lane", () => {
+    const clock = createAnimClock();
+    clock.advance(DT, frame({ song: songFrame({ kick: true, chord: true, clap: true }) }));
+    const after = clock.advance(DT, frame({ song: songFrame() }));
+    expect(after.song.chordPulse).toBe(after.song.clapPulse);
+    expect(after.song.kickPulse).toBeGreaterThan(after.song.clapPulse);
+  });
+
+  it("eases the levels to the frame's values while no gate is given", () => {
+    const clock = createAnimClock();
+    let anim = clock.advance(DT, frame({ song: songFrame({ keys: 1, loudness: 1, clapLevel: 1 }) }));
+    for (let i = 0; i < 59; i++) anim = clock.advance(DT, frame({ song: songFrame({ keys: 1, loudness: 1, clapLevel: 1 }) }));
+    expect(anim.song.keys).toBeGreaterThan(0.9);
+    expect(anim.song.loudness).toBeGreaterThan(0.9);
+    expect(anim.song.clapLevel).toBeGreaterThan(0.9);
+  });
+
+  it("a shut silence gate dims the levels to 0", () => {
+    const clock = createAnimClock();
+    const marks: SilenceGateMarks = { closed: 0.5, open: 0.6 };
+    let anim = clock.advance(DT, frame({ level: 0, song: songFrame({ keys: 1, hatLevel: 1 }) }), undefined, marks);
+    for (let i = 0; i < 59; i++) anim = clock.advance(DT, frame({ level: 0, song: songFrame({ keys: 1, hatLevel: 1 }) }), undefined, marks);
+    expect(anim.song.keys).toBe(0);
+    expect(anim.song.hatLevel).toBe(0);
+  });
+
+  it("an edge fires while the gate is open and not while it is shut", () => {
+    const marks: SilenceGateMarks = { closed: 0.5, open: 0.6 };
+    const edges = songFrame({ kick: true, clap: true, hat: true, chord: true });
+    const shut = createAnimClock().advance(DT, frame({ level: 0, song: edges }), undefined, marks);
+    expect(shut.gateDimmer).toBeLessThan(0.5);
+    expect(shut.song.kickOnset || shut.song.clapOnset || shut.song.hatOnset || shut.song.chordOnset).toBe(false);
+    expect(shut.song.kickPulse).toBe(0);
+    const open = createAnimClock().advance(DT, frame({ level: 1, song: edges }), undefined, marks);
+    expect(open.gateDimmer).toBe(1);
+    expect(open.song.kickOnset && open.song.clapOnset && open.song.hatOnset && open.song.chordOnset).toBe(true);
+  });
+
+  describe("the Drop edge", () => {
+    const drop = (level: number) => frame({ song: songFrame({ dropLevel: level }) });
+
+    it("fires once when the drop level crosses the mark, and its pulse decays from 1", () => {
+      const clock = createAnimClock();
+      const fires: boolean[] = [];
+      for (const level of [0, 0.4, DROP_MARK - 0.01]) fires.push(clock.advance(DT, drop(level)).dropOnset);
+      expect(fires).toEqual([false, false, false]);
+      const crossed = clock.advance(DT, drop(DROP_MARK));
+      expect(crossed.dropOnset).toBe(true);
+      expect(crossed.dropPulse).toBe(1);
+      const held = clock.advance(DT, drop(1));
+      expect(held.dropOnset).toBe(false);
+      expect(held.dropPulse).toBeLessThan(1);
+      expect(held.dropPulse).toBeGreaterThan(0);
+    });
+
+    it("does not fire again until the level has fallen past the re-arm line", () => {
+      const clock = createAnimClock();
+      let count = 0;
+      const run = (levels: number[]): void => {
+        for (const level of levels) if (clock.advance(DT, drop(level)).dropOnset) count++;
+      };
+      run([0.2, 0.9, 0.8, DROP_MARK - 0.05, 0.9]);
+      expect(count).toBe(1);
+      run([DROP_MARK - 0.2, 0.9]);
+      expect(count).toBe(2);
+    });
+
+    it("does not fire with the silence gate shut, and a drop crossed then is not made up later", () => {
+      const marks: SilenceGateMarks = { closed: 0.5, open: 0.6 };
+      const clock = createAnimClock();
+      const shut = clock.advance(DT, frame({ level: 0, song: songFrame({ dropLevel: 1 }) }), undefined, marks);
+      expect(shut.gateDimmer).toBeLessThan(0.5);
+      expect(shut.dropOnset).toBe(false);
+      expect(shut.dropPulse).toBe(0);
+      const open = clock.advance(DT, frame({ level: 1, song: songFrame({ dropLevel: 1 }) }), undefined, marks);
+      expect(open.dropOnset).toBe(false);
+    });
+
+    it("reads the frame's own level, not the eased one, and fires nothing with no song reading", () => {
+      const clock = createAnimClock();
+      const first = clock.advance(DT, drop(1));
+      expect(first.dropOnset).toBe(true);
+      expect(first.song.dropLevel).toBeLessThan(DROP_MARK);
+      const none = createAnimClock();
+      for (let i = 0; i < 10; i++) expect(none.advance(DT, frame()).dropOnset).toBe(false);
+    });
+  });
+
+  it("a frame with no song fires no edge and eases every level down to 0", () => {
+    const clock = createAnimClock();
+    let anim = clock.advance(DT, frame({ song: songFrame({ kick: true, playing: 1, dropLevel: 1, hatLevel: 1 }) }));
+    expect(anim.song.playing).toBeGreaterThan(0);
+    for (let i = 0; i < 120; i++) anim = clock.advance(DT, frame());
+    expect(anim.song.kickOnset).toBe(false);
+    expect(anim.song.kickPulse).toBeLessThan(0.01);
+    expect(anim.song.playing).toBeLessThan(0.01);
+    expect(anim.song.dropLevel).toBeLessThan(0.01);
+    expect(anim.song.hatLevel).toBeLessThan(0.01);
+  });
+});
 
 describe("createAnimClock", () => {
   it("passes FeatureFrame.bpm straight through", () => {
@@ -73,32 +193,6 @@ describe("createAnimClock", () => {
     for (let i = 0; i < 59; i++) anim = clock.advance(DT, frame({ hats: 1, lead: 1, level: 0 }), undefined, marks);
     expect(anim.hats).toBe(0);
     expect(anim.lead).toBe(0);
-  });
-
-  /** Hats rising for 10 ticks then falling for 30, every frame carrying `engine`. */
-  function hatsBurst(clock: AnimClock, engine: FeatureFrame["engine"]): AnimFrame[] {
-    const out: AnimFrame[] = [];
-    for (let i = 0; i < 40; i++) out.push(clock.advance(DT, frame({ hats: i < 10 ? 1 : 0, engine })));
-    return out;
-  }
-
-  it("a Hats peak while the engine hears music is a hit, sized by the peak", () => {
-    const frames = hatsBurst(createAnimClock(), engineReading({ music: true }));
-    const hits = frames.filter((a) => a.hatsOnset);
-    expect(hits).toHaveLength(1);
-    const hit = hits[0]!;
-    expect(hit.hatsPulse).toBe(1);
-    expect(hit.hatsHit).toBe(hit.hatsPeak);
-    expect(hit.hatsPeak).toBeGreaterThan(0.3);
-    expect(frames.at(-1)!.hatsPulse).toBeLessThan(0.1);
-    expect(frames.at(-1)!.hatsHit).toBe(hit.hatsHit);
-  });
-
-  it("a Hats peak with no music heard is found but not counted", () => {
-    const frames = hatsBurst(createAnimClock(), engineReading({ music: false }));
-    expect(frames.some((a) => a.hatsPeak > 0)).toBe(true);
-    expect(frames.some((a) => a.hatsOnset)).toBe(false);
-    expect(frames.every((a) => a.hatsPulse === 0 && a.hatsHit === 0)).toBe(true);
   });
 
   it("hits.low/mid/high mirror bandEnergy's own per-lane diagnostics", () => {

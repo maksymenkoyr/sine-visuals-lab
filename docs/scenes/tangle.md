@@ -124,6 +124,21 @@ the reference's sparse still state while the music plays, by design.
 - **Detail** went 6 → 8 → 10 → 14 to reach the reference's vertex count.
 - 2026-10-08 — Re-inflate and Reset on drop became hit drivers (the Reaction row, Flat or Sized; drives.ts's header, "Hit drivers"). Sized scales the pull home and the reset amount by how far the hit stood out; Flat, the default, is unchanged.
 - 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/tangle/card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #802: Inflate moved from the bass hit to the Kick.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 1.72 → 1.56, p95 2.45 → 2.53; silence
+    median 0.90 → 0.89, p95 1.09 → 1.11; hits a minute on the song 428 →
+    420, in silence 0 → 0; main's bass / mid / treble lanes 152 / 138 /
+    242 a minute against kick / clap / hats / chord 108 / 46 / 278 / 122.
+- 2026-10-30, #803: the scene's drop reaction now fires when audio v6's
+  drop level crosses its mark (`DROP_MARK`, `src/render/animClock.ts`), not
+  on the Section trend's old drop detector.
+  - tune-real on a real song (around-the-world, 60 s) then silence, the
+    commit before → this change, one run each: song change median
+    1.60 → 1.64, p95 2.57 → 2.59; silence median
+    0.80 → 0.80, p95 1.07 → 1.07; hits a minute on the song
+    365 → 362, in silence 0 → 0; drops a minute on the song
+    0 → 2, in silence 0 → 0.
 
 ## Tuning notes
 

@@ -365,7 +365,7 @@ const GLOBAL_SETTINGS: SceneSetting[] = [
     // Only reads as a pump on music with real hits to push against.
     auto: { pulse: 0.35, attack: 0.2 },
     // A kick is the natural pedal to push against; rewire it in the picker.
-    drive: { default: "anim.lowOnset" },
+    drive: { default: "anim.kickOnset" },
   },
   {
     key: "seed",

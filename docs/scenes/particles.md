@@ -35,6 +35,14 @@ None — original design.
   `uDetail` as part of the repo-wide quality/tier renaming; no visual
   change.
 - 2026-10-24 — Id, name and gallery record moved to `src/render/scenes/particles.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #804: The overall brightness moves with Level, which now reads audio v6's
+  Loudness (the song's loudness on a fixed decibel scale), not the band mean.
+  - tune-real on a real song (around-the-world) then silence, before →
+    after: at full level change median 1.59 → 1.71, p95 3.08 → 3.46 on the
+    song, median 0 → 0, p95 0 → 0 in silence; hits a minute 408 → 404 on the
+    song, 0 → 0 in silence; with the song 20 dB down change median 1.82 →
+    1.79, p95 3.57 → 3.56 on the song, median 0 → 0, p95 0 → 0 in silence;
+    hits a minute 404 → 408 on the song, 0 → 0 in silence.
 
 ## Tuning notes
 

@@ -97,6 +97,22 @@ addition. `/ref` bundles:
   stamp strength (Reseed) and the hole radius (Bass wipe) by how far the hit
   stood out; Flat, the default, is unchanged.
 - 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/petri.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #802: The Kick wipe and the relief lift moved from the bass
+  hit to the Kick.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 2.22 → 2.10, p95 3.39 → 4.14; silence
+    median 0.46 → 0.25, p95 0.60 → 0.41; hits a minute on the song 408 →
+    416, in silence 0 → 0; main's bass / mid / treble lanes 160 / 128 /
+    242 a minute against kick / clap / hats / chord 112 / 32 / 278 / 122.
+- 2026-10-30, #803: the scene's drop reaction now fires when audio v6's
+  drop level crosses its mark (`DROP_MARK`, `src/render/animClock.ts`), not
+  on the Section trend's old drop detector.
+  - tune-real on a real song (around-the-world, 60 s) then silence, the
+    commit before → this change, one run each: song change median
+    2.39 → 1.66, p95 3.72 → 3.40; silence median
+    0.29 → 0.28, p95 0.57 → 0.54; hits a minute on the song
+    366 → 368, in silence 0 → 0; drops a minute on the song
+    0 → 2, in silence 0 → 0.
 
 ## Tuning notes
 

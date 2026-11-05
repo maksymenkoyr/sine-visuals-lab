@@ -1,4 +1,4 @@
-import { NUM_BANDS, type EngineReading, type FeatureFrame } from "./types.ts";
+import { NUM_BANDS, type EngineReading, type FeatureFrame, type SongFrame } from "./types.ts";
 
 export interface SyntheticOpts {
   /** Tempo of the synthetic groove. Different tiles should use different
@@ -45,11 +45,21 @@ const NOISE_FLOOR = 0.04;
 const SECTION_PERIOD_SEC = 26;
 const SECTION_DEPTH = 0.7; // 0 = no section dynamics, 1 = quiet section hits pure noise floor
 
+// The song layer's drop level: a quick rise at each section's peak, then a
+// slow fall. The fall is slow enough to cross animClock.ts's re-arm line well
+// before the next section, so every peak fires one Drop.
+const DROP_AT_SECTION = 0.5;
+const DROP_RISE_SEC = 0.4;
+const DROP_FALL_SEC = 2;
+
 // The engine reading's hit strengths: both clear an open silence gate, and the
 // kick stands out more, as a real kick over a hat does.
 const KICK_STRENGTH = 2;
 const HAT_STRENGTH = 1.5;
 const BEATS_PER_BAR = 4;
+// The synthetic groove has no snare of its own; the song layer's Clap lands on
+// the backbeat, the way a snare would.
+const BACKBEAT_PARITY = 1;
 const SYNTHETIC_CONFIDENCE = 0.8;
 const SYNTHETIC_DOWNBEAT_CONFIDENCE = 0.5;
 
@@ -82,6 +92,22 @@ export function createSyntheticFeed(opts: SyntheticOpts = {}): SyntheticFeed {
     downbeatTime: 0,
     downbeatConfidence: SYNTHETIC_DOWNBEAT_CONFIDENCE,
     updates: 0,
+  };
+
+  // The song layer's reading, from the same envelopes. No chord: the groove
+  // has none, so Chord stays silent here.
+  const song: SongFrame = {
+    kick: false,
+    clap: false,
+    hat: false,
+    chord: false,
+    clapLevel: 0,
+    hatLevel: 0,
+    chordLevel: 0,
+    keys: 0,
+    loudness: 0,
+    dropLevel: 0,
+    playing: 1,
   };
 
   return {
@@ -152,7 +178,16 @@ export function createSyntheticFeed(opts: SyntheticOpts = {}): SyntheticFeed {
       engine.beatTime = beatIndex * period - phaseOffset;
       engine.downbeatTime = bar * BEATS_PER_BAR * period - phaseOffset;
       engine.updates = beatIndex;
-      return { time: timeSec, bands, energy, onset: beat, pulseOnset: beat, bpm, onsetPhase: beatPhase, level, hats, lead, engine };
+      song.kick = beat;
+      song.clap = beat && (beatIndex & 1) === BACKBEAT_PARITY;
+      song.hat = offBeat;
+      song.clapLevel = clamp01(midEnv * sectionGain);
+      song.hatLevel = hats;
+      song.keys = lead;
+      song.loudness = energy;
+      const sinceDropSec = (((sectionPhase - DROP_AT_SECTION) % 1) + 1) % 1 * SECTION_PERIOD_SEC;
+      song.dropLevel = sinceDropSec < DROP_RISE_SEC ? sinceDropSec / DROP_RISE_SEC : Math.exp(-(sinceDropSec - DROP_RISE_SEC) / DROP_FALL_SEC);
+      return { time: timeSec, bands, energy, onset: beat, pulseOnset: beat, bpm, onsetPhase: beatPhase, level, hats, lead, engine, song };
     },
   };
 }

@@ -16,6 +16,7 @@ import { createFullscreenScene } from "../../fullscreenScene.ts";
 import { card } from "./card.ts";
 import { FRAG } from "./glsl.ts";
 import { decay, LAYERS, layerAt, wrapSpin } from "./motion.ts";
+import { levelOf } from "../../signals.ts";
 
 /** Zoom rate at Zoom speed 1, in log-scale per second: the reference zooms
  *  ×1.35–1.40 a second (0.30–0.335 measured two ways). */
@@ -71,8 +72,8 @@ export const ledheartsScene = createFullscreenScene(card.id, card.name, FRAG, {
   extraUniforms: (frame, anim, getSetting, drives) => {
     const dt = Math.min(Math.max(anim.dtSec, 0), MAX_DT_SEC);
     // Called every frame, unconditionally: fired() must see every frame.
-    const kick = drives.fired("push", anim.lowOnset);
-    const hit = drives.fired("flip", anim.midOnset);
+    const kick = drives.fired("push", anim.song.kickOnset);
+    const hit = drives.fired("flip", anim.song.chordOnset);
     const drop = drives.fired("wave", anim.dropOnset);
 
     pushVel = decay(pushVel, dt, PUSH_TAU_SEC);
@@ -86,7 +87,7 @@ export const ledheartsScene = createFullscreenScene(card.id, card.name, FRAG, {
       pushVel += WAVE_PUSH * waveLvl * getSetting("wave");
     }
 
-    const rush = getSetting("rush") * Math.max(0, drives.value("rush", frame.energy));
+    const rush = getSetting("rush") * Math.max(0, drives.value("rush", levelOf(frame)));
     zoomLog += dt * (BASE_ZOOM * getSetting("zoom") * (1 + rush) + pushVel);
     spinPhase = wrapSpin(spinPhase + dt * (BASE_SPIN * getSetting("spin") + spinVel));
 

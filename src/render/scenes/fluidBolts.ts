@@ -34,7 +34,7 @@ import { createProgram, createColorTarget, destroyTarget, type ColorTarget } fro
 import type { SimFormat } from "./fluidSim.ts";
 
 /** Bolt slots the layer can hold in flight at once — enough for a multi-bolt
- *  treble hit times the four copies a Kaleidoscope fold asks for (see
+ *  hat hit times the four copies a Kaleidoscope fold asks for (see
  *  boltMirrors in fluid.ts). */
 export const MAX_BOLTS = 12;
 /** Shortest gap between strikes before a second one is dropped, unless

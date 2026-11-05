@@ -24,7 +24,7 @@ import { routeWheelByHalves } from "./wheelHalves.ts";
 import "./widgets/index.ts";
 import { getWidget, type LinkedSetting, type WidgetCtx } from "./widgets/registry.ts";
 import { formatMixedSummary } from "./widgets/itemSelection.ts";
-import { SIGNALS, type SignalId, type SignalSpec } from "../render/signals.ts";
+import { levelOf, SIGNALS, type SignalId, type SignalSpec } from "../render/signals.ts";
 import { takeSettingMarks } from "../render/settingMarks.ts";
 import { NUM_BANDS, type FeatureFrame } from "../audio/types.ts";
 import { BAND_SPLIT } from "../audio/bandSplit.ts";
@@ -75,6 +75,7 @@ import { hideTooltip, showTooltip } from "./tooltip.ts";
 import { setHintText } from "./hintSwatches.ts";
 import { installKeyHints, noteKeyUse, SHORTCUTS, welcomeOnce } from "./keyHints.ts";
 import { createAudioMeters, type AudioMetersDeps } from "./audioMeters.ts";
+import type { SongMarks } from "../audio/song/songLayer.ts";
 import { chainOf, type ChainFocus, type ChainGraph } from "./patchChain.ts";
 import { isOffReadout, sliderValueText } from "./sliderValueText.ts";
 import {
@@ -461,6 +462,8 @@ export interface DeviceMenuDeps {
   currentPaletteId: () => string;
   /** False while app.ts skips the stem split (src/render/stemReaders.ts); Heat records a gap. */
   stemsMeasured: () => boolean;
+  /** Where the song layer's triggers fire (EngineSource.marks); null wherever this device runs no song layer of its own. */
+  getSongMarks: () => SongMarks | null;
   onPickPalette: (id: string) => void;
   getAudioStatus: () => AudioStatus;
   /** Mic-vs-screen state (src/audio/sourcePref.ts). Null on a renderer or the synthetic feed, which hides the Source row. */
@@ -2019,6 +2022,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     getSilenceGate: () => deps.resolveSilenceGate(),
     getBandEdgesHz: () => deps.getBandEdgesHz(),
     stemsMeasured: () => deps.stemsMeasured(),
+    getSongMarks: () => deps.getSongMarks(),
     patch: jackPatch,
   });
 
@@ -6679,10 +6683,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       for (const row of sceneRowHandles) row.updateSignalPills(frame, anim);
       // The tick is FeatureFrame.level: absolute, fixed-window loudness that
       // Auto-gain doesn't touch, so it reads the room. The fill starts from
-      // .energy (which Auto-gain shapes) and runs the render path's
-      // sensitivity+expansion curve, so it shows what the scene reacts to.
+      // Level (levelOf) and runs the render path's sensitivity+expansion
+      // curve, so it shows what the scene reacts to.
       const tick = Math.min(1, Math.max(0, frame?.level ?? 0));
-      const energy = Math.min(1, Math.max(0, frame?.energy ?? 0));
+      const energy = Math.min(1, Math.max(0, frame ? levelOf(frame) : 0));
       const sceneId = deps.currentSceneId();
       const sensitivity = deps.resolveSensitivityValue(sceneId);
       const expansion = deps.resolveExpansionValue(sceneId);

@@ -1881,6 +1881,8 @@ function wireDeviceMenu(): void {
     currentPaletteId: () => palette.id,
     // A page that follows a feed reads the sender's levels: measured.
     stemsMeasured: () => stemGate?.measured() ?? true,
+    // Only the device that hears the music has the song layer's marks.
+    getSongMarks: () => engineSource?.marks ?? null,
     // The column head's audio-source status. A page that follows another device
     // has no local analyser.
     getAudioStatus: () => ({
@@ -3286,6 +3288,7 @@ function readLocalCapture(
   const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale);
   const engine = engineSource ? engineSource.read(now) : null;
   f.engine = engine;
+  f.song = engineSource ? engineSource.song : null;
   f.gateOff = !captureIsMic;
   f.bpm = engineSource ? engineSource.bpm : 0;
   gateMusicHeld = musicHoldsGate(engine, gateMusicHeld);
@@ -3412,6 +3415,7 @@ function sampleToVisual(s: VisualSample | null): FeatureFrame | null {
     hats: s.hats,
     lead: s.lead,
     engine: s.engine,
+    song: s.song,
     gateOff: s.gateOff,
   };
 }

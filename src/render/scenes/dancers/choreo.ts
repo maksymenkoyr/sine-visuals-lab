@@ -33,11 +33,11 @@ export interface ChoreoParams {
   bob: number;
   /** 0..1 bias on how big a move the picker asks for (the `groove` setting). */
   groove: number;
-  /** 0..1 how far bass hits open the jaw (the `jaw` setting). */
+  /** 0..1 how far kicks open the jaw (the `jaw` setting). */
   jaw: number;
   /** The "jaw" setting's own resolved drive (src/render/drives.ts) — what
-   *  the jaw actually opens against. Defaults to `clocks.lowPulse` when
-   *  omitted, its Bass hit default, so every existing caller (tests
+   *  the jaw actually opens against. Defaults to `clocks.kickPulse` when
+   *  omitted, its Kick default, so every existing caller (tests
    *  included) keeps today's exact behavior; only index.ts's render()
    *  passes a real drive-resolved value. */
   jawDrive?: number;
@@ -135,7 +135,7 @@ export function createChoreographer(): Choreographer {
       dropBlend = slew(dropBlend, dropTarget, dropTarget > dropBlend ? DROP_ATTACK_RATE : DROP_RELEASE_RATE, dtSec);
       if (dropBlend > 1e-3) lerpPose(target, drop, dropBlend * (0.5 + 0.5 * params.energy), target);
 
-      mulBoneEuler(target, B.jaw, params.jaw * (params.jawDrive ?? clocks.lowPulse) * JAW_MAX, 0, 0);
+      mulBoneEuler(target, B.jaw, params.jaw * (params.jawDrive ?? clocks.kickPulse) * JAW_MAX, 0, 0);
 
       if (!primed) {
         pose.set(target);
@@ -147,7 +147,7 @@ export function createChoreographer(): Choreographer {
 
       const bob = params.bob;
       const bobBeat = params.bobBeatDrive ?? clocks.beatPulse;
-      const bobLow = params.bobLowDrive ?? clocks.lowPulse;
+      const bobLow = params.bobLowDrive ?? clocks.kickPulse;
       cam.camDolly = slew(cam.camDolly, bob * bobBeat * DOLLY_MAX, CAM_SLEW_RATE, dtSec);
       cam.camTilt = slew(cam.camTilt, bob * bobBeat * TILT_MAX, CAM_SLEW_RATE, dtSec);
       cam.camRoll = slew(cam.camRoll, bob * bobLow * ROLL_MAX, CAM_SLEW_RATE, dtSec);

@@ -32,12 +32,17 @@ quiet level, fed each tick by `feedSilenceGateMeasurement`, as
 `src/audio/autoGain.ts`'s amount tracks the room's band span; neither resolves
 through `musicProfile.ts`'s dials, and neither is a setting.
 `src/audio/sensitivity.ts`'s Sensitivity/Expansion/Smoothing curves shape the
-bands on top of that, at values `src/render/autoTune.ts` picks from the music. Beside the bands,
+bands on top of that, at values `src/render/autoTune.ts` picks from the music.
+What a scene or a wire sees as Level is not that band mean: `levelOf` in
+`src/render/signals.ts` reads the song layer's Loudness off the frame, and falls
+back to `FeatureFrame.energy` only for a frame with no song reading. The music
+dials, Auto and the flow clock keep reading the band mean. Beside the bands,
 `src/audio/stemSplit.ts` reads the analyser's full FFT bins, before the AGC (which
-would level held sound away): the hits at the top of the spectrum for the Hats
-signal, and the held part of the mids for Lead; `app.ts` writes both into the frame, so a TV gets
+would level held sound away): the held part of the mids for Lead (and the hits
+at the top of the spectrum, which no signal reads now: the Hats hit comes from
+the song layer, `src/audio/song/`); `app.ts` writes both into the frame, so a TV gets
 them over the wire rather than working them out itself. The split runs only on
-ticks where something reads them; `src/render/stemReaders.ts` says who does.
+ticks where something reads Lead; `src/render/stemReaders.ts` says who does.
 
 Each render tick, `src/render/animClock.ts`'s `createAnimClock` takes the current
 `FeatureFrame` and produces one `AnimFrame` — flow phase, the audio engine's
@@ -95,7 +100,9 @@ look and has no panel or audio of its own.
   the current layout and a legacy-decode fallback with its own sunset condition.
   The engine's reading rides in the frame, and `src/net/wireDecimator.ts` and
   `src/net/jitterBuffer.ts` keep its one-frame hits from being lost on the way
-  (`docs/audio-engine.md`, "From mic to TV").
+  (`docs/audio-engine.md`, "From mic to TV"). The song layer's reading rides
+  after it in a song tail on the same terms; the device that hears the music
+  fills it, and its edges are latched like the engine's hits.
 - `server/room.ts` (the Durable Object, class `Room`, bound as `ROOM` per
   `wrangler.toml`) is only the Cloudflare adapter. What a room does is
   `server/roomCore.ts`, which the tests drive with fake sockets; who may join and

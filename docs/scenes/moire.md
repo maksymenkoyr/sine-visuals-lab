@@ -131,6 +131,21 @@ worked around in this scene.
   drives.ts's header, "Hit drivers"). It is flat-only: a flip either happens
   or it doesn't, so it can't be sized.
 - 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/moire.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #802: The Blackout flip moved from the bass hit to the Kick.
+  - tune-real on a real song (around-the-world) then silence, main → this
+    change: song change median 17.45 → 17.44, p95 20.55 → 21.11; silence
+    median 5.30 → 5.19, p95 16.77 → 16.94; hits a minute on the song 420 →
+    418, in silence 0 → 0; main's bass / mid / treble lanes 152 / 128 /
+    242 a minute against kick / clap / hats / chord 114 / 50 / 276 / 122.
+- 2026-10-30, #803: the scene's drop reaction now fires when audio v6's
+  drop level crosses its mark (`DROP_MARK`, `src/render/animClock.ts`), not
+  on the Section trend's old drop detector.
+  - tune-real on a real song (around-the-world, 60 s) then silence, the
+    commit before → this change, one run each: song change median
+    17.80 → 17.50, p95 21.16 → 21.15; silence median
+    0.00 → 0.00, p95 14.42 → 14.58; hits a minute on the song
+    365 → 358, in silence 0 → 0; drops a minute on the song
+    0 → 2, in silence 0 → 0.
 
 ## Tuning notes
 

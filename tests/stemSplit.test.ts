@@ -176,7 +176,7 @@ describe("stemSplit behind its gate (src/render/stemReaders.ts)", () => {
     const rows: [number, number, number][] = [];
     for (let k = 0; k < 5 * 60; k++) {
       const t = k / 60;
-      if (k === wiredAt * 60) setDriveSetting("gated-scene", LEVEL, driveSettingFromChoice("anim.hats"));
+      if (k === wiredAt * 60) setDriveSetting("gated-scene", LEVEL, driveSettingFromChoice("anim.lead"));
       const bins = readBinsDb(mono, t, SR);
       const want = always.update(bins, t, RANGES);
       const got = gate.update(wiresReadStems("gated-scene", [LEVEL]), bins, t, RANGES) ?? { hats: 0, lead: 0 };

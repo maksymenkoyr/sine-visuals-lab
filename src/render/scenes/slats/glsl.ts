@@ -191,7 +191,7 @@ void main() {
   vec3 tinted = mix(vec3(1.0), palette(TINT_PALETTE_T, uPalA, uPalB, uPalC, uPalD), uTint);
   float a = vAlpha * (uOpacity / OPACITY_DEFAULT);
   a *= 1.0 + ONSET_ALPHA_PUNCH * uOnsetEnv;
-  a *= 1.0 - uKickDip * kickDipDrive(uLowPulse);
+  a *= 1.0 - uKickDip * kickDipDrive(uKickPulse);
   a = clamp(a, 0.0, 1.0);
   outColor = vec4(tinted * a, a);
 }

@@ -154,6 +154,16 @@ None — original design.
   eases from the last row to its own so 30 fps doesn't stair-step; at a steady
   60 fps the picture is pixel-identical (`tools/gpu-bench.mjs --compare`).
 - 2026-10-24 — Id, name, settings and gallery record moved to `src/render/scenes/meshGrid.card.ts`, so the scene's code loads after the page's first paint. Nothing visible changed. (#536)
+- 2026-10-30, #804: The floor and horizon glow and Background Mesh
+  Intensity's drive moves with Level, which now reads audio v6's Loudness
+  (the song's loudness on a fixed decibel scale), not the band mean.
+  - tune-real on a real song (around-the-world) then silence, before →
+    after: at full level change median 4.85 → 5.23, p95 5.31 → 5.8 on the
+    song, median 0.87 → 0.87, p95 0.99 → 0.99 in silence; hits a minute 386
+    → 408 on the song, 0 → 0 in silence; with the song 20 dB down change
+    median 4.78 → 4.7, p95 5.45 → 5.45 on the song, median 0.87 → 0.87, p95
+    0.99 → 0.99 in silence; hits a minute 418 → 404 on the song, 0 → 0 in
+    silence.
 
 ## Tuning notes
 
