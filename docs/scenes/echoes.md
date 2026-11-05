@@ -6,9 +6,10 @@ fan of echo lines that peel off, bend, pinch to points and fade. A 3D or 4D
 wireframe figure instead leaves its echoes in its own space: a trail of
 copies pushed back into depth (or through the fourth dimension), seen in
 perspective from a slowly swinging camera. The music
-swings its size once a bar, pops it outward on bass hits (a ripple that runs
-down the fan) and spreads the echoes further apart as the mids get louder. A
-bass hit also sends a bright ring down the fan (Shockwave), Mirror folds a
+swings its size once a bar, pops it outward on kicks (a ripple that runs
+down the fan) and spreads the echoes further apart as the mids get louder; a
+figure takes all three harder, so every shape moves about as much. A
+kick also sends a bright ring down the fan (Shockwave), Mirror folds a
 flat shape's flow into a kaleidoscope, and Age tint colours each echo by how
 far down the fan it is.
 In development, on main.
@@ -21,7 +22,8 @@ In development, on main.
 - `src/render/scenes/echoes/index.ts` — the body, loaded after first paint: the ping-pong
   render-target pair (`ensureTargets`, sized by `TARGET_SCALE` and capped at
   `MAX_TARGET_DIM` like Coil's), and `render()`, which turns settings and
-  drives into the step pass's uniforms. The header explains why this is a
+  drives into the step pass's uniforms, a figure's through `FIGURE_SIZE_GAIN`
+  and `FIGURE_FLOW_GAIN`. The header explains why this is a
   feedback loop and not a drawn stack of copies.
 - `src/render/scenes/echoes/glsl.ts` — `buildStepFrag` (one generation of the
   loop: sample one step back along the flow — `mirroredFlow`, which is
@@ -230,6 +232,61 @@ Mirror, colour by age and a hit shockwave from a list of four:
     414, in silence 0 → 0; main's bass / mid / treble lanes 140 / 138 /
     242 a minute against kick / clap / hats / chord 122 / 42 / 278 / 138.
 
+2026-11-05 — the user: "in echoes as less dimentions as bigger reaction to
+music we get":
+
+- **Measured, and it was so.** With Spin and Drift at 0 only the wires move
+  the picture, so `scripts/reaction.mjs` reads the music's share alone.
+  Travel is how far the lit lines move per 100 ms, read on blocks about a
+  tenth of a half-height wide and divided by the light on screen, so a figure
+  with many edges doesn't score higher for drawing more of them:
+
+  | Shape | around-the-world, main → now | billie-jean, main → now |
+  |---|---|---|
+  | Circle | 36 → 36 | 36 → 35 |
+  | Square | 34 → 35 | 34 → 34 |
+  | Tetrahedron | 23 → 36 | 23 → 33 |
+  | Cube | 23 → 35 | 22 → 34 |
+  | Tesseract | 18 → 35 | 17 → 32 |
+  | 5-cell | 21 → 39 | 20 → 36 |
+
+  Tuned on around-the-world; billie-jean played no part in the tuning. Flat
+  shapes keep a gain of 1, so they are the control. The other figures, on
+  around-the-world only: Octahedron 21 → 35, Dodecahedron 21 → 32,
+  Cuboctahedron 21 → 32, Icosahedron 19 → 29, 16-cell 19 → 34, 24-cell 14 → 28.
+  The densest stay a little low, since the gains go by dimension, not by figure.
+- **Why the figures lagged.** Kick and Breathe scale the picture about the
+  centre. All of a circle's outline moves square-on, while a figure's edges
+  point every way, so many slide along themselves and show nothing, and its
+  lines sit nearer the centre (on average about 0.9 of the radius for 3D, 0.7
+  for 4D), where scaling moves them less. Distance alone explained only part of
+  the gap, direction the rest. Flow pushes echoes into depth, where
+  perspective shrinks the move. Shockwave is light, not movement, and was
+  about equal already.
+- **More gain, not a new motion.** `FIGURE_SIZE_GAIN` multiplies Breathe and
+  Kick, `FIGURE_FLOW_GAIN` multiplies Flow around its rest. Neighbouring
+  frames still glide, so the trail, which is rebuilt whole each frame, didn't
+  start to jitter.
+- **Silence had to stay.** The first round had no floor on Flow, and silence
+  pulled a Tesseract's whole trail onto the figure and shortened a Cube's.
+  `FLOW_AT_SILENCE` keeps the step where a flat shape's sits at a reading of 0,
+  which gives the same silent picture as before.
+- **Not equal on every reading.** `moved`, the share of light that cleared its
+  own width, is closer but still falls with dimension: 132 / 87 / 61 on main,
+  132 / 106 / 85 now (Circle, Cube, Tesseract, around-the-world). Raising the
+  gains to level it would overshoot on travel, whose p95 already sits above the
+  circle's: 58 / 66 / 67. The 5-cell runs a little high. On the biggest moments
+  the oldest, faintest echoes of a figure now reach the top of the frame.
+- Real song vs silence (`tools/tune-real.mjs echoes`, around-the-world from
+  8 s for 20 s, default settings), change median / p95, main → now; no hits
+  fired on silence:
+
+  | Shape | Song | Silence | Song p95 / silence p95 |
+  |---|---|---|---|
+  | Circle | 2.00 / 2.86 → 1.99 / 2.91 | 0.37 / 0.63 → 0.39 / 0.62 | 4.6× → 4.7× |
+  | Cube | 3.03 / 4.58 → 3.76 / 5.75 | 0.79 / 1.20 → 0.81 / 1.18 | 3.8× → 4.9× |
+  | Tesseract | 1.99 / 2.98 → 3.34 / 5.41 | 0.58 / 0.85 → 0.58 / 0.86 | 3.5× → 6.3× |
+
 ## Tuning notes
 
 - The reference's bare-circle stretches (17–20 s) are Flow 0; its busy
@@ -260,7 +317,11 @@ Mirror, colour by age and a hit shockwave from a list of four:
   shots), saved with `tools/ref-keep.py`.
 - `echoes/scripts/` — `circle_fit.py` and `measure_lines.py` (the stroke,
   gap and colour numbers above), `radius_burst.mjs` (the reaction check),
-  `variants.mjs` + `tile.py` (headless settings variants, tiled).
+  `variants.mjs` + `tile.py` (headless settings variants, tiled),
+  `reaction.mjs` (how much the music alone moves each shape, per wire, on a real
+  song), `clip.mjs` (a shape's clip from a fixed song moment, to set two
+  builds side by side) and `exposure.py` (a long exposure of those clips: the
+  wider the smear, the further the music moved the lines).
 - The reference media (the video, its audio, the wall crop, frames, bursts)
   is in the local `/ref` cache and the private archive (`tools/ref-archive.py`),
   never in this repo.

@@ -31,7 +31,8 @@
 // is a plain wire the user can move: Breathe swings the size once a bar
 // (the reference's timer swung about once every three bars at its tempo),
 // Kick pops it outward on every kick (a ripple that runs down the fan), and
-// Flow spreads the echoes further apart as the mids get louder. Shockwave and
+// Flow spreads the echoes further apart as the mids get louder; a figure takes
+// all three harder (FIGURE_SIZE_GAIN, FIGURE_FLOW_GAIN). Shockwave and
 // the Mirror and Age tint looks are additions of ours with no counterpart in
 // the reference: a hit sends a bright ring down the fan (the display pass
 // finds each pixel's place in the fan from its freshness), Mirror folds the
@@ -80,6 +81,15 @@ const DRIFT_PER_SEC = 0.5;
 const TRAIL_STEP_PER_FLOW = 0.45;
 const TRAIL_FREQ = 1.2;
 const TRAIL_TIME_PER_PHASE = 3;
+/** How much harder the music drives a figure than a flat shape, by its
+ *  dimension, or a 4D figure reacts at about half a circle's strength. A size
+ *  swing moves all of a circle's outline square-on, but a figure's edges point
+ *  every way, so it slides many along themselves, and its echoes sit nearer
+ *  the centre, where scaling moves them less. Flow pushes echoes into depth,
+ *  which perspective shrinks. Tuned on real songs (docs/scenes/echoes.md). */
+const FIGURE_SIZE_GAIN: Record<3 | 4, number> = { 3: 2, 4: 2.5 };
+const FIGURE_FLOW_GAIN: Record<3 | 4, number> = { 3: 1.5, 4: 1.9 };
+const FLOW_AT_SILENCE = 0.5;
 const DEG2RAD = Math.PI / 180;
 /** Seconds a shockwave ring takes to run from the outline to the last echo,
  *  and its width in echoes (never under MIN_RING_WIDTH of the fan). */
@@ -308,12 +318,20 @@ function createEchoesScene(): Scene {
         ringAmp[i] = ringPeak[i];
       }
 
-      const radius = size * (1 + breathe * wave + kick * pop);
+      const shapeSpec = SHAPES[Math.max(0, Math.min(SHAPES.length - 1, shape))];
+      const solidDim = shapeSpec.solid ? SOLIDS[shapeSpec.solid].dim : null;
+      const sizeGain = solidDim ? FIGURE_SIZE_GAIN[solidDim] : 1;
+      const flowGain = solidDim ? FIGURE_FLOW_GAIN[solidDim] : 1;
+
+      const radius = size * (1 + sizeGain * (breathe * wave + kick * pop));
       angleDeg = (angleDeg + spin * dt) % 360;
       solidPhase += spin * DEG2RAD * dt;
       fieldPhase += drift * DRIFT_PER_SEC * dt;
       const fadeStep = 1 / Math.max(echoes, 1);
-      const flowAmount = flow * (0.5 + flowReading);
+      // Pivots on the wire's rest, so an unplugged Flow reads the same at any
+      // gain. The floor is where a flat shape sits at a reading of 0: without
+      // it, silence would pull a 4D figure's whole trail back onto the figure.
+      const flowAmount = flow * Math.max(FLOW_AT_SILENCE, 1 + flowGain * (flowReading - 0.5));
 
       historyHead = (historyHead + 1) % HISTORY_FRAMES;
       historyLen = Math.min(historyLen + 1, HISTORY_FRAMES);
@@ -322,7 +340,6 @@ function createEchoesScene(): Scene {
 
       const pxHH = 2 / targetH;
       const stroke = Math.max(STROKE_HALF_HH, MIN_STROKE_PX * pxHH);
-      const shapeSpec = SHAPES[Math.max(0, Math.min(SHAPES.length - 1, shape))];
 
       const write = 1 - read;
       const writeTarget = targets[write]!;
