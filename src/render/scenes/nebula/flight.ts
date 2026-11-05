@@ -74,6 +74,10 @@ const HUE_WANDER: readonly PathSine[] = [
 // flight's own pace (index.ts's BASE_SPEED) so at the default the reference's fly-through still leads.
 const CHURN_RATE = 0.05;
 const FLOW: readonly [number, number] = [0.04, 0.015];
+// How much a full reading on Gas drift's wire adds to the gas's own motion, as a share of the slider.
+// Tuned on a real song (docs/scenes/nebula.md): a level at the top wire weight runs the gas about as
+// fast as the slider's own top, and a hit still reads as a push.
+const GAS_WIRE_GAIN = 4;
 
 const TAU = Math.PI * 2;
 
@@ -102,6 +106,12 @@ export function advanceFlight(f: Flight, dtSec: number, speed: number, hueRate: 
   f.churn = (f.churn + dtSec * CHURN_RATE * gasDrift) % TAU;
   f.flowX = wrap(f.flowX + dtSec * FLOW[0] * gasDrift, PERIOD);
   f.flowY = wrap(f.flowY + dtSec * FLOW[1] * gasDrift, PERIOD);
+}
+
+/** Gas drift's slider as its wire moves it. A factor, not `slider * reading`: an empty jack or a silent
+ *  wire reads 0 and the gas keeps its own pace, and a slider at 0 still holds it still. */
+export function gasDriftRate(slider: number, reading: number): number {
+  return slider * (1 + GAS_WIRE_GAIN * reading);
 }
 
 function wrap(x: number, period: number): number {

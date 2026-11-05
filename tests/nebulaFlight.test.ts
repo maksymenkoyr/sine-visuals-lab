@@ -7,11 +7,13 @@ import {
   advanceFlight,
   cameraUniforms,
   createFlight,
+  gasDriftRate,
   hueWander,
   pathUniforms,
   PERIOD,
   PERIOD_Z,
 } from "../src/render/scenes/nebula/flight.ts";
+import { SETTINGS } from "../src/render/scenes/nebula/card.ts";
 import { buildStars, STAR_COUNT, STAR_STRIDE } from "../src/render/scenes/nebula/stars.ts";
 
 function camAt(travel: number, turn = 1) {
@@ -92,6 +94,23 @@ describe("Nebula flight", () => {
       expect(v).toBeLessThan(PERIOD);
     }
     expect(f.travel).toBeCloseTo(500, 6);
+  });
+});
+
+describe("Nebula Gas drift's wire", () => {
+  it("keeps the slider's pace at a reading of 0 and runs faster above it", () => {
+    expect(gasDriftRate(1.5, 0)).toBe(1.5);
+    expect(gasDriftRate(1.5, 0.5)).toBeGreaterThan(1.5);
+    expect(gasDriftRate(1.5, 1)).toBeGreaterThan(gasDriftRate(1.5, 0.5));
+  });
+
+  it("holds the gas still at a slider of 0 whatever the wire reads", () => {
+    expect(gasDriftRate(0, 1)).toBe(0);
+  });
+
+  it("starts with no wire plugged in", () => {
+    const spec = SETTINGS.find((s) => s.key === "gasDrift");
+    expect(spec?.drive?.default).toEqual({ mix: "add", sources: [] });
   });
 });
 
