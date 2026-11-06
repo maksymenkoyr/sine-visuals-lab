@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { DIAL_SIGNALS, type SignalId } from "../src/render/signals.ts";
+import { BAND_SIGNALS, DIAL_SIGNALS, type SignalId } from "../src/render/signals.ts";
 import { hasHitStrength } from "../src/render/gateWindow.ts";
 import {
   applyEdit,
@@ -129,7 +129,7 @@ describe("randomPatch (the console's Random wiring)", () => {
     };
   }
 
-  it("wires one or two different catalogue signals with weights in range, never Tempo or Tempo lock", () => {
+  it("wires one or two different catalogue signals with weights in range, never Tempo, Tempo lock or a single band", () => {
     const rnd = seeded(7);
     const counts = new Set<number>();
     const mixes = new Set<string>();
@@ -152,6 +152,7 @@ describe("randomPatch (the console's Random wiring)", () => {
     expect(RANDOM_WIRE_SIGNALS).not.toContain("anim.tempo");
     expect(RANDOM_WIRE_SIGNALS).not.toContain("anim.tempoLock");
     for (const id of DIAL_SIGNALS) expect(RANDOM_WIRE_SIGNALS).not.toContain(id);
+    for (const id of BAND_SIGNALS) expect(RANDOM_WIRE_SIGNALS).not.toContain(id);
   });
 
   it("gives a hit with a size its height and Beat wave its beats per swing, and nothing else either", () => {

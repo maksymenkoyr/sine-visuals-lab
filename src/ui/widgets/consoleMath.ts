@@ -1,5 +1,5 @@
 import { hasHitStrength } from "../../render/gateWindow.ts";
-import { DIAL_SIGNALS, SIGNALS, type SignalId } from "../../render/signals.ts";
+import { BAND_SIGNALS, DIAL_SIGNALS, SIGNALS, type SignalId } from "../../render/signals.ts";
 import { DRIVE_EVERY_VALUES, type DriveMix, type DrivePatch, type DriveSource, type HitHeight } from "../../render/drives.ts";
 
 /**
@@ -106,9 +106,15 @@ export function valuesMatch(values: readonly number[], target: readonly number[]
 /** The signals the console's Random wires a lane to: every catalogue signal
  *  but the ones that hardly move while a song plays (Tempo, Tempo lock and
  *  the slow Song dials in DIAL_SIGNALS) — wired in, they would only
- *  hold a setting off its slider. */
+ *  hold a setting off its slider — and the single bands in BAND_SIGNALS: a
+ *  wired band always shows its row on the Sound card, so one roll floods that
+ *  card with rows nobody picked. */
 export const RANDOM_WIRE_SIGNALS: readonly SignalId[] = (Object.keys(SIGNALS) as SignalId[]).filter(
-  (id) => id !== "anim.tempo" && id !== "anim.tempoLock" && !(DIAL_SIGNALS as readonly SignalId[]).includes(id),
+  (id) =>
+    id !== "anim.tempo" &&
+    id !== "anim.tempoLock" &&
+    !(DIAL_SIGNALS as readonly SignalId[]).includes(id) &&
+    !(BAND_SIGNALS as readonly SignalId[]).includes(id),
 );
 /** How often Random gives a lane a second wire instead of one. */
 export const RANDOM_SECOND_WIRE = 0.4;

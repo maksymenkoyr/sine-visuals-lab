@@ -1129,6 +1129,12 @@ configs are used.
     median 7.16 → 6.95, p95 8.75 → 8.64 on the song, median 2.93 → 3.14, p95
     3.79 → 3.79 in silence; hits a minute 398 → 418 on the song, 0 → 0 in
     silence.
+- 2026-11-06 — Random no longer wires a lane to a single band. The user, with
+  a screenshot of the Sound card's Bands block full of rows: "can physarum
+  random stop using separate bands like this". A wired band always shows its
+  row, so one roll filled the card. `RANDOM_WIRE_SIGNALS` leaves `BAND_SIGNALS`
+  out, as it already did Tempo and the dials. Wires already plugged stay until
+  the next Random or a manual unplug; a band stays wireable by hand.
 
 ## Tuning notes
 
