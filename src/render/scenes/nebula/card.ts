@@ -65,7 +65,8 @@ export const SETTINGS: SceneSetting[] = [
     max: 8,
     step: 0.1,
     default: 1,
-    description: "How fast the clouds stream past and change shape on their own. 0 holds them still.",
+    description: "How fast the clouds stream past and change shape on their own. 0 holds them still. A wire speeds them up with the music.",
+    drive: { default: { mix: "add", sources: [] } },
   },
   {
     key: "glow",

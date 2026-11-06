@@ -45,7 +45,8 @@ wheel over most of an hour. In development.
   `anim.lead` and `tilt` on `anim.centroid` (both read in JS through
   `drives.value`), `shock` on `anim.dropOnset` and `twinkle` on `anim.hats`
   (both hit drivers read through `drives.fired`; Twinkle's flash is sized by
-  `drives.hitSize`).
+  `drives.hitSize`). `gasDrift` starts on an empty patch: no wire, the
+  slider's pace, until one is plugged in (flight.ts's `gasDriftRate`).
 - `src/render/scenes/nebula/reactions.ts` — the JS-side state of Twinkle,
   Drop shock and Colour tilt: the two flash slots, the burst's centre and
   clock, the centroid's running mean and the lean.
@@ -242,6 +243,38 @@ from 4 s, and an in-page probe of the reactions' state over 90 s).
   brighter with the lead, as on the prototype; the owner's call whether to
   lower it.
 
+2026-11-05, Gas drift's wire (Levitating, 20 s from 6 s unless noted).
+
+- `tools/tune-real.mjs`, 30 s from 4 s, nothing plugged in:
+
+  | source | change med | change p95 | hits/min | energy | fps |
+  |---|---|---|---|---|---|
+  | song | 5.13 | 6.74 | 326 | 0.66 | 120 |
+  | silence | 1.95 | 3.01 | 0 | 0.00 | 120 |
+
+  Song over silence at p95 2.2×, as before.
+- The gas alone (flight, Surge, stars, Colour drift and the other reactions
+  off, Glow unplugged), change median / p95, Gas drift 1 unless noted:
+
+  | wire | song | silence |
+  |---|---|---|
+  | none | 0.445 / 0.527 | 0.450 / 0.532 |
+  | none, slider 3 | 1.10 / 1.28 | |
+  | none, slider 5 | 1.68 / 2.36 | |
+  | none, slider 8 | 3.19 / 4.85 | |
+  | Level, weight 1 | 1.63 / 2.01 | 0.450 / 0.531 |
+  | Level, weight 2 | 3.40 / 5.03 | |
+  | Section, weight 1 | 1.67 / 2.07 | |
+  | Lead, weight 1 | 1.38 / 1.66 | |
+  | Kick, weight 1 | 0.91 / 1.51 | |
+  | Kick, weight 2 | 1.23 / 2.19 | |
+  | Level, weight 1, slider 0 | 0.000 / 0.000 | |
+
+- The whole scene, default settings, song: no wire 5.13 / 6.84 and 5.03 /
+  6.81 (two runs), Level 5.48 / 7.69, Kick 5.34 / 7.09; Level in silence
+  1.79 / 3.00. The flight still leads, so the wire shows as the gas
+  quickening, not as a new motion.
+
 ## Decisions and pivots
 
 - 2026-10-21 — Sync hypotheses from the scan: no trigger at all (silent
@@ -362,6 +395,11 @@ from 4 s, and an in-page probe of the reactions' state over 90 s).
   of its spread there (reactions.ts's header). A mean was tried first and
   the centroid's rare bright spikes kept the lean warm; a median stepped
   toward took most of a minute to settle.
+- 2026-11-05 — The owner asked to expose Gas drift to signals. It starts on
+  an empty patch rather than a default wire: "in silence it only drifts" is
+  the scene's own motion, and nothing was asked to change until a wire goes
+  in. A wire multiplies the slider's rate instead of replacing it, so a
+  silent wire keeps the drift and a slider at 0 still holds the gas still.
 
 ## Tuning notes
 
@@ -372,7 +410,8 @@ from 4 s, and an in-page probe of the reactions' state over 90 s).
 - Gas sets how much of the view is cloud; Roll how far the view swings;
   Colour turn rotates every colour about the grey axis (0 is the
   reference's violet); Colour drift sets how fast the wander runs; Gas drift how fast the
-  gas streams past and reshapes on its own (0 holds it still).
+  gas streams past and reshapes on its own (0 holds it still); a wire on it
+  quickens that, by a level far more than by a hit, whose push is brief.
 - Inner light and Colour tilt swing against the song's own recent level,
   so judge them a half-minute into a song; at its start they ease in.
 

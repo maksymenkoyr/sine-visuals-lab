@@ -18,7 +18,7 @@
  * lights the gas from inside (Inner light), a drop sends a burning wave
  * through it (Drop shock), the colours lean with the sound's brightness
  * (Colour tilt), and the hats make the stars flash (Twinkle); reactions.ts
- * holds those four's state.
+ * holds those four's state. Gas drift starts with no wire and takes one.
  * docs/scenes/nebula.md has the record: the measurements, the decisions,
  * and what is still to tune.
  */
@@ -45,7 +45,7 @@ import {
   uploadCommonUniforms,
 } from "../../sceneCommon.ts";
 import { card, SETTINGS } from "./card.ts";
-import { advanceFlight, cameraUniforms, cameraWorld, createFlight, hueWander, pathUniforms, type Flight } from "./flight.ts";
+import { advanceFlight, cameraUniforms, cameraWorld, createFlight, gasDriftRate, hueWander, pathUniforms, type Flight } from "./flight.ts";
 import { EXTRA_UNIFORMS, FOV_TAN, GAS_BODY, OCCLUDE, OUT_BODY, T_MAX } from "./glsl.ts";
 import {
   advanceReactions,
@@ -167,7 +167,8 @@ function createNebulaScene(): Scene {
       gasProg.use();
       uploadCommonUniforms(gasProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       const surge = 1 + SURGE_GAIN * setting("surge") * drives.value("surge", anim.sectionIntensity);
-      advanceFlight(flight, dt, BASE_SPEED * setting("speed") * surge, setting("drift"), setting("gasDrift"));
+      const gasDrift = gasDriftRate(setting("gasDrift"), drives.value("gasDrift", 0));
+      advanceFlight(flight, dt, BASE_SPEED * setting("speed") * surge, setting("drift"), gasDrift);
       cameraUniforms(flight, setting("spin"), cam);
       pathUniforms(flight, path);
       const camPos = cameraWorld(flight);
