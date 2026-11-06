@@ -2,9 +2,9 @@
 // drawn into a feedback loop that a drifting noise field warps every frame,
 // so the outline sheds a fan of evenly spaced echo lines that peel off along
 // the flow, bunch into sheets where the flow stalls, and fade out. A 3D or
-// 4D wireframe figure instead leaves its echoes in its own space — pushed
-// back into depth or through the fourth axis — built and drawn without the
-// loop (solids.ts's header has why and how). Built from
+// 4D wireframe figure instead leaves its echoes in its own space, multiplying
+// along one more direction for each dimension it adds — built and drawn
+// without the loop (solids.ts's header has why and how). Built from
 // `/ref` on a live-coding set filmed at a venue (r/creativecoding, "Live
 // coding generative visuals during our show"; bundle `livecode-wall`, the
 // wall projection cropped out of the room) — docs/scenes/echoes.md has the
@@ -31,8 +31,7 @@
 // is a plain wire the user can move: Breathe swings the size once a bar
 // (the reference's timer swung about once every three bars at its tempo),
 // Kick pops it outward on every kick (a ripple that runs down the fan), and
-// Flow spreads the echoes further apart as the mids get louder; a figure takes
-// all three harder (FIGURE_SIZE_GAIN, FIGURE_FLOW_GAIN). Shockwave and
+// Flow spreads the echoes further apart as the mids get louder. Shockwave and
 // the Mirror and Age tint looks are additions of ours with no counterpart in
 // the reference: a hit sends a bright ring down the fan (the display pass
 // finds each pixel's place in the fan from its freshness), Mirror folds the
@@ -47,7 +46,7 @@ import { PASSTHROUGH_DRIVES } from "../../drives.ts";
 import { wrapFlow } from "../../noiseHash.ts";
 import type { QualityPreset } from "../../quality.ts";
 import { buildStepFrag, buildDisplayFrag, MAX_RINGS, SEGMENT_FRAG, SEGMENT_VERT } from "./glsl.ts";
-import { buildTrail, MAX_SOLID_EDGES, orbitYaw, SEGMENT_FLOATS, SOLIDS } from "./solids.ts";
+import { buildTrail, MAX_TRAIL_SEGMENTS, orbitYaw, SEGMENT_FLOATS, SOLIDS, trailEchoes } from "./solids.ts";
 import { card, SETTINGS, SHAPES } from "./card.ts";
 
 const ID = card.id;
@@ -81,15 +80,6 @@ const DRIFT_PER_SEC = 0.5;
 const TRAIL_STEP_PER_FLOW = 0.45;
 const TRAIL_FREQ = 1.2;
 const TRAIL_TIME_PER_PHASE = 3;
-/** How much harder the music drives a figure than a flat shape, by its
- *  dimension, or a 4D figure reacts at about half a circle's strength. A size
- *  swing moves all of a circle's outline square-on, but a figure's edges point
- *  every way, so it slides many along themselves, and its echoes sit nearer
- *  the centre, where scaling moves them less. Flow pushes echoes into depth,
- *  which perspective shrinks. Tuned on real songs (docs/scenes/echoes.md). */
-const FIGURE_SIZE_GAIN: Record<3 | 4, number> = { 3: 2, 4: 2.5 };
-const FIGURE_FLOW_GAIN: Record<3 | 4, number> = { 3: 1.5, 4: 1.9 };
-const FLOW_AT_SILENCE = 0.5;
 const DEG2RAD = Math.PI / 180;
 /** Seconds a shockwave ring takes to run from the outline to the last echo,
  *  and its width in echoes (never under MIN_RING_WIDTH of the fan). */
@@ -103,10 +93,11 @@ function settingFor(key: string): SceneSetting {
   return s;
 }
 
-/** The most echoes a figure's trail can have (the Echoes setting's own
- *  max), and how many frames of the figure's turn and size are kept for it. */
+/** How many frames of a figure's turn and size are kept: a copy can be as many
+ *  steps from the figure now as the Echoes setting's top allows along each of
+ *  a 4D figure's three directions. */
 const MAX_ECHOES = settingFor("echoes").max;
-const HISTORY_FRAMES = MAX_ECHOES + 1;
+const HISTORY_FRAMES = 3 * MAX_ECHOES + 1;
 
 const STEP_FRAG = buildStepFrag(SETTINGS, COMMON_UNIFORMS_GLSL);
 const DISPLAY_FRAG = buildDisplayFrag(SETTINGS, COMMON_UNIFORMS_GLSL);
@@ -144,16 +135,16 @@ function createEchoesScene(): Scene {
   // jump every plane but the first.
   let solidPhase = 0;
   // The figure's turn phase and size over the last HISTORY_FRAMES frames,
-  // newest at `historyHead` — echo k of a figure's trail is the figure as it
-  // was k frames ago (solids.ts's buildTrail), so a Kick pop ripples down
-  // the trail the way it runs down a flat shape's echoes.
+  // newest at `historyHead` — a copy k steps from the figure now is the figure
+  // as it was k frames ago (solids.ts's buildTrail), so a Kick pop ripples
+  // through the copies the way it runs down a flat shape's echoes.
   const phaseHistory = new Float64Array(HISTORY_FRAMES);
   const radiusHistory = new Float64Array(HISTORY_FRAMES);
   let historyHead = 0;
   let historyLen = 0;
   // The trail's segments for the segment pass, and the instanced VAO that
   // reads them (a static quad corner buffer plus this, per instance).
-  const segBuf = new Float32Array(MAX_SOLID_EDGES * MAX_ECHOES * SEGMENT_FLOATS);
+  const segBuf = new Float32Array(MAX_TRAIL_SEGMENTS * SEGMENT_FLOATS);
   let segProg: GLProgram | null = null;
   let segVao: WebGLVertexArrayObject | null = null;
   let segCornerVbo: WebGLBuffer | null = null;
@@ -318,20 +309,12 @@ function createEchoesScene(): Scene {
         ringAmp[i] = ringPeak[i];
       }
 
-      const shapeSpec = SHAPES[Math.max(0, Math.min(SHAPES.length - 1, shape))];
-      const solidDim = shapeSpec.solid ? SOLIDS[shapeSpec.solid].dim : null;
-      const sizeGain = solidDim ? FIGURE_SIZE_GAIN[solidDim] : 1;
-      const flowGain = solidDim ? FIGURE_FLOW_GAIN[solidDim] : 1;
-
-      const radius = size * (1 + sizeGain * (breathe * wave + kick * pop));
+      const radius = size * (1 + breathe * wave + kick * pop);
       angleDeg = (angleDeg + spin * dt) % 360;
       solidPhase += spin * DEG2RAD * dt;
       fieldPhase += drift * DRIFT_PER_SEC * dt;
       const fadeStep = 1 / Math.max(echoes, 1);
-      // Pivots on the wire's rest, so an unplugged Flow reads the same at any
-      // gain. The floor is where a flat shape sits at a reading of 0: without
-      // it, silence would pull a 4D figure's whole trail back onto the figure.
-      const flowAmount = flow * Math.max(FLOW_AT_SILENCE, 1 + flowGain * (flowReading - 0.5));
+      const flowAmount = flow * (0.5 + flowReading);
 
       historyHead = (historyHead + 1) % HISTORY_FRAMES;
       historyLen = Math.min(historyLen + 1, HISTORY_FRAMES);
@@ -340,6 +323,7 @@ function createEchoesScene(): Scene {
 
       const pxHH = 2 / targetH;
       const stroke = Math.max(STROKE_HALF_HH, MIN_STROKE_PX * pxHH);
+      const shapeSpec = SHAPES[Math.max(0, Math.min(SHAPES.length - 1, shape))];
 
       const write = 1 - read;
       const writeTarget = targets[write]!;
@@ -352,10 +336,11 @@ function createEchoesScene(): Scene {
       if (shapeSpec.solid && segProg && segVao && segInstVbo) {
         // A figure's echoes live in its own space (solids.ts's header): the
         // whole trail is rebuilt each frame and drawn fresh, no feedback.
+        const solid = SOLIDS[shapeSpec.solid];
         const count = buildTrail(
-          SOLIDS[shapeSpec.solid],
+          solid,
           {
-            echoes: Math.max(1, Math.min(MAX_ECHOES, Math.round(echoes))),
+            echoes: trailEchoes(solid, echoes),
             step: flowAmount * TRAIL_STEP_PER_FLOW,
             freq: TRAIL_FREQ * detail,
             time: fieldPhase * TRAIL_TIME_PER_PHASE,
