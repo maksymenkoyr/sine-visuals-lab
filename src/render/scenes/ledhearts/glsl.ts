@@ -7,7 +7,8 @@
  * centre, so a heart is made of whole dots and its outline steps from dot to
  * dot as it moves. A softer copy of the same field, sampled at the pixel,
  * is the haze that fills the gaps between lit LEDs and glows past a heart's
- * edge.
+ * edge. Blur, slider plus wires, sets how soft those edges are and how far
+ * the haze reaches.
  *
  * The field is LAYERS hashed lattices of hearts (motion.ts says how they
  * zoom and wrap). A lattice cell holds at most one heart, jittered and sized
@@ -31,9 +32,18 @@ const DOT_DIAMETER = 0.63;
 /** Haze inside a heart, relative to a lit dot: the reference's gaps read
  *  0.25 against 0.76 at the dot centres. */
 const HAZE_SHARE = 0.5;
-/** How far the haze reaches past a heart's edge, in half-heights per e-fold
- *  (the reference measures 12–14 px at 720 px tall). */
-const HAZE_EFOLD = 0.036;
+/** Blur's two ends. How far the haze reaches past a heart's edge, in
+ *  half-heights per e-fold; the reference measures 12–14 px at 720 px tall,
+ *  about a third of the way up, and the owner wants it sharper than that. */
+const HAZE_EFOLD_SHARP = 0.012;
+const HAZE_EFOLD_SOFT = 0.1;
+/** Edge softness either side of the outline: in LEDs at no blur, since any
+ *  less and a dot pops on and off as an edge passes it instead of fading;
+ *  in half-heights at full blur. */
+const EDGE_SHARP_LEDS = 0.45;
+const EDGE_SOFT = 0.07;
+/** How much softer, in cells, a near, fading layer gets at full blur. */
+const NEAR_BLUR = 0.3;
 /** The heart's outline, in any unit: a lobe disc on each side and a small
  *  disc at the bottom tip, joined along their outer tangents. Only the tip is
  *  rounded: a rounded cleft fills in, and a heart a few LEDs tall then reads
@@ -81,11 +91,6 @@ const WOBBLE = 0.6;
 /** How narrow a turning heart gets, as a share of its width: any narrower
  *  and the LED grid draws it as a single violet line. */
 const MIN_WIDTH = 0.45;
-/** Edge softness in half-heights, either side of the outline (under one LED
- *  at the default LED rows: any softer and a heart a few LEDs tall loses its
- *  cleft and tip), and how much more, in cells, a near, fading layer gets. */
-const EDGE = 0.012;
-const NEAR_BLUR = 0.22;
 /** The drop wave's front speed and width, in half-heights. */
 const WAVE_SPEED = 1.8;
 const WAVE_WIDTH = 0.35;
@@ -132,6 +137,11 @@ vec3 hueShift(vec3 c, float deg) {
   return c * cos(r) + cross(k, c) * sin(r) + k * dot(k, c) * (1.0 - cos(r));
 }
 
+// This frame's softness, read once in main from Blur and its wires.
+float gEdge;
+float gHazeEfold;
+float gNearBlur;
+
 // One layer's light at p (half-heights from the centre). halo = false gives
 // the field an LED samples; true gives the haze, which glows past the edge.
 vec3 layerLight(vec2 p, int k, bool halo) {
@@ -164,8 +174,8 @@ vec3 layerLight(vec2 p, int k, bool halo) {
     d = vec2(cos(tilt) * d.x - sin(tilt) * d.y, sin(tilt) * d.x + cos(tilt) * d.y);
     float sd = sdHeart(vec2(d.x / squash, d.y), a) * mix(squash, 1.0, 0.5);
     float cov = halo
-      ? exp(-max(sd, 0.0) * scale / ${HAZE_EFOLD.toFixed(3)})
-      : 1.0 - smoothstep(-1.0, 1.0, sd / (${EDGE.toFixed(3)} / scale + near * ${NEAR_BLUR.toFixed(3)}));
+      ? exp(-max(sd, 0.0) * scale / gHazeEfold)
+      : 1.0 - smoothstep(-1.0, 1.0, sd / (gEdge / scale + near * gNearBlur));
     float inner = halo ? 0.0 : smoothstep(0.0, 0.6 * a, -sd);
 
     vec3 col = fract(h2.y * 3.7) < ${ROSE_SHARE.toFixed(3)} ? ROSE : HEART;
@@ -191,6 +201,13 @@ void main() {
   vec2 dotCentre = (floor(g) + 0.5) * pitch;
   float aa = 0.7 * uLedRows / uResolution.y;
   float dotMask = 1.0 - smoothstep(${(DOT_DIAMETER / 2).toFixed(3)} - aa, ${(DOT_DIAMETER / 2).toFixed(3)} + aa, length(fract(g) - 0.5));
+
+  // A wire lifts the slider toward full blur, so an empty jack reads the
+  // slider alone (drives.ts, "Nothing plugged in").
+  float blur = clamp(uBlur + (1.0 - uBlur) * blurDrive(0.0), 0.0, 1.0);
+  gEdge = mix(${EDGE_SHARP_LEDS.toFixed(3)} * pitch, ${EDGE_SOFT.toFixed(3)}, blur);
+  gHazeEfold = mix(${HAZE_EFOLD_SHARP.toFixed(3)}, ${HAZE_EFOLD_SOFT.toFixed(3)}, blur);
+  gNearBlur = ${NEAR_BLUR.toFixed(3)} * blur;
 
   vec3 core = vec3(0.0);
   vec3 haze = vec3(0.0);

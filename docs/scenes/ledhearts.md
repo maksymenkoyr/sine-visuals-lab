@@ -173,11 +173,41 @@ has by design.
   | true heart | 16.09 | 23.10 | 8.19 | 9.49 |
 
   Reactions unchanged; no hit fired on silence.
+- 2026-11-06, the owner: "make them less blurry. lets mb try to expose blur to
+  signals." A new Blur setting sets edge softness, how far the haze reaches and
+  how soft near hearts get, all from one value. Its default sits low, so the
+  picture is now well sharper than the reference on purpose. Blur starts with
+  nothing plugged in, because the music should not soften a picture the owner
+  asked to sharpen until someone wires it; a wire lifts the slider toward full
+  blur. `tools/tune-real.mjs ledhearts` on Levitating, 30 s from 4 s, no wire,
+  change in % of full scale per 100 ms:
+
+  | source | change med | change p95 | hits/min | energy |
+  |---|---:|---:|---:|---:|
+  | song | 18.85 | 24.12 | 316 | 0.66 |
+  | silence | 8.46 | 9.74 | 0 | 0.00 |
+
+  The same song with Blur wired, 20 s from 4 s, reading the picture's edge
+  contrast each frame (a 160×90 copy's mean neighbour difference, higher is
+  sharper, one run each; it counts LED dots too, so it moves less than the
+  eye sees):
+
+  | wire | song p5 | song med | song p95 | silence med |
+  |---|---:|---:|---:|---:|
+  | none | 29.46 | 32.25 | 35.92 | 25.47 |
+  | Kick hit | 27.83 | 30.51 | 33.93 | 25.49 |
+  | Level | 27.08 | 28.99 | 30.89 | 25.48 |
+
+  Silence does not move with a wire in. At full wire weight Kick hit pumps from
+  sharp to fully soft on each kick; Level sits soft on a loud song, so it wants
+  a lower weight.
 
 ## Tuning notes
 
 - Hearts, Haze and the ground decide the dark share; check it beside the
-  reference, since it is half of the look.
+  reference, since it is half of the look. Blur is sharper than the
+  reference's glow at its default, so the reference's look sits higher up its
+  slider.
 - Level rush stacks on Zoom speed; on a loud track the zoom runs about 1.4×
   its rest speed before kicks. Turn Level rush down for calmer music.
 - Hit spin defaults to Mid hit (snares, claps) so it alternates with the
@@ -217,3 +247,4 @@ has by design.
 - #654: first pass (draft).
 - 2026-10-24 (#682) — Bass and Treble hits also fire on the engine's band-level jumps; no code in this scene changed (see Decisions)
 - 2026-11-04 — a true heart shape; no haze seams, tip stems or edge-on streaks (see Decisions)
+- 2026-11-06 — sharper by default; a Blur setting that takes wires (see Decisions)
