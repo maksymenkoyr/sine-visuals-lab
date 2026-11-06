@@ -33,7 +33,7 @@ export const SETTINGS: SceneSetting[] = [
     key: "shape",
     label: "Shape",
     description:
-      "The outline the echoes come from: a flat shape, a 3D solid whose echoes trail back into depth, or a 4D shape (a tesseract is a 4D cube) whose echoes trail through the fourth dimension",
+      "The outline the echoes come from: a flat shape, whose echoes multiply one way across the screen; a 3D solid, whose echoes also multiply back into depth; or a 4D shape (a tesseract is a 4D cube), whose echoes also multiply through the fourth dimension",
     group: "Form",
     min: 0,
     max: SHAPES.length - 1,
@@ -66,7 +66,7 @@ export const SETTINGS: SceneSetting[] = [
   {
     key: "echoes",
     label: "Echoes",
-    description: "How many echo lines trail behind the outline before they're gone — right keeps more",
+    description: "How many echoes trail behind the outline before they're gone — right keeps more. A 3D or 4D shape keeps fewer along each direction, since they multiply",
     group: "Form",
     min: 2,
     max: 40,
@@ -89,7 +89,7 @@ export const SETTINGS: SceneSetting[] = [
     key: "flow",
     label: "Flow",
     description:
-      "How far each echo is pushed from the one before — right spreads the lines further apart; a 3D or 4D shape's echoes go back into depth",
+      "How far each echo is pushed from the one before — right spreads them further apart, along every direction a 3D or 4D shape's echoes multiply in",
     group: "Motion",
     min: 0,
     max: 1,

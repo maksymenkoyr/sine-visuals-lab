@@ -3,12 +3,13 @@
 One warm-white outline — a circle or a regular polygon — drawn into a
 feedback loop that a drifting noise field warps every frame, so it sheds a
 fan of echo lines that peel off, bend, pinch to points and fade. A 3D or 4D
-wireframe figure instead leaves its echoes in its own space: a trail of
-copies pushed back into depth (or through the fourth dimension), seen in
-perspective from a slowly swinging camera. The music
-swings its size once a bar, pops it outward on bass hits (a ripple that runs
+wireframe figure instead leaves its echoes in its own space, and each dimension
+it adds, adds a direction they multiply in: a 3D figure's fill a grid of copies,
+across the screen and back into depth; a 4D figure's fill a block, through the
+fourth dimension too; all seen in perspective from a slowly swinging camera. The
+music swings its size once a bar, pops it outward on kicks (a ripple that runs
 down the fan) and spreads the echoes further apart as the mids get louder. A
-bass hit also sends a bright ring down the fan (Shockwave), Mirror folds a
+kick also sends a bright ring down the fan (Shockwave), Mirror folds a
 flat shape's flow into a kaleidoscope, and Age tint colours each echo by how
 far down the fan it is.
 In development, on main.
@@ -32,10 +33,11 @@ In development, on main.
   place in the fan from its freshness). Its header owns the R/G channel
   meaning and why the fade is linear.
 - `src/render/scenes/echoes/solids.ts` — the 3D and 4D figures in `SOLIDS`
-  (vertices only; edges are derived as nearest pairs) and `buildTrail`,
-  which builds a figure's whole echo trail in its own space and projects it
-  to 2D segments carrying each end's magnification. Its header owns the
-  turning, the trail, the flow and the projection. `index.ts` maps the Shape
+  (vertices only; edges are derived as nearest pairs), `trailEchoes` (how many
+  copies along each direction, from the Echoes setting) and `buildTrail`,
+  which multiplies a figure's echoes along its directions in its own space and
+  projects them to 2D segments carrying each end's magnification. Its header
+  owns the turning, the trail, the flow and the projection. `index.ts` maps the Shape
   chips (`SHAPES`) to flat corner counts or figures, keeps the figure's
   recent turn and size for the trail, and draws the segments with glsl.ts's
   `SEGMENT_VERT`/`SEGMENT_FRAG` as instanced quads instead of the step pass.
@@ -43,7 +45,8 @@ In development, on main.
   driver), `noiseHash.ts`
   (`NOISE_HASH_GLSL` for the field, `wrapFlow` for the drift phase).
 - Tests: `tests/echoesSolids.test.ts` (each figure's vertex and edge counts,
-  equal edges, projected size, and that a trail really recedes); the
+  equal edges, projected size, that copies multiply along each direction, that
+  they really recede, and that the row across the screen stays level); the
   cross-scene tests (`tests/drives.test.ts`,
   `tests/settingGroups.test.ts`, …) cover the rest through `listScenes()`.
 
@@ -230,6 +233,82 @@ Mirror, colour by age and a hit shockwave from a list of four:
     414, in silence 0 → 0; main's bass / mid / treble lanes 140 / 138 /
     242 a minute against kick / clap / hats / chord 122 / 42 / 278 / 138.
 
+2026-11-05 and 11-06 — the user: "in echoes as less dimentions as bigger reaction
+to music we get", then "if 2d multiplying through one side so each new
+dimention should add this multiplying dimention basically", the same idea as
+their 2026-10-06 ask for a trail in dim − 1 directions, left open until now:
+
+- **Measured, and it was so.** With Spin and Drift at 0 only the wires move
+  the picture, so `scripts/reaction.mjs` reads the music's share alone.
+  Travel is how far the lit lines move per 100 ms, read on blocks about a
+  tenth of a half-height wide and divided by the light on screen, so a figure
+  with many edges doesn't score higher for drawing more of them:
+
+  | Shape | around-the-world, main → now | billie-jean, main → now |
+  |---|---|---|
+  | Circle | 36 → 37 | 34 → 34 |
+  | Square | 35 → 34 | 33 → 33 |
+  | Tetrahedron | 23 → 40 | 22 → 38 |
+  | Cube | 23 → 35 | 22 → 32 |
+  | Octahedron | 22 → 32 | |
+  | Cuboctahedron | 20 → 32 | |
+  | Dodecahedron | 21 → 30 | |
+  | Icosahedron | 18 → 28 | |
+  | 5-cell | 22 → 38 | 20 → 35 |
+  | Tesseract | 18 → 33 | 17 → 29 |
+  | 16-cell | 18 → 31 | |
+  | 24-cell | 14 → 28 | |
+
+  Spacing was set on around-the-world; billie-jean played no part. Flat shapes
+  are unchanged, so they are the control.
+- **Why figures lagged.** Kick and Breathe scale the picture about the centre.
+  All of a circle's outline moves square-on, while a figure's edges point every
+  way, so many slide along themselves and show nothing, and its lines sit nearer
+  the centre (on average about 0.9 of the radius for 3D, 0.7 for 4D). Flow only
+  pushed echoes into depth, where perspective shrinks the move.
+- **Gains first, then dropped.** A gain per dimension on Kick, Breathe and Flow
+  levelled travel by force (36 / 35 / 35 for Circle, Cube, Tesseract), but wasn't
+  what the user meant. Multiplying levelled it with no gain at all, so the gains
+  were removed before merging.
+- **Each dimension adds a direction.** A flat shape's echoes run one way across
+  the screen. A 3D figure's run across the screen and back into depth; a 4D
+  figure's also run along the fourth axis. Copies multiply, so the music now
+  moves every row of them.
+- **A fan of fans, not a rigid grid.** Each copy is its parent carried one step
+  further, the step taken from where the parent's vertex sat, so each row bends
+  its own way. Brightness is the product of the fade along each direction.
+- **The row across the screen goes on after the camera's swing.** Before it, the
+  swing turned that row toward the viewer and its nearest copies filled the
+  frame. `tests/echoesSolids.test.ts` holds this with the camera swung.
+- **Spacing and bend, by eye.** At the old step the copies merged into a clump
+  and the directions couldn't be told apart, so `DIRECTION_STEP` spreads them.
+  The bend then compounded over many more steps and stretched the wireframes
+  into long streaks, so it stays on the trail's own step and `BEND` came down.
+- **Copies are budgeted.** `ECHOES_SHARE` draws fewer along each direction than
+  the Echoes setting, and `MAX_TRAIL_SEGMENTS` caps a frame. Building the trail on
+  the main thread (`trailEchoes`, then `buildTrail`):
+  0.09 ms for a Cube, 0.67 ms for a Tesseract and 1.05 ms for a 24-cell at the
+  default setting, 5.20 ms at worst, a Tesseract at the setting's top. Frame rate
+  stayed at 120 fps headless at the default setting for every figure.
+- **Silence is a different picture.** With no music Flow rests at half, so a
+  figure's copies draw together into a compact block instead of main's one-way
+  trail. They spread out when the music comes in.
+- **Not level on every reading.** `moved`, the share of light that clears its own
+  width, barely changes: 132 / 89 / 61 on main, 134 / 93 / 56 now (Circle, Cube,
+  Tesseract, around-the-world), since moving lines now land on other lines. The
+  densest figures stay low on travel (24-cell, Icosahedron) and the sparsest run
+  high (Tetrahedron, 5-cell). The faintest copies can reach the frame's edge.
+- Real song vs silence (`tools/tune-real.mjs echoes`, around-the-world from
+  8 s for 20 s, default settings), change median / p95, main → now; no hits
+  fired on silence. This reading isn't divided by the light, so it also counts the
+  extra lines:
+
+  | Shape | Song | Silence | Song p95 / silence p95 |
+  |---|---|---|---|
+  | Circle | 1.91 / 2.93 → 1.90 / 3.04 | 0.38 / 0.62 → 0.39 / 0.62 | 4.7× → 4.9× |
+  | Cube | 2.98 / 4.51 → 5.56 / 8.86 | 0.81 / 1.20 → 1.01 / 1.44 | 3.8× → 6.2× |
+  | Tesseract | 1.99 / 3.04 → 5.74 / 8.11 | 0.58 / 0.89 → 0.65 / 0.84 | 3.4× → 9.6× |
+
 ## Tuning notes
 
 - The reference's bare-circle stretches (17–20 s) are Flow 0; its busy
@@ -240,8 +319,9 @@ Mirror, colour by age and a hit shockwave from a list of four:
 - Judge it on real music: synthetic audio's mid level is low, so Flow reads
   short fans there.
 - The figures with many edges (the 24-cell, the icosahedron) fill into a
-  dense mass at the default Echoes; fewer echoes, or more Spin so the trails
-  separate, reads cleaner.
+  dense mass at the default Echoes; fewer echoes reads cleaner. At the setting's
+  top a Cube's grid becomes a full-screen woven sheet and a Tesseract's block a
+  tall tower of rows; `MAX_TRAIL_SEGMENTS` stops the densest figures earlier.
 
 ## Known issues and next steps
 
@@ -260,7 +340,11 @@ Mirror, colour by age and a hit shockwave from a list of four:
   shots), saved with `tools/ref-keep.py`.
 - `echoes/scripts/` — `circle_fit.py` and `measure_lines.py` (the stroke,
   gap and colour numbers above), `radius_burst.mjs` (the reaction check),
-  `variants.mjs` + `tile.py` (headless settings variants, tiled).
+  `variants.mjs` + `tile.py` (headless settings variants, tiled),
+  `reaction.mjs` (how much the music alone moves each shape, per wire, on a real
+  song), `clip.mjs` (a shape's clip from a fixed song moment, to set two
+  builds side by side) and `exposure.py` (a long exposure of those clips: the
+  wider the smear, the further the music moved the lines).
 - The reference media (the video, its audio, the wall crop, frames, bursts)
   is in the local `/ref` cache and the private archive (`tools/ref-archive.py`),
   never in this repo.
@@ -288,3 +372,4 @@ Mirror, colour by age and a hit shockwave from a list of four:
   more Shape chips and their trails in depth (closed unmerged after it
   conflicted with main's In development section, replaced by #400).
 - #400 — the same rebased onto main again.
+- #817 — each dimension adds a direction the echoes multiply in, which levels the reaction across dimensions.

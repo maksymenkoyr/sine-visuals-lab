@@ -1,12 +1,12 @@
 // The 3D and 4D figures Echoes can draw instead of a flat outline, and the
-// trail of echoes they leave *in their own space*: a flat shape's echoes
-// are pushed across the screen by glsl.ts's feedback loop, but a figure's
-// echoes are copies of the figure itself, pushed back into depth (3D) or
-// along the fourth axis (4D) and bent by a smooth flow of the same number of
-// dimensions, then seen in perspective. That is what lets the depth show: a
-// 3D trail recedes, shrinks and fades into the distance; a 4D trail shrinks
-// inward through the fourth dimension, each echo nesting inside the last the
-// way a tesseract's inner cube sits inside its outer one.
+// echoes they leave *in their own space*. A flat shape's echoes multiply in one
+// direction, across the screen, through glsl.ts's feedback loop. Each dimension
+// a figure adds, adds a direction its echoes multiply in: a 3D figure's run
+// across the screen and back into depth, so they fill a grid of copies; a 4D
+// figure's also run along the fourth axis, each copy nesting inside the last
+// the way a tesseract's inner cube sits inside its outer one, so they fill a
+// block. A smooth flow of the figure's own dimensions bends them, and they are
+// seen in perspective.
 //
 // Figures: each is its vertex list, scaled to a unit circumradius, and its
 // edges — every pair of vertices at the smallest distance apart, true for
@@ -20,11 +20,14 @@
 // side to side on the same phase (orbitYaw) so the trail is seen from
 // changing angles — parallax is the other half of seeing depth.
 //
-// The trail (buildTrail): echo 0 is the figure now; echo k is the figure as
-// it was k frames ago (its turn and its size, from index.ts's history, so a
-// Kick pop ripples down the trail as it does on a flat shape), displaced by
-// k steps of the flow — each step taken from where the previous echo's
-// vertex sat. Projection is 4D to 3D, then 3D to 2D, each a perspective
+// The trail (buildTrail): each copy is its parent carried one step further
+// along one direction, the step taken from where the parent's vertex sat, so a
+// row of copies peels off the way a flat shape's fan does and each row bends its
+// own way; this is a fan of fans, not a rigid grid. A copy is also the figure as
+// it was as many frames ago as it is steps from the figure now (its turn and
+// its size, from index.ts's history, so a Kick pop ripples through the copies as
+// it does down a flat shape's fan). Its brightness is the product of its fade
+// along each direction. Projection is 4D to 3D, then 3D to 2D, each a perspective
 // divide; every vertex also reports its magnification, which the segment
 // shader turns into line width and fog.
 
@@ -147,8 +150,10 @@ export const SOLIDS = {
 
 export type SolidId = keyof typeof SOLIDS;
 
-/** The most edges any figure has. */
-export const MAX_SOLID_EDGES = Math.max(...Object.values(SOLIDS).map((s) => s.edges.length));
+/** The most trail segments one frame may draw: copies multiply by the Echoes
+ *  setting once per direction, so a dense 4D figure at the setting's top would
+ *  otherwise upload megabytes a frame. */
+export const MAX_TRAIL_SEGMENTS = 32768;
 /** Floats per trail segment in buildTrail's output: x1, y1, x2, y2 (screen,
  *  half-heights), m1, m2 (each end's magnification, 1 at the figure's
  *  centre depth), fade (1 for the figure now, falling down the trail), 0. */
@@ -176,13 +181,33 @@ const ZW_RATE = 0.53;
 // bring the trail toward the viewer and through the camera.
 const ORBIT_SWING = 0.8;
 const ORBIT_RATE = 0.7;
-/** How far the flow bends an echo sideways relative to the steady push
- *  back into depth / the fourth axis — and, along the push axis and along
- *  z (the final 3D view's depth, for a 4D figure too), the share of the
- *  bend kept: at full strength the flow could cancel the push or carry an
- *  echo toward the camera, so the trail stopped reading as receding. */
-const BEND = 0.9;
+/** How far the flow bends a copy sideways relative to the steady push along
+ *  its direction, and, along z and w, the share of the bend kept: at full
+ *  strength the flow could cancel the push or carry a copy toward the camera,
+ *  so the trail stopped reading as receding. */
+const BEND = 0.65;
 const PUSH_AXIS_BEND = 0.35;
+/** Each direction's step as a multiple of the trail's, across the screen, then
+ *  depth, then the fourth axis: at much less the copies merge into a clump and
+ *  the directions can't be told apart. The across-the-screen one is the only one
+ *  perspective doesn't shrink, and its push leans along the frame's wide side. */
+const DIRECTION_STEP: readonly number[] = [1.8, 1.6, 1.6];
+const PLANE_PUSH: readonly [number, number] = [-0.85, 0.53];
+/** How far apart in the flow's time each direction reads it, so the rows of
+ *  one direction don't bend the same way as the rows of another. */
+const DIRECTION_TIME_SHIFT = 7.3;
+/** Copies along each direction as a share of the Echoes setting, by dimension:
+ *  they multiply, so the setting a flat shape rests on would otherwise draw more
+ *  copies than can be told apart. */
+const ECHOES_SHARE: Record<3 | 4, number> = { 3: 0.6, 4: 0.5 };
+
+/** How many copies a figure's echoes run to along each of its directions, at
+ *  an Echoes setting of `echoes`. */
+export function trailEchoes(solid: Solid, echoes: number): number {
+  const directions = solid.dim - 1;
+  const budget = Math.floor((MAX_TRAIL_SEGMENTS / solid.edges.length) ** (1 / directions));
+  return Math.max(2, Math.min(budget, Math.round(echoes * ECHOES_SHARE[solid.dim])));
+}
 
 /** The camera's yaw for a turn phase — see the header. */
 export function orbitYaw(phase: number): number {
@@ -214,8 +239,11 @@ function pose(solid: Solid, src: readonly number[], phase: number, scale: number
 }
 
 /** Projects a posed (and possibly displaced) vertex: writes screen x, y (in
- *  units of `screenScale`) and the magnification into `out`. */
-function project(dim: 3 | 4, v: Float64Array, yaw: number, screenScale: number, out: Float64Array): void {
+ *  units of `screenScale`) and the magnification into `out`. `planeX`, `planeY`
+ *  carry it across the screen after the camera's swing, as a flat shape's fan
+ *  is: before it, the swing would turn that row toward the viewer, and its
+ *  nearest copies would fill the frame. */
+function project(dim: 3 | 4, v: Float64Array, yaw: number, screenScale: number, out: Float64Array, planeX = 0, planeY = 0): void {
   let x = v[0];
   let y = v[1];
   let z = v[2];
@@ -232,8 +260,8 @@ function project(dim: 3 | 4, v: Float64Array, yaw: number, screenScale: number, 
   const xr = c * x + s * z;
   const zr = -s * x + c * z;
   const s3 = VIEW_3D / (VIEW_3D - Math.min(zr, VIEW_3D - NEAR_LIMIT));
-  out[0] = xr * s3 * SCALE_3D * screenScale;
-  out[1] = y * s3 * SCALE_3D * screenScale;
+  out[0] = (xr + planeX) * s3 * SCALE_3D * screenScale;
+  out[1] = (y + planeY) * s3 * SCALE_3D * screenScale;
   out[2] = m * s3;
 }
 
@@ -315,9 +343,10 @@ function field(dim: 3 | 4, p: Float64Array, freq: number, time: number, out: Flo
 }
 
 export interface TrailParams {
-  /** How many copies, the figure now included. */
+  /** How many copies along each direction, the figure now included
+   *  (trailEchoes). */
   echoes: number;
-  /** How far each echo moves from the one before, in circumradii. */
+  /** How far each copy moves from its parent, in circumradii. */
   step: number;
   /** The flow's spatial frequency, in waves per circumradius. */
   freq: number;
@@ -327,47 +356,97 @@ export interface TrailParams {
   yaw: number;
   /** The figure's size now, in half-heights. */
   radius: number;
-  /** Echo k's turn phase and size: k = 0 is now, k frames ago after that. */
+  /** A copy's turn phase and size, k steps from the figure now: k = 0 is now,
+   *  k frames ago after that. */
   phaseAt(k: number): number;
   radiusAt(k: number): number;
 }
 
-/** Writes the whole trail — every edge of every echo, nearest echo first —
- *  as SEGMENT_FLOATS-float segments into `out`, and returns how many it
- *  wrote (never more than fit). */
+// Reused between frames: a trail is rebuilt every frame, and a dense one holds
+// tens of thousands of numbers.
+let dispScratch = new Float64Array(0);
+let posedScratch = new Float64Array(0);
+
+/** Writes the whole trail, every edge of every copy, as SEGMENT_FLOATS-float
+ *  segments into `out`, and returns how many it wrote (never more than fit).
+ *  Copies run through their directions in index order, the across-the-screen
+ *  direction changing fastest, then depth, then the fourth axis. */
 export function buildTrail(solid: Solid, p: TrailParams, out: Float32Array): number {
   const n = solid.verts.length;
   const dim = solid.dim;
+  const directions = dim - 1;
+  const echoes = p.echoes;
+  const copies = echoes ** directions;
   const screenScale = p.radius / typicalExtent(solid);
-  const disp = new Float64Array(n * 4);
+  const lags = (echoes - 1) * directions + 1;
+  if (dispScratch.length < copies * n * 4) dispScratch = new Float64Array(copies * n * 4);
+  if (posedScratch.length < lags * n * 4) posedScratch = new Float64Array(lags * n * 4);
+  const disp = dispScratch;
+  const posed = posedScratch;
   const v = new Float64Array(4);
   const q = new Float64Array(4);
   const f = new Float64Array(4);
   const proj = new Float64Array(n * 3);
   const pr = new Float64Array(3);
   const maxSegments = Math.floor(out.length / SEGMENT_FLOATS);
-  const pushAxis = dim === 4 ? 3 : 2;
-  let count = 0;
-  for (let k = 0; k < p.echoes; k++) {
+  // The row across the screen grows both ways from the frame's centre, or
+  // louder mids would carry the whole figure off to one side.
+  const planeStep = p.step * DIRECTION_STEP[0];
+
+  for (let k = 0; k < lags; k++) {
     const rel = p.radius > 0 ? p.radiusAt(k) / p.radius : 1;
     const phase = p.phaseAt(k);
     for (let i = 0; i < n; i++) {
       pose(solid, solid.verts[i], phase, rel, v);
-      if (k > 0) {
-        for (let c = 0; c < 4; c++) q[c] = v[c] + disp[i * 4 + c];
-        field(dim, q, p.freq, p.time, f);
-        f[pushAxis] *= PUSH_AXIS_BEND;
-        if (pushAxis !== 2) f[2] *= PUSH_AXIS_BEND;
-        for (let c = 0; c < 4; c++) disp[i * 4 + c] += p.step * BEND * f[c];
-        disp[i * 4 + pushAxis] -= p.step;
+      posed.set(v, (k * n + i) * 4);
+    }
+  }
+
+  let count = 0;
+  for (let copy = 0; copy < copies; copy++) {
+    let lag = 0;
+    let fade = 1;
+    // The last direction this copy has moved along: its parent is one step
+    // back along it, so every row grows out of a copy the row before made.
+    let direction = -1;
+    let stride = 1;
+    let parentStride = 0;
+    for (let d = 0, rest = copy; d < directions; d++) {
+      const along = rest % echoes;
+      rest = Math.floor(rest / echoes);
+      lag += along;
+      fade *= 1 - along / echoes;
+      if (along > 0) {
+        direction = d;
+        parentStride = stride;
       }
-      for (let c = 0; c < 4; c++) v[c] += disp[i * 4 + c];
-      project(dim, v, p.yaw, screenScale, pr);
+      stride *= echoes;
+    }
+    const parent = copy - parentStride;
+    const across = copy % echoes;
+    const planeX = (across - (echoes - 1) / 2) * planeStep * PLANE_PUSH[0];
+    const planeY = (across - (echoes - 1) / 2) * planeStep * PLANE_PUSH[1];
+    for (let i = 0; i < n; i++) {
+      const base = (lag * n + i) * 4;
+      const mine = (copy * n + i) * 4;
+      if (direction < 0) {
+        for (let c = 0; c < 4; c++) disp[mine + c] = 0;
+      } else {
+        const from = (parent * n + i) * 4;
+        for (let c = 0; c < 4; c++) q[c] = posed[base + c] + disp[from + c];
+        field(dim, q, p.freq, p.time + direction * DIRECTION_TIME_SHIFT, f);
+        f[2] *= PUSH_AXIS_BEND;
+        f[3] *= PUSH_AXIS_BEND;
+        for (let c = 0; c < 4; c++) disp[mine + c] = disp[from + c] + p.step * BEND * f[c];
+        // Depth is z, the fourth axis w; across the screen is planeX, planeY.
+        if (direction > 0) disp[mine + direction + 1] -= p.step * DIRECTION_STEP[direction];
+      }
+      for (let c = 0; c < 4; c++) v[c] = posed[base + c] + disp[mine + c];
+      project(dim, v, p.yaw, screenScale, pr, planeX, planeY);
       proj[i * 3] = pr[0];
       proj[i * 3 + 1] = pr[1];
       proj[i * 3 + 2] = pr[2];
     }
-    const fade = 1 - k / Math.max(p.echoes, 1);
     for (const [a, b] of solid.edges) {
       if (count >= maxSegments) return count;
       const o = count * SEGMENT_FLOATS;

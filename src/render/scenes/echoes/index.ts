@@ -2,9 +2,9 @@
 // drawn into a feedback loop that a drifting noise field warps every frame,
 // so the outline sheds a fan of evenly spaced echo lines that peel off along
 // the flow, bunch into sheets where the flow stalls, and fade out. A 3D or
-// 4D wireframe figure instead leaves its echoes in its own space — pushed
-// back into depth or through the fourth axis — built and drawn without the
-// loop (solids.ts's header has why and how). Built from
+// 4D wireframe figure instead leaves its echoes in its own space, multiplying
+// along one more direction for each dimension it adds — built and drawn
+// without the loop (solids.ts's header has why and how). Built from
 // `/ref` on a live-coding set filmed at a venue (r/creativecoding, "Live
 // coding generative visuals during our show"; bundle `livecode-wall`, the
 // wall projection cropped out of the room) — docs/scenes/echoes.md has the
@@ -46,7 +46,7 @@ import { PASSTHROUGH_DRIVES } from "../../drives.ts";
 import { wrapFlow } from "../../noiseHash.ts";
 import type { QualityPreset } from "../../quality.ts";
 import { buildStepFrag, buildDisplayFrag, MAX_RINGS, SEGMENT_FRAG, SEGMENT_VERT } from "./glsl.ts";
-import { buildTrail, MAX_SOLID_EDGES, orbitYaw, SEGMENT_FLOATS, SOLIDS } from "./solids.ts";
+import { buildTrail, MAX_TRAIL_SEGMENTS, orbitYaw, SEGMENT_FLOATS, SOLIDS, trailEchoes } from "./solids.ts";
 import { card, SETTINGS, SHAPES } from "./card.ts";
 
 const ID = card.id;
@@ -93,10 +93,11 @@ function settingFor(key: string): SceneSetting {
   return s;
 }
 
-/** The most echoes a figure's trail can have (the Echoes setting's own
- *  max), and how many frames of the figure's turn and size are kept for it. */
+/** How many frames of a figure's turn and size are kept: a copy can be as many
+ *  steps from the figure now as the Echoes setting's top allows along each of
+ *  a 4D figure's three directions. */
 const MAX_ECHOES = settingFor("echoes").max;
-const HISTORY_FRAMES = MAX_ECHOES + 1;
+const HISTORY_FRAMES = 3 * MAX_ECHOES + 1;
 
 const STEP_FRAG = buildStepFrag(SETTINGS, COMMON_UNIFORMS_GLSL);
 const DISPLAY_FRAG = buildDisplayFrag(SETTINGS, COMMON_UNIFORMS_GLSL);
@@ -134,16 +135,16 @@ function createEchoesScene(): Scene {
   // jump every plane but the first.
   let solidPhase = 0;
   // The figure's turn phase and size over the last HISTORY_FRAMES frames,
-  // newest at `historyHead` — echo k of a figure's trail is the figure as it
-  // was k frames ago (solids.ts's buildTrail), so a Kick pop ripples down
-  // the trail the way it runs down a flat shape's echoes.
+  // newest at `historyHead` — a copy k steps from the figure now is the figure
+  // as it was k frames ago (solids.ts's buildTrail), so a Kick pop ripples
+  // through the copies the way it runs down a flat shape's echoes.
   const phaseHistory = new Float64Array(HISTORY_FRAMES);
   const radiusHistory = new Float64Array(HISTORY_FRAMES);
   let historyHead = 0;
   let historyLen = 0;
   // The trail's segments for the segment pass, and the instanced VAO that
   // reads them (a static quad corner buffer plus this, per instance).
-  const segBuf = new Float32Array(MAX_SOLID_EDGES * MAX_ECHOES * SEGMENT_FLOATS);
+  const segBuf = new Float32Array(MAX_TRAIL_SEGMENTS * SEGMENT_FLOATS);
   let segProg: GLProgram | null = null;
   let segVao: WebGLVertexArrayObject | null = null;
   let segCornerVbo: WebGLBuffer | null = null;
@@ -335,10 +336,11 @@ function createEchoesScene(): Scene {
       if (shapeSpec.solid && segProg && segVao && segInstVbo) {
         // A figure's echoes live in its own space (solids.ts's header): the
         // whole trail is rebuilt each frame and drawn fresh, no feedback.
+        const solid = SOLIDS[shapeSpec.solid];
         const count = buildTrail(
-          SOLIDS[shapeSpec.solid],
+          solid,
           {
-            echoes: Math.max(1, Math.min(MAX_ECHOES, Math.round(echoes))),
+            echoes: trailEchoes(solid, echoes),
             step: flowAmount * TRAIL_STEP_PER_FLOW,
             freq: TRAIL_FREQ * detail,
             time: fieldPhase * TRAIL_TIME_PER_PHASE,
