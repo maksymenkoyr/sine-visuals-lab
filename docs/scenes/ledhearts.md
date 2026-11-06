@@ -1,11 +1,12 @@
 # LED Hearts (`ledhearts`)
 
 In development, on main. Glowing magenta hearts on a wall of round LEDs, zooming out from the
-centre forever. Most hearts face the viewer and rock; a few turn all the way
-round and show violet edge-on. Near hearts swell, soften to dim red and fade.
+centre forever. Most hearts face the viewer and rock; a few keep turning,
+narrowing and leaning violet but never thinning to a line. Near hearts swell,
+soften to dim red and fade.
 The music speeds the zoom and lifts the glow with its level, kicks push the
 zoom, hits set the hearts spinning, and a drop sends a wave of light out from
-the centre. First pass, not on main yet: it sits in this PR.
+the centre.
 
 ## Where the code is
 
@@ -150,11 +151,63 @@ has by design.
     median 16.88 → 16.31, p95 21.71 → 21.52 on the song, median 7.95 → 7.93,
     p95 9.19 → 9.22 in silence; hits a minute 392 → 402 on the song, 0 → 0
     in silence.
+- 2026-11-04, the owner: "I just don't like current LED hearts at all … why
+  can't it be the same as the original but without the lines." Three things
+  read as lines. The old heart (a diamond with two discs) had a distance
+  field that was wrong outside the shape, so every heart's haze trailed a
+  point below its tip. Haze and soft edges reached past what the lattice's
+  2×2 lookup reads, so the lookup's cell edges cut them off in straight
+  seams. A heart turning edge-on became a one-LED violet streak; the
+  reference has these too, but the owner wants them gone. Now
+  the heart is each lobe disc joined to a small tip disc along their
+  tangents, with an exact distance field and only the tip rounded (rounding
+  the whole outline filled the cleft, and small hearts read as blobs). Every
+  heart's light fades out by `LOOKUP_REACH`. A turning heart stops at
+  `MIN_WIDTH`. `EDGE` went under one LED, so a heart a few LEDs tall keeps
+  its cleft and tip. `tools/tune-real.mjs ledhearts` on Levitating, 30 s
+  from 4 s, change in % of full scale per 100 ms:
+
+  | build | song med | song p95 | silence med | silence p95 |
+  |---|---:|---:|---:|---:|
+  | before (main) | 14.81 | 22.89 | 7.96 | 9.19 |
+  | true heart | 16.09 | 23.10 | 8.19 | 9.49 |
+
+  Reactions unchanged; no hit fired on silence.
+- 2026-11-06, the owner: "make them less blurry. lets mb try to expose blur to
+  signals." A new Blur setting sets edge softness, how far the haze reaches and
+  how soft near hearts get, all from one value. Its default sits low, so the
+  picture is now well sharper than the reference on purpose. Blur starts with
+  nothing plugged in, because the music should not soften a picture the owner
+  asked to sharpen until someone wires it; a wire lifts the slider toward full
+  blur. `tools/tune-real.mjs ledhearts` on Levitating, 30 s from 4 s, no wire,
+  change in % of full scale per 100 ms:
+
+  | source | change med | change p95 | hits/min | energy |
+  |---|---:|---:|---:|---:|
+  | song | 18.85 | 24.12 | 316 | 0.66 |
+  | silence | 8.46 | 9.74 | 0 | 0.00 |
+
+  The same song with Blur wired, 20 s from 4 s, reading the picture's edge
+  contrast each frame (a 160×90 copy's mean neighbour difference, higher is
+  sharper, one run each; it counts LED dots too, so it moves less than the
+  eye sees):
+
+  | wire | song p5 | song med | song p95 | silence med |
+  |---|---:|---:|---:|---:|
+  | none | 29.46 | 32.25 | 35.92 | 25.47 |
+  | Kick hit | 27.83 | 30.51 | 33.93 | 25.49 |
+  | Level | 27.08 | 28.99 | 30.89 | 25.48 |
+
+  Silence does not move with a wire in. At full wire weight Kick hit pumps from
+  sharp to fully soft on each kick; Level sits soft on a loud song, so it wants
+  a lower weight.
 
 ## Tuning notes
 
 - Hearts, Haze and the ground decide the dark share; check it beside the
-  reference, since it is half of the look.
+  reference, since it is half of the look. Blur is sharper than the
+  reference's glow at its default, so the reference's look sits higher up its
+  slider.
 - Level rush stacks on Zoom speed; on a loud track the zoom runs about 1.4×
   its rest speed before kicks. Turn Level rush down for calmer music.
 - Hit spin defaults to Mid hit (snares, claps) so it alternates with the
@@ -193,3 +246,5 @@ has by design.
 
 - #654: first pass (draft).
 - 2026-10-24 (#682) — Bass and Treble hits also fire on the engine's band-level jumps; no code in this scene changed (see Decisions)
+- 2026-11-04 — a true heart shape; no haze seams, tip stems or edge-on streaks (see Decisions)
+- 2026-11-06 — sharper by default; a Blur setting that takes wires (see Decisions)
