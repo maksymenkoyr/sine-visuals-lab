@@ -918,3 +918,5 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 - #805 (draft, 2026-10-30): Dance cut and Camera cut on their own wires,
   Shortest dance and Shortest view, and the chip on screen outlined on the
   Dance and View rows.
+- #822 (draft, 2026-11-07): every dance keeps one pace, measured from how it
+  moves (`pace.ts`).
