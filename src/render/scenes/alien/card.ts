@@ -7,8 +7,9 @@ import { DANCE_HOLD_SEC, LOOPS, VIEW_HOLD_SEC, VIEWS } from "./reel.ts";
 // This scene's gallery section and the day it was added (scenes/sceneModules.ts).
 export const gallery = { stage: "development", added: "2026-10-05" } as const;
 
-/** Scales Level (Move's default wire) so a loud song reads about 1 — the
- *  dance at its captured speed with Move at its default. */
+/** Scales Level (Move's default wire) so a loud song reads about 1: with
+ *  Move at its default, every dance at the pace they all keep
+ *  (reel.ts's DANCE_PACE_HZ). */
 export const MOVE_GAIN = 2;
 
 export const SETTINGS: SceneSetting[] = [
@@ -17,7 +18,8 @@ export const SETTINGS: SceneSetting[] = [
     label: "Move",
     description:
       "The music pays for every frame of the dance: the wired input node times this sets how fast the loop plays, " +
-      "gliding rather than jumping. At 1 a loud song plays it as it was danced; silence buys no frames, so the alien holds still",
+      "gliding rather than jumping. Every dance keeps the same pace, so a cut never makes him dance faster or slower. " +
+      "At 1 a loud song plays that pace; silence buys no frames, so the alien holds still",
     group: "Motion",
     min: 0,
     max: 3,

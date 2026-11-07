@@ -7,8 +7,9 @@ import { LOOPS } from "../../render/scenes/alien/reel.ts";
 /**
  * The Move readout (Alien, src/render/scenes/alien/): the Move row, then what
  * the music is buying right now, all from the scene's probe() every tick.
- *   - speed: the dance's speed, × the dance as captured;
- *   - buying: frames of the captured dance paid for per second at that speed;
+ *   - speed: the dance's speed, × the pace every dance keeps (reel.ts's
+ *     DANCE_PACE_HZ);
+ *   - buying: frames of the dance's clip paid for per second at that speed;
  *   - the loop on screen (of LOOPS) and its clip;
  *   - the loop as a strip of its frames, filled up to the playhead, and the
  *     frame number. In silence nothing is bought, so the strip stops and
