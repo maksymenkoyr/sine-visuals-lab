@@ -52,6 +52,7 @@ import {
   advanceFlight,
   cameraUniforms,
   cameraWorld,
+  churnOffset,
   createFlight,
   gasDriftRate,
   hueWander,
@@ -146,6 +147,7 @@ function createNebulaScene(): Scene {
   const prevCam = new Float32Array(16);
   let camNow = createCameraFrame();
   let camThen = createCameraFrame();
+  const churn = new Float32Array(3);
   const bandsBuf = new Float32Array(NUM_BANDS);
 
   function sizedTarget(gl: WebGL2RenderingContext, preset: QualityPreset): ColorTarget {
@@ -254,8 +256,7 @@ function createNebulaScene(): Scene {
       gasProg.setV4v("uCam", cam);
       gasProg.setV4v("uPath", path);
       gasProg.setF("uHueDrift", hueDrift);
-      gasProg.setF("uChurn", flight.churn);
-      gasProg.setV2("uFlow", flight.flowX, flight.flowY);
+      gasProg.setV3v("uChurn", churnOffset(flight, churn));
       gasProg.setV4v("uShockAt", shockAt);
       gasProg.setF("uShockAmp", setting("shock") * shockAmp(reactions));
       gasProg.setF("uIgnite", setting("shock") * igniteAmp(reactions));

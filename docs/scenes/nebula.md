@@ -7,8 +7,8 @@ and churning texture inside them, and dark voids full of stars ahead. The music 
 section builds (Surge), lights the gas from inside with the melody (Inner
 light), sends a burning wave through it on a drop (Drop shock), leans the
 colours with how bright the sound is (Colour tilt) and makes the stars
-flash on the hats (Twinkle); in silence it only drifts, the gas streaming past
-and slowly changing shape (Gas drift), and its colours wander round the
+flash on the hats (Twinkle); in silence it only drifts, the gas slowly
+changing shape where it is (Gas drift), and its colours wander round the
 wheel over most of an hour. In development.
 
 ## Where the code is
@@ -33,8 +33,8 @@ wheel over most of an hour. In development.
   as the resolve reads it (`HISTORY_SCALE`, `MAX_JUMP`).
 - `src/render/scenes/nebula/flight.ts` — the camera on the JS side: the
   weaving path (`PATH_X`, `PATH_Y`, tunnel radius `PATH_R`), the roll
-  (`ROLL`), the colour wander (`HUE_WANDER`), the gas's own churn and flow
-  (`CHURN_RATE`, `FLOW`, scaled by Gas drift) and the repeats every sampled
+  (`ROLL`), the colour wander (`HUE_WANDER`), the gas's own reshaping
+  (`CHURN`, run by Gas drift) and the repeats every sampled
   field shares (`PERIOD`, `PERIOD_Z`). Nothing that grows reaches the GPU
   (noiseHash.ts's header says why).
 - `src/render/scenes/nebula/stars.ts` — the stars as GL points: a field,
@@ -43,7 +43,8 @@ wheel over most of an hour. In development.
   gas that dims and reddens them up to the depth the gas pass leaves in its
   alpha.
 - `tests/nebulaFlight.test.ts` — bounded uniforms, an orthonormal view, no
-  jump at the camera's wrap, deterministic stars.
+  jump at the camera's wrap, deterministic stars, and Gas drift leaving the
+  camera's read of the gas alone.
 - `tests/nebulaHistory.test.ts` — the sub-pixel offsets, and a gas parcel
   reprojected to where the last camera saw it across the flow's and the
   camera's wraps.
@@ -328,6 +329,36 @@ hook; main and this change served side by side.
   (`scripts/clip.mjs --synthetic`): Drop shock's burn reads as on main frame
   for frame, with no trail behind its front.
 
+2026-11-07, Gas drift reshapes in place (Levitating; the gas alone is
+flight, Surge, stars, Colour drift and every reaction at 0, in silence,
+20 s from 6 s; `scripts/slide.mjs` with frames 2 s apart).
+
+- Slide against reshape: correlation at no shift / at the best shift, the
+  best shift's mean length, and how consistent its direction is (1 = one
+  way every time):
+
+  | Gas drift | build | at 0 | best | shift | consistency |
+  |---|---|---|---|---|---|
+  | 8 | main (flow + churn circle) | 0.295 | 0.588 | 10.8 px (the probe's limit) | 0.99 |
+  | 8 | churn circle alone | 0.926 | 0.926 | 0 px | — |
+  | 8 | this change | 0.649 | 0.687 | 2.4 px | 0.17 |
+  | 1 | this change | 0.942 | 0.942 | 0 px | — |
+
+- The gas alone, `tools/tune-real.mjs` change median / p95 in silence:
+  main 0.49 / 0.60 at Gas drift 1 and 3.36 / 4.56 at 8; the churn circle
+  without the flow 0.08 / 0.09 and 0.28 / 0.33; this change 0.23 / 0.28 at 1.
+- `tools/tune-real.mjs`, 30 s from 4 s, default settings, main then this
+  change in the same session:
+
+  | build | source | change med | change p95 | hits/min | energy | fps |
+  |---|---|---|---|---|---|---|
+  | main | song | 5.05 | 6.84 | 316 | 0.66 | 120 |
+  | main | silence | 1.94 | 2.96 | 0 | 0.00 | 118 |
+  | this | song | 4.80 | 6.73 | 332 | 0.67 | 119 |
+  | this | silence | 1.92 | 2.79 | 0 | 0.00 | 120 |
+
+  Song over silence at p95 2.4×; the flight still sets the scene's pace.
+
 ## Decisions and pivots
 
 - 2026-10-21 — Sync hypotheses from the scan: no trigger at all (silent
@@ -477,6 +508,17 @@ hook; main and this change served side by side.
   lines; they see `SHELL_FINE` of it. A new setting, Fine detail, scales it,
   and at 0 the gas runs smooth as before and the reads are skipped. Its
   default, 1, is my call, not yet confirmed by the owner.
+- 2026-11-07 — The owner found Gas drift moving the camera: "it should
+  change clouds shape but not move them all in one direction like a wind".
+  This replaces the 10-26 reading of the ask as both motions. The flow slid
+  the whole gas as one block, which on screen is a sideways camera move; it
+  is gone. Alone, the old churn (a small circle in the warp field) only
+  wobbled the outlines and came back, nearly still at the default. The
+  warp's read point now wanders along one slow sine per axis (`CHURN`),
+  each about half the warp's coarsest cell, so outlines change for good
+  while every mass stays where it is; the probe finds no direction to it.
+  Its pace at Gas drift 1 is my call: about half the old default's motion,
+  all of it reshaping; the owner hasn't seen it yet.
 
 ## Tuning notes
 
@@ -487,8 +529,10 @@ hook; main and this change served side by side.
 - Gas sets how much of the view is cloud; Roll how far the view swings;
   Colour turn rotates every colour about the grey axis (0 is the
   reference's violet); Colour drift sets how fast the wander runs; Gas drift how fast the
-  gas streams past and reshapes on its own (0 holds it still); a wire on it
+  gas reshapes in place on its own (0 holds it still); a wire on it
   quickens that, by a level far more than by a hit, whose push is brief.
+- To tell a reshape from a slide, run `scripts/slide.mjs` on the gas alone:
+  frame change can't, since a slide moves as many pixels.
 - Inner light and Colour tilt swing against the song's own recent level,
   so judge them a half-minute into a song; at its start they ease in.
 - Fine detail sets how finely the edges crinkle and the bodies churn; 0 is
@@ -526,7 +570,8 @@ hook; main and this change served side by side.
   correlation at fixed lags), `stats.py` (luma, saturation, lit hue),
   `hues.py` (hue shares of lit pixels), `loop.py` (loop period and colour
   over the video), `ca.py` (lens-split test), `pair.py` (reference over
-  ours tiles), `shot.mjs` (synthetic-audio screenshots, first PR).
+  ours tiles), `shot.mjs` (synthetic-audio screenshots, first PR),
+  `slide.mjs` (whether the picture slides one way or reshapes in place).
 - The reactions' prototype: the private page
   https://claude.ai/artifact/D39meUNZGjwpdh9mbqtJuB (versions 1 to 3).
 - The reference video, frames and comparison sheets: the local `/ref` cache
