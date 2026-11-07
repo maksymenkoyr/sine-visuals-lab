@@ -4,11 +4,13 @@
  * between dark voids full of stars. flight.ts moves the camera, volume.ts
  * bakes the gas, glsl.ts marches through it, stars.ts lays the stars over it.
  *
- * Three draws: the march runs into an offscreen target no taller than
- * `GAS_HEIGHT` for the quality preset, a full-resolution pass scales it up
- * with its glare, and the stars go on top as points. The gas is soft enough
- * to scale up, sharpened on the way (glsl.ts's OUT_BODY); the march at full
- * Retina resolution measured 112 ms a frame on an M1 Pro.
+ * Four draws: the march runs into an offscreen target no taller than
+ * `GAS_HEIGHT` for the quality preset, with its rays shifted a little every
+ * frame; a resolve folds that into a history twice as tall, moved for the
+ * camera's motion (history.ts); a full-resolution pass scales the history up
+ * with its glare; and the stars go on top as points. The march at full
+ * Retina resolution measured 112 ms a frame on an M1 Pro, and the history
+ * gets most of a taller march's detail for a fraction of its cost.
  *
  * The look and the motion were measured from a silent Blender screensaver
  * (the `/ref` bundles `violet-filament` and `violet-loop`); nothing in it
@@ -29,6 +31,7 @@ import {
   createColorTarget,
   createFullscreenQuad,
   createProgram,
+  destroyTarget,
   drawFullscreenQuad,
   type ColorTarget,
   type GLProgram,
@@ -45,8 +48,27 @@ import {
   uploadCommonUniforms,
 } from "../../sceneCommon.ts";
 import { card, SETTINGS } from "./card.ts";
-import { advanceFlight, cameraUniforms, cameraWorld, createFlight, gasDriftRate, hueWander, pathUniforms, type Flight } from "./flight.ts";
-import { EXTRA_UNIFORMS, FOV_TAN, GAS_BODY, OCCLUDE, OUT_BODY, T_MAX } from "./glsl.ts";
+import {
+  advanceFlight,
+  cameraUniforms,
+  cameraWorld,
+  createFlight,
+  gasDriftRate,
+  hueWander,
+  pathUniforms,
+  PERIOD,
+  type Flight,
+} from "./flight.ts";
+import { EXTRA_UNIFORMS, FOV_TAN, GAS_BODY, OCCLUDE, OUT_BODY, RESOLVE_BODY, T_MAX } from "./glsl.ts";
+import {
+  captureCamera,
+  createCameraFrame,
+  frameNoiseAt,
+  HISTORY_SCALE,
+  jitterAt,
+  MAX_JUMP,
+  prevCamUniforms,
+} from "./history.ts";
 import {
   advanceReactions,
   createReactions,
@@ -78,11 +100,13 @@ function setting(key: string): number {
   return spec ? resolveSceneSetting(ID, spec) : 0;
 }
 
-function fragSource(body: string): string {
+/** `aux`: the gas pass, which also writes its light's depth to a second attachment (glsl.ts). */
+function fragSource(body: string, aux = false): string {
+  const outs = aux ? "layout(location = 0) out vec4 outColor;\nlayout(location = 1) out vec4 outAux;" : "out vec4 outColor;";
   return `#version 300 es
 precision highp float;
 in vec2 vUv;
-out vec4 outColor;
+${outs}
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS.map((s) => `uniform float ${settingUniformName(s.key)};`).join("\n")}
 ${DRIVE_GLSL(SETTINGS)}
@@ -100,8 +124,15 @@ function createNebulaScene(): Scene {
   let vao: WebGLVertexArrayObject | null = null;
   let starVao: WebGLVertexArrayObject | null = null;
   let starBuf: WebGLBuffer | null = null;
+  let resolveProg: GLProgram | null = null;
   let maxPointSize = 64;
+  // The gas target, its light's depth (a second attachment) and the history pair; all sized together.
   let target: ColorTarget | null = null;
+  let aux: WebGLTexture | null = null;
+  let hist: ColorTarget[] = [];
+  let front = 0;
+  let histOk = false;
+  let frameNo = 0;
   // Baked once per mount; a bake that failed isn't retried every frame.
   let volume: WebGLTexture | null = null;
   let baked = false;
@@ -111,6 +142,10 @@ function createNebulaScene(): Scene {
   const tw = new Float32Array(4);
   const cam = new Float32Array(16);
   const path = new Float32Array(8);
+  const jitter = new Float32Array(2);
+  const prevCam = new Float32Array(16);
+  let camNow = createCameraFrame();
+  let camThen = createCameraFrame();
   const bandsBuf = new Float32Array(NUM_BANDS);
 
   function sizedTarget(gl: WebGL2RenderingContext, preset: QualityPreset): ColorTarget {
@@ -119,16 +154,34 @@ function createNebulaScene(): Scene {
     const h = Math.max(1, Math.min(fullH, GAS_HEIGHT[preset]));
     const w = Math.max(1, Math.round((fullW * h) / fullH));
     if (target && target.w === w && target.h === h) return target;
-    freeTarget(gl);
-    target = createColorTarget(gl, w, h, { label: ID, minFilter: gl.LINEAR_MIPMAP_LINEAR, mipmap: true });
-    return target;
+    freeTargets(gl);
+    const t = createColorTarget(gl, w, h, { label: ID, minFilter: gl.LINEAR_MIPMAP_LINEAR, mipmap: true });
+    target = t;
+    aux = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, aux);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.R8, w, h);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, aux, 0);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const hh = Math.min(fullH, h * HISTORY_SCALE);
+    const hw = Math.max(1, Math.round((fullW * hh) / fullH));
+    hist = [createColorTarget(gl, hw, hh, { label: ID }), createColorTarget(gl, hw, hh, { label: ID })];
+    histOk = false;
+    return t;
   }
 
-  function freeTarget(gl: WebGL2RenderingContext): void {
-    if (!target) return;
-    gl.deleteFramebuffer(target.fbo);
-    gl.deleteTexture(target.tex);
+  function freeTargets(gl: WebGL2RenderingContext): void {
+    destroyTarget(gl, target);
     target = null;
+    if (aux) gl.deleteTexture(aux);
+    aux = null;
+    for (const h of hist) destroyTarget(gl, h);
+    hist = [];
+    histOk = false;
   }
 
   return {
@@ -136,7 +189,8 @@ function createNebulaScene(): Scene {
 
     init(ctx: SceneContext) {
       const { gl } = ctx;
-      gasProg = createProgram(gl, fragSource(GAS_BODY));
+      gasProg = createProgram(gl, fragSource(GAS_BODY, true));
+      resolveProg = createProgram(gl, fragSource(RESOLVE_BODY));
       outProg = createProgram(gl, fragSource(OUT_BODY));
       starProg = createProgram(gl, STAR_FRAG, starVert(FOV_TAN, T_MAX, OCCLUDE));
       vao = createFullscreenQuad(gl);
@@ -154,10 +208,12 @@ function createNebulaScene(): Scene {
       flight = createFlight();
       reactions = createReactions();
       baked = false;
+      histOk = false;
+      frameNo = 0;
     },
 
     render(ctx, frame, viewport, palette, anim, drives = PASSTHROUGH_DRIVES) {
-      if (!gasProg || !outProg || !starProg || !vao || !starVao) return;
+      if (!gasProg || !resolveProg || !outProg || !starProg || !vao || !starVao) return;
       const { gl } = ctx;
       if (!baked) {
         volume = bakeVolume(gl);
@@ -180,9 +236,21 @@ function createNebulaScene(): Scene {
       const hueDrift = hueWander(flight);
 
       const tgt = sizedTarget(gl, ctx.quality.preset);
+      const [histIn, histOut] = [hist[front], hist[1 - front]];
+      captureCamera(camPos, cam, flight.flowX, flight.flowY, camNow);
+      if (histOk && prevCamUniforms(camThen, camNow, PERIOD, prevCam) > MAX_JUMP) histOk = false;
+      [camNow, camThen] = [camThen, camNow];
+      jitterAt(frameNo, jitter);
+      const frameNoise = frameNoiseAt(frameNo);
+      frameNo = (frameNo + 1) % 1_000_000;
+
       gl.bindFramebuffer(gl.FRAMEBUFFER, tgt.fbo);
       gl.viewport(0, 0, tgt.w, tgt.h);
       gasProg.setV2("uResolution", tgt.w, tgt.h);
+      gasProg.setV2("uJitter", jitter[0], jitter[1]);
+      gasProg.setF("uFrameNoise", frameNoise);
+      // A history pixel's size at unit distance: the fine detail is drawn down to it (glsl.ts).
+      gasProg.setF("uPixel", (2 * FOV_TAN) / histOut.h);
       gasProg.setV4v("uCam", cam);
       gasProg.setV4v("uPath", path);
       gasProg.setF("uHueDrift", hueDrift);
@@ -202,13 +270,45 @@ function createNebulaScene(): Scene {
       gl.bindTexture(gl.TEXTURE_2D, tgt.tex);
       gl.generateMipmap(gl.TEXTURE_2D);
 
+      gl.bindFramebuffer(gl.FRAMEBUFFER, histOut.fbo);
+      gl.viewport(0, 0, histOut.w, histOut.h);
+      resolveProg.use();
+      uploadCommonUniforms(resolveProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
+      resolveProg.setV2("uResolution", histOut.w, histOut.h);
+      resolveProg.setV4v("uCam", cam);
+      resolveProg.setV4v("uPrevCam", prevCam);
+      resolveProg.setV2("uJitter", jitter[0], jitter[1]);
+      resolveProg.setF("uFrameNoise", frameNoise);
+      resolveProg.setF("uHistOk", histOk ? 1 : 0);
+      gl.bindTexture(gl.TEXTURE_2D, tgt.tex);
+      resolveProg.setI("uGasTex", 0);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, aux);
+      resolveProg.setI("uAuxTex", 1);
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, histIn.tex);
+      resolveProg.setI("uHistTex", 2);
+      drawFullscreenQuad(gl, vao);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      front = 1 - front;
+      histOk = true;
+
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
       outProg.use();
       uploadCommonUniforms(outProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       gl.bindTexture(gl.TEXTURE_2D, tgt.tex);
-      outProg.setI("uGasTex", 0);
+      outProg.setI("uGasTex", 1);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, histOut.tex);
+      outProg.setI("uHistTex", 0);
       drawFullscreenQuad(gl, vao);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, tgt.tex);
 
       if (setting("stars") > 0) {
         starProg.use();
@@ -220,6 +320,7 @@ function createNebulaScene(): Scene {
         starProg.setV4v("uTw", twinkleUniforms(reactions, tw));
         starProg.setF("uTwAmt", setting("twinkle"));
         starProg.setI("uGasTex", 0);
+        starProg.setV2("uJitterUv", jitter[0] / tgt.w, jitter[1] / tgt.h);
         // Screen blend: a star brightens the gas under it without clipping it to white.
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.ONE_MINUS_DST_COLOR, gl.ONE);
@@ -234,17 +335,19 @@ function createNebulaScene(): Scene {
 
     dispose(ctx: SceneContext) {
       const { gl } = ctx;
-      freeTarget(gl);
+      freeTargets(gl);
       if (volume) gl.deleteTexture(volume);
       volume = null;
       baked = false;
       gasProg?.dispose();
+      resolveProg?.dispose();
       outProg?.dispose();
       starProg?.dispose();
       if (vao) gl.deleteVertexArray(vao);
       if (starVao) gl.deleteVertexArray(starVao);
       if (starBuf) gl.deleteBuffer(starBuf);
       gasProg = null;
+      resolveProg = null;
       outProg = null;
       starProg = null;
       vao = null;

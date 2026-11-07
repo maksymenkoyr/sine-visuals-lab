@@ -17,6 +17,16 @@ export const SETTINGS: SceneSetting[] = [
     description: "How much of the view is cloud. Lower leaves more open space.",
   },
   {
+    key: "fine",
+    label: "Fine detail",
+    group: "Form",
+    min: 0,
+    max: 2,
+    step: 0.05,
+    default: 1,
+    description: "How finely the cloud's edges crinkle and its insides churn. At 0 they run smooth.",
+  },
+  {
     key: "stars",
     label: "Stars",
     group: "Form",
