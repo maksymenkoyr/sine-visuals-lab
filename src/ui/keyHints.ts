@@ -1,6 +1,7 @@
 import { isMacAgent } from "./outputKeys.ts";
 import { EFFECTS } from "../render/heldEffects.ts";
 import { effectShortcutId } from "./effectControls.ts";
+import { WALK_KEYS } from "./freeLook.ts";
 import { hideTooltip, showTooltip } from "./tooltip.ts";
 
 /**
@@ -103,6 +104,8 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { key: "1–9", id: "pad", label: "Fire pad", hint: "Fire pad 1–9 of the Set, panel open or closed" },
   // A scene's own arrow keys (ui/sceneArrows.ts); Alien's camera is the only one so far.
   { key: "← → ↑ ↓", id: "arrows", label: "Camera", hint: "Move the camera, in a scene that has one (Alien): ← → around, ↑ ↓ over and under, ⇧ ↑ ↓ closer and further" },
+  // A scene's own walk (ui/freeLook.ts); Code Rain is the only one so far.
+  { key: "W A S D", id: "walk", label: "Walk", hint: `Walk through a scene that lets you (Code Rain): click the picture, then ${WALK_KEYS.join(", ")}` },
   // The held effects (render/heldEffects.ts): one row per effect, tagged on its
   // on-screen button in #fxBar (ui/effectControls.ts).
   ...EFFECTS.map((e) => ({ key: e.key, id: effectShortcutId(e.id), label: e.label, hint: e.hint })),

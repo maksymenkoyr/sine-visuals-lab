@@ -1,12 +1,11 @@
 # Code Rain (`coderain`)
 
-A 3D field of falling glyph columns that the camera explores on foot —
-walking over low hills without ever stopping, slowing to look round, high
-into the rain and down below, floating up or sinking through the columns — with a
-dancer drawn in tiny raining glyphs among them. Bass hits start fresh heads
-from the top of the view and flare the heads; the overall level speeds the
-fall; a drop swings the camera to a new heading. Speed runs the walk and the
-fall faster or slower together. In development, in the gallery's development section.
+A 3D field of falling glyph columns with a dancer drawn in tiny raining
+glyphs among them. The camera stands still; a viewer can walk through the
+rain and look round by hand, like in a game: click the picture, then the
+mouse looks and the keys walk, and Esc stops. Kicks start fresh heads from
+the top of the view and flare the heads; the overall level speeds the fall.
+In development, in the gallery's development section.
 
 ## Where the code is
 
@@ -17,9 +16,9 @@ fall faster or slower together. In development, in the gallery's development sec
   clock, the hit-burst ring (`BURST_SLOTS`), the draws.
 - `glyphs.ts` — the hand-drawn stroke glyph set and `buildGlyphAtlas`.
 - `figure.ts` — the dancer: the Dancers scene's choreographer and rig, flattened to 2D capsules.
-- `explorer.ts` — the camera's scripted walk: walk, look-round and rise legs from a seeded generator, and the head's gaze points.
+- `src/render/freeLook.ts` and `src/ui/freeLook.ts` — the walk by hand, shared rather than the scene's own: the card's `freeLook` turns it on, and the body moves its camera with a `createWalker`.
 - `glsl.ts` — `RAIN_VERT`/`RAIN_FRAG` (instanced columns) and `FIGURE_VERT`/`FIGURE_FRAG`; hashes via `noiseHash.ts`'s `uhash` on integers only.
-- `tests/coderain.test.ts`.
+- `tests/coderain.test.ts`; the walk's own in `tests/freeLook.test.ts`.
 
 ## References
 
@@ -90,8 +89,33 @@ hear run but ~106.7 on the ref-shoot run.
     median 3.71 → 3.6, p95 5.21 → 5.15 on the song, median 2.81 → 2.77, p95
     4.01 → 4.03 in silence; hits a minute 414 → 408 on the song, 0 → 0 in
     silence.
+- 2026-11-07 — Owner: remove the head tilting and all the moving, "we
+  should just stay stand", and let a viewer move and look around "like in
+  game". The scripted explorer (`explorer.ts`), Tilt, a drop's Turn and
+  Speed are gone; Speed's only job left was the fall, which Fall speed does.
+  An old look's `speed`, `tilt` and `turn` are ignored on apply. The camera
+  stands still and level, with the dancer in the middle of the view. A click
+  on the picture locks the mouse to it: the mouse looks round, W A S D or
+  the arrows walk, Space goes up, Shift down, Esc stops; while walking those
+  keys don't strobe, open the panel, invert or cue (`src/ui/freeLook.ts`'s
+  header). The dancer now stands in the world, `FIG_DIST` ahead of the
+  start, repeating every `FIELD` like the columns and fading with distance
+  as they do. Closes #737: its parts 1 (a wandering head) and 4 (legs on the
+  music) no longer apply, part 2 is this walk, part 3 is Tilt's removal.
+  - tune-real, Around the World then silence, 30 s, main → this change,
+    change median / p95: song 3.75 / 5.21 → 1.59 / 2.08, silence 2.79 /
+    3.99 → 0.65 / 0.81 (song p95 over silence 1.3x → 2.6x); hits a minute
+    406 → 414 on the song, 0 → 0 in silence; drops a minute 2 → 2. With the
+    walk gone, what moves in silence is the rain, the flicker and the
+    dancer, so the music's share of the motion doubled.
 
 ## Known issues and next steps
+
+- The pop-out output and a room's TV don't follow the walk: each draws its
+  own camera, which stands at the start. Following would mean sending the
+  pose over the output bridge; the owner's call.
+- No walk on a touch screen: it has no pointer lock, and nothing else is
+  wired.
 
 - No `auto` weight tables yet (every setting manual).
 - The reference's ghosts carry image colour; ours is pale green — ask whether a colour option is wanted.
@@ -105,7 +129,7 @@ hear run but ~106.7 on the ref-shoot run.
 
 ## Resume here
 
-- `npm run dev`, then `/?audio=synthetic&bpm=120#/v/coderain`.
+- `npm run dev`, then `/?audio=synthetic&bpm=120#/v/coderain`; click the picture to walk.
 - `node tools/ref-shoot.mjs tools/.cache/refs/matrix-rain --scene coderain --port <p> --size 1280x720`.
 - Shell guard in the worktree rejects compound commands; use plain ones.
 
