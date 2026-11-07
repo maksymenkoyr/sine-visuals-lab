@@ -1,8 +1,8 @@
 # Nebula (`nebula`)
 
 A slow flight through a glowing gas cloud: violet, blue and magenta masses
-whose edges burn white-blue with a red-orange fringe, fine veins inside
-them, and dark voids full of stars ahead. The music brightens the cloud
+whose crinkled edges burn white-blue with a red-orange fringe, fine veins
+and churning texture inside them, and dark voids full of stars ahead. The music brightens the cloud
 (Glow), flares its edges white on hits (Flare), speeds the flight up as a
 section builds (Surge), lights the gas from inside with the melody (Inner
 light), sends a burning wave through it on a drop (Drop shock), leans the
@@ -17,15 +17,20 @@ wheel over most of an hour. In development.
   `SETTINGS`, the `gallery` record and `loadBody`. The body spreads the card, so the
   registered settings are the body's own objects.
 - `src/render/scenes/nebula/index.ts` — the body: the rest of the scene, loaded after first
-  paint. The three draws (gas, scale-up with glare, stars), `GAS_HEIGHT` per quality preset,
-  and the flight constants (`BASE_SPEED`, `SURGE_GAIN`).
+  paint. The four draws (gas, resolve into the history, scale-up with glare, stars),
+  `GAS_HEIGHT` per quality preset, and the flight constants (`BASE_SPEED`, `SURGE_GAIN`).
 - `src/render/scenes/nebula/volume.ts` — `bakeVolume`: the gas as a
-  tileable 3D texture, baked on the GPU once per mount (gas, detail and two
-  warp channels).
+  tileable 3D texture with a mip chain, baked on the GPU once per mount
+  (gas, detail and two warp channels).
 - `src/render/scenes/nebula/glsl.ts` — `GAS_BODY`, the raymarch (edge band,
-  inner shells and veins integrated per step, edge emphasis, the tunnel,
-  hue-keeping tone map) and `OUT_BODY`, the scale-up with glare. The band,
-  shell, tunnel and colour constants sit at the top.
+  inner shells and veins integrated per step, the fine detail near the
+  edge, edge emphasis, the tunnel, hue-keeping tone map); `RESOLVE_BODY`,
+  which folds each frame into the history; and `OUT_BODY`, the scale-up
+  with glare. The band, shell, fine detail, tunnel and colour constants sit
+  at the top.
+- `src/render/scenes/nebula/history.ts` — the temporal resolve on the JS
+  side: the march's per-frame sub-pixel offsets and the last frame's camera
+  as the resolve reads it (`HISTORY_SCALE`, `MAX_JUMP`).
 - `src/render/scenes/nebula/flight.ts` — the camera on the JS side: the
   weaving path (`PATH_X`, `PATH_Y`, tunnel radius `PATH_R`), the roll
   (`ROLL`), the colour wander (`HUE_WANDER`), the gas's own churn and flow
@@ -39,6 +44,9 @@ wheel over most of an hour. In development.
   alpha.
 - `tests/nebulaFlight.test.ts` — bounded uniforms, an orthonormal view, no
   jump at the camera's wrap, deterministic stars.
+- `tests/nebulaHistory.test.ts` — the sub-pixel offsets, and a gas parcel
+  reprojected to where the last camera saw it across the flow's and the
+  camera's wraps.
 - Drives (src/render/drives.ts): `glow` on `anim.energy`, `flare` on
   `anim.kickOnset` (read as a level in GLSL), `surge` on
   `anim.sectionIntensity` (read in JS through `drives.value`), `inner` on
@@ -275,6 +283,51 @@ from 4 s, and an in-page probe of the reactions' state over 90 s).
   1.79 / 3.00. The flight still leads, so the wire shows as the gas
   quickening, not as a new motion.
 
+2026-11-07, finer gas. Stills at 3024×1890 (a 1512×945 window at 2×, a
+MacBook's Retina canvas), the flight held at fixed distances by a temporary
+hook; main and this change served side by side.
+
+- What read as low resolution, at 2× zoom: every rim was a chain of beads
+  about 3.5 screen pixels apart. They were the march's per-pixel grain
+  (steps land differently from pixel to pixel, worst where a ray grazes the
+  thin edge band), stretched from the 540-pixel target to 1890 and lifted by
+  the unsharp step. A march at the screen's full height shrank them to a
+  pixel-sized hatch; quarter-length steps calmed the bodies but not the
+  grazing rims; with no jitter the grain became a comb of step bands.
+- Under the beads the gas held nothing finer than the detail read's
+  smallest lattice cell, about 0.1 world units: 30 to 80 screen pixels at the
+  2 to 5 units most gas is seen from. The reference's 720p frames crinkle
+  and churn down to a few pixels.
+- `tools/gpu-bench.mjs` at 3024×1890 on the M1 Pro (high), main, by the gas
+  target's height: 540 5.3 ms, 720 8.2, 945 13.0; Caustics 7.7.
+- The fine detail's two reads cost about 2% of the frame (bench, with
+  Caustics as the yardstick in each run).
+- This change against main: on a quiet machine 5.3 → 6.7 ms (Caustics 7.7);
+  in a loaded pair 6.15 → 7.88 (Caustics 8.2 in both). The resolve itself is
+  about 0.4 ms of that: cut to a single read it measured 6.26–6.34. In the
+  app at 60 fps (`--app`, per draw; its numbers run high, compare within a
+  run): gas 4.9–5.5 ms on both, scale-up 6.7–7.3 on both, the new resolve
+  5.7, stars 1.4–1.6 → 1.6.
+- Frame statistics (`scripts/stats.py`) at six distances along the flight
+  (3 to 43), main → this change: mean luma 0.192–0.481 → 0.193–0.470 (each
+  within 0.011), p50 the same, share above 0.6 0.026–0.331 → 0.023–0.306,
+  saturation the same, lit hue 253–260° → 257–263°. The light and colour
+  hold; what changed is the structure.
+- `tools/tune-real.mjs` (Levitating, 30 s from 4 s), main then this change:
+
+  | source | change med | change p95 | hits/min | energy | fps |
+  |---|---|---|---|---|---|
+  | song, main | 5.04 | 6.74 | 308 | 0.67 | 116 |
+  | silence, main | 1.93 | 2.97 | 0 | 0.00 | 117 |
+  | song | 4.93 | 6.62 | 320 | 0.66 | 113 |
+  | silence | 2.09 | 3.15 | 0 | 0.00 | 111 |
+
+  Song over silence at p95 2.3× → 2.1×: the finer texture moves a little
+  more in silence; the reactions are unchanged.
+- A drop on the synthetic feed, filmed in the page at 60 fps
+  (`scripts/clip.mjs --synthetic`): Drop shock's burn reads as on main frame
+  for frame, with no trail behind its front.
+
 ## Decisions and pivots
 
 - 2026-10-21 — Sync hypotheses from the scan: no trigger at all (silent
@@ -400,6 +453,30 @@ from 4 s, and an in-page probe of the reactions' state over 90 s).
   the scene's own motion, and nothing was asked to change until a wire goes
   in. A wire multiplies the slider's rate instead of replacing it, so a
   silent wire keeps the drift and a slider at 0 still holds the gas still.
+- 2026-11-07 — The owner found the gas low-resolution ("can we do better
+  gas quality in nebula? it seems to have low res") and offered the gas
+  simulation of their portfolio site's v2 cover: a fog sea, a shallow-water
+  layer over terrain raymarched with noise billows. Studied, not carried
+  over as such: it moves fog over ground, a 3D simulation on a grid this
+  scene could afford would be coarser than the bake, and the reference is a
+  procedural render. Two of its rendering habits did carry over: reading
+  one noise texture again at turned, finer scales, and picking the noise's
+  mip level from the pixel's footprint. A taller gas target alone cost 8.2
+  ms at 720 and 13 ms at 945 and still left the gas smooth.
+- 2026-11-07 — Chosen: fine detail near the edge (the detail channel read
+  twice more, down to a few pixels, through a mip chain the bake now builds)
+  and a temporal resolve (each frame marched with a new sub-pixel offset and
+  start offsets, averaged into a history twice the target's height, moved
+  by the depth the light came from and held to what the frame shows).
+  Without the resolve the fine detail was grain; without the fine detail the
+  resolve gave clean but still smooth lobes.
+- 2026-11-07 — Isotropic fine detail turned to grain; stretched along the
+  flight about as much as the gas is, it combed into long streaks at the
+  sides of the view; half that read most like the reference's crinkled
+  edges. Inner shells that saw all of it crazed the bodies with bright
+  lines; they see `SHELL_FINE` of it. A new setting, Fine detail, scales it,
+  and at 0 the gas runs smooth as before and the reads are skipped. Its
+  default, 1, is my call, not yet confirmed by the owner.
 
 ## Tuning notes
 
@@ -414,6 +491,10 @@ from 4 s, and an in-page probe of the reactions' state over 90 s).
   quickens that, by a level far more than by a hit, whose push is brief.
 - Inner light and Colour tilt swing against the song's own recent level,
   so judge them a half-minute into a song; at its start they ease in.
+- Fine detail sets how finely the edges crinkle and the bodies churn; 0 is
+  the smooth gas from before. Judge it on a Retina-sized frame at 1:1, in
+  motion as well as at rest: thumbnails hide it, and a single still of a
+  freshly mounted scene shows the grain the history hasn't averaged yet.
 
 ## Known issues and next steps
 
@@ -424,11 +505,12 @@ from 4 s, and an in-page probe of the reactions' state over 90 s).
   streaky masses (p50 0.11–0.17 against 0.16–0.20).
 - The flight opens on the same stretch of gas on every mount.
 - No `auto` weight tables yet; every setting is manual.
-- The gas itself stays soft: a march at the screen's full height is only a
-  little crisper than the sharpened scale-up. Finer detail would have to
-  come from the volume (`VOLUME_SIZE`, the detail read), not the target.
-- About 0.55× Caustics' GPU time at Retina size on high; lower presets
-  shrink the gas target and the step count.
+- The first frames after a mount or a resize are grainy until the history
+  fills, about eight frames. Filmed at Flight speed 3.5, the edge of the
+  view, where the gas moves fastest, kept its detail with no trail; a
+  faster jump than `MAX_JUMP` in one frame restarts the history.
+- About 0.87× Caustics' GPU time at Retina size on high; lower presets
+  shrink the gas target, the history with it, and the step count.
 - The first frame stalls on the volume bake (about 10 ms) and, most likely,
   the gas shader compiling; pre-warming the program is untried.
 
@@ -438,7 +520,9 @@ from 4 s, and an in-page probe of the reactions' state over 90 s).
   their data and our ref-shoot frames, kept with `tools/ref-keep.py`
   (`violet-filament` holds the first PR's frames).
 - `nebula/scripts/`: `rest.mjs` (the scene with a wav as the mic, chrome
-  hidden; `--video` for a real-time recording), `lagcorr.py` (motion as
+  hidden; `--video` for a real-time recording), `clip.mjs` (a real-time
+  clip at Retina size recorded in the page, sharp enough to judge the fine
+  detail in motion; 2026-11-07), `lagcorr.py` (motion as
   correlation at fixed lags), `stats.py` (luma, saturation, lit hue),
   `hues.py` (hue shares of lit pixels), `loop.py` (loop period and colour
   over the video), `ca.py` (lens-split test), `pair.py` (reference over
@@ -457,6 +541,10 @@ from 4 s, and an in-page probe of the reactions' state over 90 s).
 - Motion: `node docs/scenes/nebula/scripts/rest.mjs <prefix> --port P --wav tools/.cache/refs/violet-loop/audio.wav --video 24`,
   then `scripts/lagcorr.py video` on the recording.
 - `node tools/gpu-bench.mjs --port P --scenes nebula,caustics --w 3024 --h 1890` for cost; `node tools/tune-real.mjs nebula --wav <song.wav> --port P` for song vs silence.
+- In motion at Retina size: `node docs/scenes/nebula/scripts/clip.mjs <out.webm> --port P --wav tools/.cache/refs/violet-loop/audio.wav`
+  (`--synthetic` for a drop about 13 s in). Before/after stills at one spot
+  of the flight took a temporary hook in index.ts that set `flight.travel`,
+  not kept in the code.
 - Homebrew ffmpeg needs `DYLD_LIBRARY_PATH=/opt/homebrew/Cellar/x265/4.2/lib`;
   through `uv run` that only works as ffmpeg/ffprobe wrapper scripts on `PATH`.
 - A sampler named after a setting's uniform (`uGas`) fails to compile.
@@ -470,3 +558,4 @@ from 4 s, and an in-page probe of the reactions' state over 90 s).
 - Realistic stars (#684, 2026-10-24).
 - A sharper scale-up (#701, 2026-10-25).
 - A leaner march (2026-10-25): half the GPU time, same picture.
+- Finer gas (2026-11-07): fine detail at the edges and a temporal resolve.

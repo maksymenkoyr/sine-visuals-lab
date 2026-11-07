@@ -9,7 +9,10 @@
  *   repeat. glsl.ts thresholds it into cloud and void, and reads it again
  *   at the detail's scale for its veins.
  * - G, detail: a finer fbm (`DETAIL_CELLS`) that glsl.ts reads at a higher
- *   frequency still, for the fine folds inside the cloud.
+ *   frequency still, for the fine folds inside the cloud, and twice more at
+ *   far higher ones for the fine detail of its edges. Those reads go through
+ *   the mip chain the bake ends with: read that fine at level 0, distant gas
+ *   would sparkle.
  * - B and A, the warp: two independent coarse fbms (`WARP_CELLS`) that bend
  *   the gas into the reference's combed, flowing filaments.
  *
@@ -26,8 +29,8 @@
 import { createFullscreenQuad, createProgram, drawFullscreenQuad } from "../../gl.ts";
 import { NOISE_HASH_GLSL } from "../../noiseHash.ts";
 
-/** Texels per repeat on each axis: 8 MB of RGBA8. */
-const VOLUME_SIZE = 128;
+/** Texels per repeat on each axis: 8 MB of RGBA8, and a seventh more for the mip chain. */
+export const VOLUME_SIZE = 128;
 
 const BASE_CELLS = [4, 8, 16, 32];
 const BASE_AMPS = [1, 0.45, 0.16, 0.06];
@@ -103,8 +106,8 @@ export function bakeVolume(gl: WebGL2RenderingContext): WebGLTexture | null {
   const scissor = gl.isEnabled(gl.SCISSOR_TEST);
 
   gl.bindTexture(gl.TEXTURE_3D, tex);
-  gl.texStorage3D(gl.TEXTURE_3D, 1, gl.RGBA8, VOLUME_SIZE, VOLUME_SIZE, VOLUME_SIZE);
-  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texStorage3D(gl.TEXTURE_3D, Math.log2(VOLUME_SIZE) + 1, gl.RGBA8, VOLUME_SIZE, VOLUME_SIZE, VOLUME_SIZE);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
   gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.REPEAT);
   gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.REPEAT);
@@ -141,5 +144,8 @@ export function bakeVolume(gl: WebGL2RenderingContext): WebGLTexture | null {
     gl.deleteTexture(tex);
     return null;
   }
+  gl.bindTexture(gl.TEXTURE_3D, tex);
+  gl.generateMipmap(gl.TEXTURE_3D);
+  gl.bindTexture(gl.TEXTURE_3D, prevTex);
   return tex;
 }

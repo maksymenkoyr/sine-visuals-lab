@@ -1,8 +1,10 @@
 /**
- * Nebula's two fragment bodies: GAS_BODY marches through the gas volume
- * volume.ts bakes, into a smaller offscreen target; OUT_BODY scales that up
- * to the screen. index.ts wraps both in the common uniform header, runs them
- * in that order, and draws stars.ts's points over the result.
+ * Nebula's three fragment bodies: GAS_BODY marches through the gas volume
+ * volume.ts bakes, into a smaller offscreen target; RESOLVE_BODY folds each
+ * frame's march into a history twice as tall (history.ts); OUT_BODY scales
+ * the history up to the screen. index.ts wraps all three in the common
+ * uniform header, runs them in that order, and draws stars.ts's points over
+ * the result.
  *
  * Why it looks like the reference: the gas glows only in a band around one
  * density level, its edge, and hardly at all inside. A ray that grazes a
@@ -19,9 +21,12 @@
  * channels (B, A) and read with a longer repeat along the flight than
  * across it (flight.ts's PERIOD_Z), so the gas streams toward the vanishing
  * point the way the reference's wisps lie; plus a finer read of the volume
- * for detail; minus a tunnel of open space around the camera's path
- * (flight.ts), so the camera flies through the voids and the gas passes
- * around it.
+ * for detail; plus, near the edge, the fine detail: the detail channel read
+ * twice more at much finer scales through the volume's mip chain, the level
+ * picked from a history pixel's footprint, so the edges crinkle down to a
+ * few pixels as the reference's do and stay calm far off; minus a tunnel of
+ * open space around the camera's path (flight.ts), so the camera flies
+ * through the voids and the gas passes around it.
  *
  * The band is far thinner than a step, so each step integrates it (erf of
  * the density at both ends, taken as linear in between) rather than
@@ -31,9 +36,16 @@
  * shells inside the edge and the veins of the finer read: thin sheets that
  * show as lines where the ray runs along them.
  *
+ * Long steps over a thin band still land differently from pixel to pixel,
+ * worst where a ray grazes an edge, and the fine detail adds to that: one
+ * frame's gas is grainy, and stretched to a Retina screen the grain read as
+ * beads along every rim. So the march starts each pixel at a new offset
+ * every frame and RESOLVE_BODY averages the frames, each moved to where the
+ * last camera saw it by the depth its light came from.
+ *
  * The gas target holds the gas already tone-mapped (1 - e^-x), and in alpha
  * the depth where the gas turns opaque, which stars.ts reads to hide the
- * stars behind it.
+ * stars behind it; its second attachment holds that light-weighted depth.
  *
  * Four music reactions ride on the march (reactions.ts holds their state): Inner light scales the
  * shells, veins and fill; Drop shock's front, a sphere around uShockAt, swells the gas it crosses
@@ -46,6 +58,7 @@
  */
 
 import { PATH_R, PATH_X, PATH_Y, PERIOD, PERIOD_Z, type PathSine } from "./flight.ts";
+import { VOLUME_SIZE } from "./volume.ts";
 
 /** Compile-time cap on march steps; the live count is uMaxSteps (quality.ts). */
 const MAX_STEPS = 96;
@@ -104,6 +117,29 @@ const DETAIL_XY = 3;
 const DETAIL_Z = 2;
 /** The detail's weight in the density. */
 const DETAIL_AMP = 0.07;
+/** The fine detail: the detail channel read twice more at finer scales, each through a whole-number
+ *  matrix from the position in periods to texture repeats (rows: across x, across y, along z). The
+ *  off-diagonal terms turn each lattice off the axes and the others' without breaking a repeat.
+ *  Along the flight they repeat several times less often than across it, so they lie as fibres
+ *  along the rays, which the march's long steps can follow; isotropic, they turned to grain. */
+const FINE_A = [
+  [8, 4, 0],
+  [-4, 8, 0],
+  [0, 0, 12],
+];
+const FINE_B = [
+  [39, -26, 0],
+  [26, 39, 0],
+  [3, 0, 40],
+];
+/** The fine detail's weight in the density, and the finer read's share of it. */
+const FINE_AMP = 0.028;
+const FINE_B_GAIN = 0.7;
+/** How much of the fine detail the inner shells see: all of it crazed the bodies with bright lines. */
+const SHELL_FINE = 0.3;
+/** The most the fine detail moves the density: below the edge by more than this plus the void's
+ *  reach, the detail can't light the step, so it isn't read. */
+const FINE_MAX = FINE_AMP * 0.5 * (1 + FINE_B_GAIN);
 /** The tunnel: its radius at rest (world units), how far it lowers the density at its axis, and
  *  the distances ahead (world units) over which it fades to half: the gas far down the flight stays,
  *  so the vanishing point holds small distant clouds as the reference's does. */
@@ -128,10 +164,11 @@ const EXPOSURE = 1.25;
 const BLOOM_LODS = [2, 3.5];
 const BLOOM_FLOOR = 0.18;
 const BLOOM_GAIN = 0.8;
-/** Unsharp amount against the gas target's first mip, after the cubic scale-up. Measured at Retina
- *  size (docs/scenes/nebula.md): high's `GAS_HEIGHT` target came out about as crisp as a march at
- *  the screen's full height, at a fraction of the cost; twice this turned the gas grainy. */
+/** Unsharp amount after the cubic scale-up, against four reads of the history `SHARP_R` history
+ *  pixels off diagonally. Compared at Retina size (docs/scenes/nebula.md, 2026-11-07): less left the
+ *  crinkles soft, more turned them crunchy. */
 const SHARPEN = 0.5;
+const SHARP_R = 1.5;
 /** Inner light: how many times brighter the shells and veins glow, and the dim fill, at full drive at
  *  Inner light 1. Most of it goes to the veins: lifting the fill as much turned the bodies milky in
  *  the prototype (docs/scenes/nebula.md, 2026-10-30). */
@@ -152,6 +189,9 @@ const IGNITE_FILL = 0.6;
 const TILT_DEG = 42;
 
 const f = (x: number, d = 4) => x.toFixed(d);
+// Built from rows, for `p * M`: GLSL takes a matrix's columns, and a row vector times it dots each one.
+const rowsGlsl = (m: number[][]) => `mat3(${m.map((r) => `vec3(${r.map((v) => f(v, 1)).join(", ")})`).join(", ")})`;
+const texelsPerUnit = (m: number[][]) => (Math.hypot(m[0][0], m[0][1]) * VOLUME_SIZE) / PERIOD;
 
 // Each sine's phase at the camera comes in uPath (flight.ts's pathUniforms); the shader adds its own advance over dz.
 function pathGlsl(name: string, sines: readonly PathSine[], phases: string[]): string {
@@ -175,12 +215,19 @@ uniform float uShockAmp;
 uniform float uIgnite;
 uniform float uInnerLevel;
 uniform float uTiltLean;
+uniform sampler2D uAuxTex;
+uniform sampler2D uHistTex;
+uniform vec2 uJitter;
+uniform float uFrameNoise;
+uniform float uPixel;
+uniform vec4 uPrevCam[4];
+uniform float uHistOk;
 `;
 
 const VIEW_RAY = `
-// This pixel's ray: uCam is flight.ts's cameraUniforms (position, right, up, forward).
-vec3 viewRay(out vec2 p) {
-  p = roomUv(vUv) - 0.5;
+// The ray through uv: uCam is flight.ts's cameraUniforms (position, right, up, forward).
+vec3 viewRay(vec2 uv, out vec2 p) {
+  p = roomUv(uv) - 0.5;
   p.x *= uResolution.x / uResolution.y;
   return normalize(uCam[3].xyz + (p.x * uCam[1].xyz + p.y * uCam[2].xyz) * ${f(2 * FOV_TAN)});
 }
@@ -211,6 +258,8 @@ const vec3 VEIN = vec3(0.48, 0.55, 1.00);
 // World to volume texture: one repeat per period, so the gas is stretched along the flight.
 const vec3 BASE_SCALE = vec3(${f(1 / PERIOD, 6)}, ${f(1 / PERIOD, 6)}, ${f(1 / PERIOD_Z, 6)});
 const vec3 DETAIL_SCALE = vec3(${f(DETAIL_XY / PERIOD, 6)}, ${f(DETAIL_XY / PERIOD, 6)}, ${f(DETAIL_Z / PERIOD_Z, 6)});
+const mat3 FINE_A = ${rowsGlsl(FINE_A)};
+const mat3 FINE_B = ${rowsGlsl(FINE_B)};
 
 ${pathGlsl("pathX", PATH_X, ["uPath[0].x", "uPath[0].y"])}
 ${pathGlsl("pathY", PATH_Y, ["uPath[0].z", "uPath[0].w"])}
@@ -234,7 +283,7 @@ vec3 hueTurn(vec3 c, float deg) {
 
 void main() {
   vec2 p;
-  vec3 dir = viewRay(p);
+  vec3 dir = viewRay(vUv + uJitter / uResolution, p);
   // The gas streams by uFlow while the tunnel stays on the camera's path, so the flow never fills it.
   vec3 cam = uCam[0].xyz - vec3(uFlow, 0.0);
   vec2 here = vec2(pathX(0.0), pathY(0.0));
@@ -247,8 +296,13 @@ void main() {
   float innerFill = 1.0 + ${f(INNER_FILL)} * innerLit;
   vec3 churn = ${f(CHURN_R)} * vec3(cos(uChurn), sin(uChurn), 0.0);
 
-  // Interleaved gradient noise: a fixed per-pixel start offset that turns step banding into fine grain.
-  float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+  // Interleaved gradient noise: a per-pixel start offset that turns step banding into fine grain, moved
+  // on every frame so RESOLVE_BODY averages the grain away.
+  float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))) + uFrameNoise);
+  float lodA = log2(max(uPixel * ${f(texelsPerUnit(FINE_A), 3)}, 1e-6));
+  float lodB = log2(max(uPixel * ${f(texelsPerUnit(FINE_B), 3)}, 1e-6));
+  float depthSum = 0.0;
+  float lightSum = 0.0;
 
   vec3 col = vec3(0.0);
   float T = 1.0;
@@ -256,6 +310,7 @@ void main() {
   float t = jitter * ${f(DT_MIN)};
   float tPrev = 0.0;
   float ePrev = 0.0;
+  float eSPrev = 0.0;
   vec4 erfPrev = vec4(0.0);
   vec4 erfSPrev = vec4(0.0);
   float fibPrev = 0.5;
@@ -269,12 +324,23 @@ void main() {
 
     vec3 rel = dir * t;
     vec3 wp = cam + rel;
-    vec4 wv = texture(uVol, (wp + churn) * BASE_SCALE);
+    // Level 0 throughout but for the fine reads: in this loop's uneven control flow the implicit
+    // derivatives that would pick a mip level are undefined.
+    vec4 wv = textureLod(uVol, (wp + churn) * BASE_SCALE, 0.0);
     vec3 qw = wp + ${f(WARP)} * vec3(wv.z - 0.5, wv.w - 0.5, wv.z - wv.w);
-    vec2 fine = texture(uVol, qw * DETAIL_SCALE).rg;
+    vec2 fine = textureLod(uVol, qw * DETAIL_SCALE, 0.0).rg;
     float det = fine.y;
     float fib = fine.x;
-    float dens = texture(uVol, qw * BASE_SCALE).r + ${f(DETAIL_AMP)} * (det - 0.5) + ${f(WRINKLE)} * (fib - 0.5);
+    float dens = textureLod(uVol, qw * BASE_SCALE, 0.0).r + ${f(DETAIL_AMP)} * (det - 0.5) + ${f(WRINKLE)} * (fib - 0.5);
+    float fineD = 0.0;
+    if (uFine > 0.001 && dens > th + ${f(VOID_E * BAND)} - ${f(FINE_MAX)} * uFine) {
+      vec3 pq = qw * BASE_SCALE;
+      float lt = log2(max(t, 0.05));
+      float fa = textureLod(uVol, pq * FINE_A, lodA + lt).g - 0.5;
+      float fb = textureLod(uVol, pq * FINE_B, lodB + lt).g - 0.5;
+      fineD = ${f(FINE_AMP)} * uFine * (fa + ${f(FINE_B_GAIN)} * fb);
+      dens += fineD;
+    }
 
     vec2 axis = vec2(pathX(rel.z), pathY(rel.z)) - here;
     float rad = ${f(TUNNEL_R)} * (1.0 + pathR(rel.z));
@@ -291,6 +357,7 @@ void main() {
     }
 
     float e = (dens - th) / ${f(BAND)};
+    float eS = e - ${f(1 - SHELL_FINE)} * fineD / ${f(BAND)};
     // Most steps lie in empty space, where every erf below sits on its clamp; branching to the clamped
     // value instead of evaluating it is exact and halves the march.
     vec4 x = vec4(-4.0), xs = vec4(-4.0), erfX = vec4(-1.0), erfS = vec4(-1.0);
@@ -298,8 +365,8 @@ void main() {
     if (e > ${f(VOID_E)}) {
       x = clamp((e - BAND_C) / BAND_S, -4.0, 4.0);
       erfX = e >= ${f(BAND_TOP_E)} ? vec4(1.0) : erfA(x);
-      xs = clamp((e * ${f(BAND)} - SHELL_OFF) / ${f(SHELL_W)}, -4.0, 4.0);
-      erfS = e <= ${f(SHELL_LOW_E)} ? vec4(-1.0) : (e >= ${f(SHELL_TOP_E)} ? vec4(1.0) : erfA(xs));
+      xs = clamp((eS * ${f(BAND)} - SHELL_OFF) / ${f(SHELL_W)}, -4.0, 4.0);
+      erfS = eS <= ${f(SHELL_LOW_E)} ? vec4(-1.0) : (eS >= ${f(SHELL_TOP_E)} ? vec4(1.0) : erfA(xs));
       fill = smoothstep(0.5, 2.5, e);
       sigma = ${f(ABSORB)} * smoothstep(-1.0, 1.5, e);
     }
@@ -315,7 +382,7 @@ void main() {
     if (live) {
       float de = e - ePrev;
       vec4 avg = abs(de) > 1e-3 ? 0.8862269 * BAND_S * (erfX - erfPrev) / de : exp(-x * x);
-      float ds = de * ${f(BAND / SHELL_W)};
+      float ds = (eS - eSPrev) * ${f(BAND / SHELL_W)};
       vec4 avgS = abs(ds) > 1e-3 ? 0.8862269 * (erfS - erfSPrev) / ds : exp(-xs * xs);
       float dv = (fib - fibPrev) / ${f(VEIN_W)};
       float avgV = abs(dv) > 1e-3 ? 0.8862269 * (erfV - erfVPrev) / dv : exp(-xv * xv);
@@ -343,11 +410,16 @@ void main() {
         float rims = (avg.y * ${f(BAND_GAIN[1])} + avg.z * ${f(BAND_GAIN[2])} + avg.w * ${f(BAND_GAIN[3])}) * heat * edge;
         emit += ember * uIgnite * pow(1.0 - cool, 1.5) * (rims * ${f(IGNITE_RIM)} + inside * ${f(IGNITE_FILL)});
       }
-      col += T * emit * (${f(EMIT)} * fade * bright * dt);
+      vec3 lit = T * emit * (${f(EMIT)} * fade * bright * dt);
+      col += lit;
+      float litSum = lit.r + lit.g + lit.b;
+      depthSum += litSum * t;
+      lightSum += litSum;
       T *= exp(-0.5 * (sigma + sigmaPrev) * dt);
       if (T < ${f(OCCLUDE)} && tOcc >= ${f(T_MAX)}) tOcc = t;
     }
     ePrev = e;
+    eSPrev = eS;
     erfPrev = erfX;
     erfSPrev = erfS;
     fibPrev = fib;
@@ -368,34 +440,112 @@ void main() {
   vec3 keep = col * ((1.0 - exp(-m * ${f(EXPOSURE)})) / m);
   vec3 bleach = 1.0 - exp(-col * ${f(EXPOSURE)});
   outColor = vec4(mix(bleach, keep, ${f(KEEP_HUE)}), tOcc / ${f(T_MAX)});
+  // Where the light came from, weighted by it: the depth RESOLVE_BODY moves this pixel by.
+  outAux = vec4(lightSum > 1e-5 ? depthSum / lightSum / ${f(T_MAX)} : 1.0, 0.0, 0.0, 1.0);
+}
+`;
+
+// Catmull-Rom, not the hardware's bilinear: OUT_BODY stretches the history over a Retina screen, where
+// bilinear smears every rim, and RESOLVE_BODY reads it back every frame, where bilinear would blur it a
+// little more each time. Per axis the two middle weights are both positive, so one bilinear read at
+// their balance point takes both texels: nine reads for the sixteen. The texture must filter LINEAR.
+// The clamp drops the filter's overshoot past black and white.
+const CUBIC = `
+vec3 cubicRgb(sampler2D tex, vec2 uv) {
+  vec2 size = vec2(textureSize(tex, 0));
+  vec2 c = uv * size - 0.5;
+  vec2 i = floor(c);
+  vec2 t = c - i;
+  vec2 w0 = 0.5 * t * (t * (2.0 - t) - 1.0);
+  vec2 w1 = 0.5 * (t * t * (3.0 * t - 5.0) + 2.0);
+  vec2 w2 = 0.5 * t * (t * (4.0 - 3.0 * t) + 1.0);
+  vec2 w3 = 0.5 * t * t * (t - 1.0);
+  vec2 wm = w1 + w2;
+  vec2 p0 = (i - 0.5) / size;
+  vec2 pm = (i + 0.5 + w2 / wm) / size;
+  vec2 p3 = (i + 2.5) / size;
+  vec3 sum = (textureLod(tex, vec2(p0.x, p0.y), 0.0).rgb * w0.x + textureLod(tex, vec2(pm.x, p0.y), 0.0).rgb * wm.x
+      + textureLod(tex, vec2(p3.x, p0.y), 0.0).rgb * w3.x) * w0.y
+    + (textureLod(tex, vec2(p0.x, pm.y), 0.0).rgb * w0.x + textureLod(tex, vec2(pm.x, pm.y), 0.0).rgb * wm.x
+      + textureLod(tex, vec2(p3.x, pm.y), 0.0).rgb * w3.x) * wm.y
+    + (textureLod(tex, vec2(p0.x, p3.y), 0.0).rgb * w0.x + textureLod(tex, vec2(pm.x, p3.y), 0.0).rgb * wm.x
+      + textureLod(tex, vec2(p3.x, p3.y), 0.0).rgb * w3.x) * w3.y;
+  return clamp(sum, 0.0, 1.0);
+}
+`;
+
+/** RESOLVE_BODY's reconstruction: this frame's samples weigh exp(-k d²) at d gas-target pixels. */
+const RECON_K = 2.5;
+/** How much of this frame goes into the history where one of its samples lands on the history
+ *  pixel, and the share of that where none comes near: about the last eight frames are averaged. */
+const HIST_NEW = 0.12;
+const HIST_FAR = 0.35;
+
+export const RESOLVE_BODY = `
+${CUBIC}
+${VIEW_RAY}
+void main() {
+  vec2 uv = gl_FragCoord.xy / uResolution;
+  ivec2 size = textureSize(uGasTex, 0);
+  // This frame's samples sit uJitter off their pixels' centres; s is where this history pixel falls among them.
+  vec2 s = uv * vec2(size) - 0.5 - uJitter;
+  ivec2 c = ivec2(floor(s + 0.5));
+  vec3 sum = vec3(0.0);
+  float wSum = 0.0;
+  vec3 lo = vec3(1.0);
+  vec3 hi = vec3(0.0);
+  float depth = 1.0;
+  float near = 0.0;
+  for (int y = -1; y <= 1; y++) {
+    for (int x = -1; x <= 1; x++) {
+      ivec2 k = c + ivec2(x, y);
+      ivec2 kc = clamp(k, ivec2(0), size - 1);
+      vec3 v = texelFetch(uGasTex, kc, 0).rgb;
+      vec2 d = vec2(k) - s;
+      float w = exp(${f(-RECON_K)} * dot(d, d));
+      sum += v * w;
+      wSum += w;
+      near = max(near, w);
+      lo = min(lo, v);
+      hi = max(hi, v);
+      // The nearest light around: a rim in front of far gas moves with the rim.
+      depth = min(depth, texelFetch(uAuxTex, kc, 0).r);
+    }
+  }
+  vec3 cur = sum / wSum;
+  outColor = vec4(cur, 1.0);
+  if (uHistOk < 0.5) return;
+
+  // The same gas a frame ago, seen from the last camera: uPrevCam[0] is how far this camera has moved
+  // from that one, less how far the gas itself streamed (flight.ts's flow).
+  vec2 p;
+  vec3 q = viewRay(uv, p) * (depth * ${f(T_MAX)}) + uPrevCam[0].xyz;
+  float z = dot(q, uPrevCam[3].xyz);
+  if (z < 1e-3) return;
+  vec2 pp = vec2(dot(q, uPrevCam[1].xyz), dot(q, uPrevCam[2].xyz)) / (z * ${f(2 * FOV_TAN)});
+  pp.x /= uResolution.x / uResolution.y;
+  vec2 prevUv = (pp + 0.5 - uViewport.xy) / uViewport.zw;
+  if (any(lessThan(prevUv, vec2(0.0))) || any(greaterThan(prevUv, vec2(1.0)))) return;
+
+  // Held to what this frame shows around the pixel, so gas that moved off it doesn't trail behind.
+  vec3 hist = clamp(cubicRgb(uHistTex, prevUv), lo, hi);
+  vec3 blend = mix(hist, cur, ${f(HIST_NEW)} * mix(${f(HIST_FAR)}, 1.0, near));
+  // The history is 8-bit: rounding by a moving dither, not to nearest, lets it creep by less than a step a frame.
+  float n = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))) + uFrameNoise) - 0.5;
+  outColor = vec4(blend + n / 255.0, 1.0);
 }
 `;
 
 export const OUT_BODY = `
-// Catmull-Rom, not the hardware's bilinear: the target is stretched several times over on a Retina
-// screen, where bilinear smears every rim. The clamp drops the filter's overshoot past black and white.
-vec4 crWeights(float t) {
-  return 0.5 * vec4(t * (t * (2.0 - t) - 1.0), t * t * (3.0 * t - 5.0) + 2.0, t * (t * (4.0 - 3.0 * t) + 1.0), t * t * (t - 1.0));
-}
-vec3 gasCubic(vec2 uv) {
-  ivec2 size = textureSize(uGasTex, 0);
-  vec2 c = uv * vec2(size) - 0.5;
-  vec2 i = floor(c);
-  vec4 wx = crWeights(c.x - i.x), wy = crWeights(c.y - i.y);
-  vec3 sum = vec3(0.0);
-  for (int y = 0; y < 4; y++) {
-    for (int x = 0; x < 4; x++) {
-      sum += texelFetch(uGasTex, clamp(ivec2(i) + ivec2(x - 1, y - 1), ivec2(0), size - 1), 0).rgb * wx[x] * wy[y];
-    }
-  }
-  return clamp(sum, 0.0, 1.0);
-}
-
+${CUBIC}
 void main() {
   vec2 p = roomUv(vUv) - 0.5;
   p.x *= uResolution.x / uResolution.y;
-  vec3 col = gasCubic(vUv);
-  col = clamp(col + ${f(SHARPEN)} * (col - textureLod(uGasTex, vUv, 1.0).rgb), 0.0, 1.0);
+  vec3 col = cubicRgb(uHistTex, vUv);
+  vec2 px = ${f(SHARP_R, 1)} / vec2(textureSize(uHistTex, 0));
+  vec3 soft = 0.25 * (texture(uHistTex, vUv + px).rgb + texture(uHistTex, vUv - px).rgb
+    + texture(uHistTex, vUv + vec2(px.x, -px.y)).rgb + texture(uHistTex, vUv + vec2(-px.x, px.y)).rgb);
+  col = clamp(col + ${f(SHARPEN)} * (col - soft), 0.0, 1.0);
   // Glare from the gas target's mip chain (index.ts rebuilds it each frame): the reference's rims
   // and hot spots sit in a soft halo, glow e-fold about 10 px at 720p.
   vec3 glow = 0.5 * (textureLod(uGasTex, vUv, ${f(BLOOM_LODS[0], 1)}).rgb + textureLod(uGasTex, vUv, ${f(BLOOM_LODS[1], 1)}).rgb);

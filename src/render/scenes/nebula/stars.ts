@@ -185,6 +185,8 @@ uniform vec4 uCam[4];
 uniform vec2 uResolution;
 uniform vec4 uViewport;
 uniform sampler2D uGasTex;
+// The gas target's rays sit this far off its pixels' centres this frame (history.ts), in uv.
+uniform vec2 uJitterUv;
 uniform float uStars;
 uniform float uMaxPt;
 uniform vec4 uTw;
@@ -228,7 +230,7 @@ void main() {
   vec2 p = vec2(dot(rel, uCam[1].xyz), dot(rel, uCam[2].xyz)) / (z * ${f(2 * fovTan)});
   vec2 room = vec2(p.x / aspect, p.y) + 0.5;
   vec2 uv = (room - uViewport.xy) / uViewport.zw;
-  float tOcc = textureLod(uGasTex, uv, 0.0).a * ${f(tMax)};
+  float tOcc = textureLod(uGasTex, uv - uJitterUv, 0.0).a * ${f(tMax)};
   float b = min(${f(LMIN)} * pow(max(1.0 - aStar.w, 1e-4), -2.0 / 3.0), ${f(L_CAP)})
     * ${f(D_REF * D_REF)} / max(dist * dist, ${f(NEAR_D2)});
   b *= 1.0 + ${f(TWINKLE_GAIN)} * uTwAmt * (uTw.y * lit(uTw.x) + uTw.w * lit(uTw.z));
