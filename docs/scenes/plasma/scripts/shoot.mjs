@@ -29,18 +29,26 @@ const fps = Number(opt("--fps", "30"));
 const mbps = Number(opt("--mbps", "16"));
 if (!out || !wav) throw new Error("usage: shoot.mjs <outPrefix> --repo DIR --port P --wav <file.wav> [...]");
 
+const mounts = Number(opt("--mounts", "1"));
 const { launchWithMic, openScene } = await import(pathToFileURL(`${repo}/tools/ref-browser.mjs`).href);
 const { browser, ctx } = await launchWithMic(wav, { width: W, height: H });
-const page = await openScene(ctx, { port, scene });
-// The dev tuning bus's startup fetch clears overrides; wait it out first.
-await page.waitForTimeout(1500);
-if (settings) {
-  await page.evaluate(([s, sc]) => window.__viz.setParams({ scene: sc, autoPin: true, settings: JSON.parse(s) }), [settings, scene]);
-}
-await page.waitForTimeout(wait);
-for (let i = 0; i < frames; i++) {
-  await page.screenshot({ path: `${out}-${String(i).padStart(2, "0")}.png` });
-  if (i < frames - 1) await page.waitForTimeout(every);
+let page;
+// --mounts N opens the scene N times (a fresh mount each, so a scene that
+// starts at a random phase shows N independent layouts), `frames` shots each.
+for (let m = 0; m < mounts; m++) {
+  if (page) await page.close();
+  page = await openScene(ctx, { port, scene });
+  // The dev tuning bus's startup fetch clears overrides; wait it out first.
+  await page.waitForTimeout(1500);
+  if (settings) {
+    await page.evaluate(([s, sc]) => window.__viz.setParams({ scene: sc, autoPin: true, settings: JSON.parse(s) }), [settings, scene]);
+  }
+  await page.waitForTimeout(wait);
+  for (let i = 0; i < frames; i++) {
+    const tag = mounts > 1 ? `m${String(m).padStart(2, "0")}-` : "";
+    await page.screenshot({ path: `${out}-${tag}${String(i).padStart(2, "0")}.png` });
+    if (i < frames - 1) await page.waitForTimeout(every);
+  }
 }
 if (clip > 0) {
   const file = `${out}.webm`;

@@ -4,19 +4,22 @@
 // or cut. Built against a measured, silent reference (docs/scenes/plasma.md,
 // References and Measurements), so every reaction to music is our own.
 //
-// The field f is value noise read through two nested domain warps (q, then
-// r on q), the folds coming from the warps compressing the noise. It is
-// coloured through a tone curve fitted to the reference's value bands:
-// z = (f - 0.5) / FIELD_SPREAD in standard units, red carrying the value,
-// blue a share of it that rises in the darks, green only near the top.
+// The field is value noise read through two nested domain warps (q, then r
+// on q), the folds coming from the warps compressing the noise. fieldFbm
+// reads it three ways: its first octaves (which zones are lit), a few more
+// (where the lines run) and all of them (the value). A slow mask taken from
+// q turns the fine octaves up in some zones and down in others, the
+// reference's lace beside its smooth plateaus. The value goes through a
+// tone curve that is a histogram match to the reference (TONE_Z), then
+// through crimson: red carries it, blue is a share that rises in the darks,
+// green only appears near the top.
 //
-// The lines are level sets of the same z, spaced 1 / (LINE_DENSITY * Lines)
-// apart, with a width in z units rather than pixels, so a line is thin
-// where the field is steep and spreads into a broad glow where the field
-// hovers near its level: the reference's rims show no preferred side (no
-// light), which rules out glints and leaves level sets. A pixel-width floor
-// from fwidth keeps a line from aliasing, with its energy kept, so a
-// too-thin line dims instead of fattening.
+// The lines are level sets of the line field. The reference's rims show no
+// preferred side (no light), which rules out glints and leaves level sets.
+// Each line has a fixed screen width matched to the reference's rims, and it
+// pulls the value toward one burning brightness. It fades out where the
+// next level is only a few pixels away, in the dark voids, and in the
+// brightest smooth glows.
 //
 // Motion: each warp octave drifts in its own direction (WARP_SITE_RATES,
 // turned by OCTAVE_TURN per octave), so the warps bend rather than carry
@@ -383,15 +386,13 @@ void main() {
 
   float base = tone(z);
 
-  // Contour lines at evenly spaced levels of the full field (see the
-  // header), kept to the brighter regions as in the reference.
+  // Contour lines at evenly spaced levels of the line field (see the header).
   float flash = clamp(uFlash * uFlashEnv, 0.0, 2.0);
   float density = ${LINE_DENSITY.toFixed(3)} * uLines;
   float x = zl * density + ${LINE_PHASE.toFixed(3)} + uSweepPhase;
   float d = abs(fract(x) - 0.5);
-  // The width is the wider of a fixed screen width (LINE_EFOLD_HH, the
-  // reference's measured rim) and a width in field units, which only wins
-  // where the field is shallow enough to spread a line into a glow.
+  // The width is a screen width (LINE_EFOLD_HH, the reference's measured
+  // rim) with a small floor in field units for where the field is flat.
   float widen = 1.0 + 0.8 * flash;
   float perPx = length(vec2(dFdx(x), dFdy(x)));
   float pxPerHh = uResolution.y * 0.5;
@@ -400,20 +401,18 @@ void main() {
   // away, lines bunch into parallel pairs and then alias into dotted
   // ripples, so they fade out there. By the soft field, they stay out of
   // the dark voids and out of the brightest zones, which the reference
-  // keeps as smooth glows: its veins run over mid-crimson ground.
-  // The profile falls off like the reference's rims: an exponential core
-  // whose tail is cut by the square term, so a line lights 2-3 px on each
-  // side and not the ground around it (a plain exponential's tail lifted
-  // whole lit zones by a few hundredths).
+  // keeps as smooth glows. The profile falls off like the reference's rims:
+  // an exponential core whose tail is cut by the square term, so a line
+  // lights a few pixels and not the ground around it (a plain exponential's
+  // tail lifted whole lit zones by a few hundredths).
   float u = d / w;
   float line = exp(-u - 0.25 * u * u) * (1.0 - smoothstep(0.06, 0.2, perPx))
     * smoothstep(-0.3, 0.7, zs) * (1.0 - 0.6 * smoothstep(1.2, 2.0, zs));
   // A line burns at one brightness wherever it runs, as the reference's
   // rims do (their cores sit near the top whether the ground beside them is
   // a dark hole or a lit plateau), so it pulls the value toward LINE_V
-  // rather than adding to it. The lace zones carry the lines, not the
-  // bright ones: the reference's brightest zones are often smooth glows.
-  // What the finest octave adds on top of the line field brightens a line
+  // rather than adding to it; the lace zones carry a little more of it.
+  // What the finest octaves add on top of the line field brightens a line
   // in one stretch and lets it fade in the next, as the reference's do,
   // instead of an even neon tube.
   float along = smoothstep(-1.2, 1.2, (f.z - f.y) / ${FINE_RESIDUAL_SPREAD.toFixed(4)});
