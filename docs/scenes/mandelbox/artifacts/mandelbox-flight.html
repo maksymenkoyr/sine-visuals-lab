@@ -1,0 +1,544 @@
+<title>Mandelbox Flight</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Syncopate:wght@700&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: the live fractal fills the window; one glass panel holds the controls and what was measured. */
+  :root {
+    --void: #050407;
+    --panel: rgba(10, 8, 16, 0.80);
+    --ink: #ece8f4;
+    --muted: #a59eb9;
+    --line: rgba(236, 232, 244, 0.14);
+    --accent: #b9a2ff;
+    --display: "Syncopate", "Arial Black", sans-serif;
+    --body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    color-scheme: dark;
+  }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body { background: var(--void); color: var(--ink); font-family: var(--body); overflow: hidden; }
+  canvas#view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; background: var(--void); }
+  .panel {
+    position: fixed;
+    left: calc(16px + env(safe-area-inset-left, 0px));
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    width: min(380px, calc(100vw - 32px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
+    max-height: calc(100% - 32px);
+    overflow-y: auto;
+    background: var(--panel);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding-block: 16px;
+    padding-left: 16px;
+    padding-right: 16px;
+    display: grid;
+    gap: 14px;
+  }
+  .panel[hidden] { display: none !important; }
+  h1 { font-family: var(--display); font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase; margin: 0; text-wrap: balance; }
+  h1 span { color: var(--accent); }
+  .lede { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
+  .controls { display: grid; gap: 10px; }
+  .row { display: grid; grid-template-columns: 92px 1fr; align-items: center; gap: 10px; }
+  .row label { font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+  .slider { display: grid; gap: 2px; }
+  .ends { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+  .ends output { color: var(--ink); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); margin: 0; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button { background: transparent; color: var(--muted); border: 0; padding: 5px 10px; font: 500 12px var(--body); cursor: pointer; }
+  .seg button[aria-pressed=true] { background: var(--accent); color: #120c22; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .actions button { background: transparent; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; font: 500 12.5px var(--body); cursor: pointer; }
+  .actions button:hover, .seg button:hover { border-color: var(--accent); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  details { border-top: 1px solid var(--line); padding-top: 10px; }
+  summary { cursor: pointer; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+  details ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 6px; font-size: 12.5px; line-height: 1.45; }
+  details li b { font-family: var(--mono); font-weight: 500; color: var(--ink); }
+  .stat { font-family: var(--mono); font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .show {
+    position: fixed; left: calc(16px + env(safe-area-inset-left, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; font: 500 12.5px var(--body); cursor: pointer;
+  }
+  .nogl { position: fixed; inset: 0; display: grid; place-items: center; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); color: var(--muted); text-align: center; }
+  @media (max-width: 480px) {
+    .panel { max-height: 55%; }
+    .row { grid-template-columns: 78px 1fr; }
+  }
+</style>
+
+<canvas id="view" aria-label="A live 3D fractal: the camera flies into a Mandelbox while its colours turn"></canvas>
+<div class="nogl" id="nogl" hidden>This sketch needs WebGL2, which this browser did not provide.</div>
+
+<section class="panel" id="panel" aria-label="Sketch controls">
+  <div>
+    <h1>Mandelbox <span>Flight</span></h1>
+    <p class="lede">A live sketch of the fractal video: the camera keeps flying into a box-folded fractal, its colours turn, and every so often it dissolves to a new place.</p>
+  </div>
+  <div class="controls">
+    <div class="row">
+      <label for="flight">Flight</label>
+      <div class="slider">
+        <input id="flight" type="range" min="0" max="0.3" step="0.005" value="0.075">
+        <div class="ends"><span>still</span><output id="flightOut"></output><span>fast</span></div>
+      </div>
+    </div>
+    <div class="row">
+      <label for="turn">Colour turn</label>
+      <div class="slider">
+        <input id="turn" type="range" min="0" max="0.12" step="0.002" value="0.03">
+        <div class="ends"><span>still</span><output id="turnOut"></output><span>fast</span></div>
+      </div>
+    </div>
+    <div class="row">
+      <label for="shape">Shape</label>
+      <div class="slider">
+        <input id="shape" type="range" min="-2.4" max="-1.4" step="0.01" value="-1.8">
+        <div class="ends"><span>boxes</span><output id="shapeOut"></output><span>arches</span></div>
+      </div>
+    </div>
+    <div class="row">
+      <label for="edges">Edges</label>
+      <div class="slider">
+        <input id="edges" type="range" min="0" max="2" step="0.05" value="1">
+        <div class="ends"><span>none</span><output id="edgesOut"></output><span>bright</span></div>
+      </div>
+    </div>
+    <div class="row">
+      <label for="punch">Grade</label>
+      <div class="slider">
+        <input id="punch" type="range" min="0" max="1" step="0.05" value="0.7">
+        <div class="ends"><span>soft</span><output id="punchOut"></output><span>punchy</span></div>
+      </div>
+    </div>
+    <div class="row">
+      <span class="lbl" id="mirrorLbl" style="font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)">Mirror</span>
+      <div class="seg" role="group" aria-labelledby="mirrorLbl">
+        <button id="mOff" aria-pressed="false">Off</button>
+        <button id="mOn" aria-pressed="false">On</button>
+        <button id="mAuto" aria-pressed="true">Per place</button>
+      </div>
+    </div>
+  </div>
+  <div class="actions">
+    <button id="next">New place</button>
+    <button id="pause">Pause</button>
+    <button id="hide">Hide panel</button>
+  </div>
+  <div class="stat" id="stat">starting…</div>
+  <details open>
+    <summary>Measured on the reference</summary>
+    <ul>
+      <li>The 3-hour video is one <b>60:00</b> loop played three times; frames at t and t+3600 s match (r 1.00).</li>
+      <li>No shot cuts: the camera keeps flying in, about <b>×1.08</b> closer per second, and half the picture is new every <b>~4 s</b>.</li>
+      <li>The colours turn round the hue wheel about once every <b>34 s</b>.</li>
+      <li>Mirrored left to right for <b>45%</b> of the hour, in three long runs; new places arrive by <b>~1.5 s</b> dissolves.</li>
+      <li>It does not follow its music: how fast the picture changes tracks loudness at <b>r ≤ 0.18</b> at every lag (chance alone reaches 0.13), and <b>0 of 19</b> picture changes land on a beat with a hit.</li>
+    </ul>
+  </details>
+  <details>
+    <summary>How our scene could react (proposal)</summary>
+    <ul>
+      <li>Loudness sets the flight speed: quiet passages drift, loud ones push in.</li>
+      <li>Kicks and claps flash the cell edges for a moment.</li>
+      <li>A new song section dissolves to a new place.</li>
+      <li>In silence the camera hovers and the colours slow almost to a stop.</li>
+    </ul>
+  </details>
+</section>
+<button class="show" id="show" hidden>Show panel</button>
+
+<script>
+(() => {
+  const ITER = 10;
+  const canvas = document.getElementById("view");
+  const gl = canvas.getContext("webgl2", { antialias: false, alpha: false, preserveDrawingBuffer: true });
+  if (!gl) { document.getElementById("nogl").hidden = false; document.getElementById("panel").hidden = true; return; }
+
+  const state = {
+    flight: 0.075, turn: 0.03, shape: -1.8, edges: 1, punch: 0.7, mirror: "auto",
+    paused: matchMedia("(prefers-reduced-motion: reduce)").matches,
+  };
+
+  // ---- the fractal, mirrored on the CPU for the camera (float64 there)
+  function de(x, y, z, s) {
+    let zx = x, zy = y, zz = z, dr = 1;
+    for (let i = 0; i < ITER; i++) {
+      zx = Math.min(Math.max(zx, -1), 1) * 2 - zx;
+      zy = Math.min(Math.max(zy, -1), 1) * 2 - zy;
+      zz = Math.min(Math.max(zz, -1), 1) * 2 - zz;
+      const r2 = zx * zx + zy * zy + zz * zz;
+      const k = 1 / Math.min(Math.max(r2, 0.25), 1);
+      zx = zx * k * s + x; zy = zy * k * s + y; zz = zz * k * s + z;
+      dr = dr * k * Math.abs(s) + 1;
+    }
+    return Math.hypot(zx, zy, zz) / Math.abs(dr);
+  }
+  const norm = (v) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  function grad(p, s, h) {
+    return [
+      de(p[0] + h, p[1], p[2], s) - de(p[0] - h, p[1], p[2], s),
+      de(p[0], p[1] + h, p[2], s) - de(p[0], p[1] - h, p[2], s),
+      de(p[0], p[1], p[2] + h, s) - de(p[0], p[1], p[2] - h, s),
+    ];
+  }
+  function basis(fwd) {
+    let up = Math.abs(fwd[1]) > 0.95 ? [0, 0, 1] : [0, 1, 0];
+    const right = norm(cross(fwd, up));
+    up = cross(right, fwd);
+    return { right, up };
+  }
+  function rayLen(p, rd, s, tMax) {
+    let t = 0;
+    for (let k = 0; k < 120; k++) {
+      const d = de(p[0] + rd[0] * t, p[1] + rd[1] * t, p[2] + rd[2] * t, s);
+      if (d < t * 0.004 + 1e-6) return t;
+      t += d * 0.9;
+      if (t > tMax) return tMax;
+    }
+    return t;
+  }
+  // A place is worth flying into when the view looks down an opening with walls all round it:
+  // the centre ray runs long while most of a coarse ray grid hits detail at varied depths.
+  function viewScore(p, fwd, d0, s) {
+    const { right, up } = basis(fwd);
+    const tMax = d0 * 90;
+    const centre = rayLen(p, fwd, s, tMax);
+    if (centre < d0 * 6) return -1;
+    const ts = [];
+    let hits = 0, n = 0, facing = 0;
+    for (let j = -1.5; j <= 1.5; j += 1) for (let i = -3; i <= 3; i += 1) {
+      n++;
+      const sx = i * 0.3, sy = j * 0.3;
+      const rd = norm([fwd[0] + sx * right[0] + sy * up[0], fwd[1] + sx * right[1] + sy * up[1], fwd[2] + sx * right[2] + sy * up[2]]);
+      const t = rayLen(p, rd, s, tMax);
+      if (t < tMax) {
+        hits++;
+        ts.push(t);
+        // walls seen edge-on read as a carpet of scales; the reference looks at its walls face-on
+        const q = [p[0] + rd[0] * t, p[1] + rd[1] * t, p[2] + rd[2] * t];
+        const g = norm(grad(q, s, t * 0.01));
+        facing += Math.abs(g[0] * rd[0] + g[1] * rd[1] + g[2] * rd[2]);
+      }
+    }
+    if (hits < n * 0.6) return -1;
+    facing /= hits;
+    if (facing < 0.45) return -1;
+    const m = ts.reduce((a, b) => a + b, 0) / ts.length;
+    const sd = Math.sqrt(ts.reduce((a, b) => a + (b - m) * (b - m), 0) / ts.length);
+    if (sd / m < 0.3) return -1;
+    return Math.min(centre / d0, 40) + 10 * hits / n + 20 * facing;
+  }
+  let seed = 6;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  function randDir() {
+    const z = rnd() * 2 - 1, a = rnd() * Math.PI * 2, r = Math.sqrt(1 - z * z);
+    return [r * Math.cos(a), r * Math.sin(a), z];
+  }
+  function findPlace(s) {
+    for (let tries = 0; tries < 4000; tries++) {
+      const p = [rnd() * 5 - 2.5, rnd() * 5 - 2.5, rnd() * 5 - 2.5];
+      const d = de(p[0], p[1], p[2], s);
+      if (d < 0.02 || d > 0.12) continue;
+      let best = null, bestScore = 0;
+      for (let k = 0; k < 24; k++) {
+        const fwd = randDir();
+        const sc = viewScore(p, fwd, d, s);
+        if (sc > bestScore) { bestScore = sc; best = fwd; }
+      }
+      if (best) return { p, fwd: best };
+    }
+    return { p: [0.3, 0.2, 2.6], fwd: norm([-0.1, -0.05, -1]) };
+  }
+
+  // ---- GL
+  const vsrc = `#version 300 es
+  in vec2 aPos; out vec2 vUv;
+  void main() { vUv = aPos * 0.5 + 0.5; gl_Position = vec4(aPos, 0.0, 1.0); }`;
+  const march = `#version 300 es
+  precision highp float;
+  uniform vec2 uRes;
+  uniform vec3 uPos, uRight, uUp, uFwd;
+  uniform float uTanHalf, uScale, uNear, uHue, uMirror, uPunch, uEdge;
+  out vec4 fragColor;
+  float de(vec3 p, out float trap) {
+    vec3 z = p;
+    float dr = 1.0;
+    trap = 1e9;
+    for (int i = 0; i < ${ITER}; i++) {
+      z = clamp(z, -1.0, 1.0) * 2.0 - z;
+      float r2 = dot(z, z);
+      float k = 1.0 / clamp(r2, 0.25, 1.0);
+      z = z * (k * uScale) + p;
+      dr = dr * k * abs(uScale) + 1.0;
+      trap = min(trap, r2);
+    }
+    return length(z) / abs(dr);
+  }
+  vec3 hsv(float h, float s, float v) {
+    vec3 k = clamp(abs(fract(h + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
+    return v * mix(vec3(1.0), k, s);
+  }
+  void main() {
+    vec2 sc = (2.0 * gl_FragCoord.xy - uRes) / uRes.y;
+    if (uMirror > 0.5) sc.x = -abs(sc.x);
+    vec3 rd = normalize(uFwd + uTanHalf * (sc.x * uRight + sc.y * uUp));
+    float pix = 2.0 * uTanHalf / uRes.y;
+    float t = 0.0, d = 1.0, trap = 0.0, steps = 0.0, glow = 0.0;
+    float tMax = uNear * 90.0;
+    bool hit = false;
+    for (int i = 0; i < 170; i++) {
+      d = de(uPos + rd * t, trap);
+      float foot = pix * max(t, uNear * 0.5);
+      if (d < foot * 1.5) { hit = true; break; }
+      glow += exp(-d / (foot * 2.5));
+      t += d * 0.9;
+      steps += 1.0;
+      if (t > tMax) break;
+    }
+    vec3 col = vec3(0.0);
+    vec3 tintA = hsv(uHue, 0.78, 1.0);
+    vec3 tintB = hsv(uHue + 0.42, 0.88, 0.9);
+    if (hit) {
+      vec3 p = uPos + rd * t;
+      float foot = pix * t;
+      float h = foot * 2.2;
+      float tr;
+      vec2 k = vec2(1.0, -1.0);
+      float a = de(p + k.xyy * h, tr);
+      float b = de(p + k.yyx * h, tr);
+      float c = de(p + k.yxy * h, tr);
+      float f = de(p + k.xxx * h, tr);
+      vec3 n = normalize(k.xyy * a + k.yyx * b + k.yxy * c + k.xxx * f);
+      // Laplacian of the distance times the probe size: > 0 on convex cell rims, < 0 in creases
+      float lap = (a + b + c + f - 4.0 * d) / (2.0 * h);
+      float rim = smoothstep(0.25, 0.9, lap * uEdge);
+      // occlusion at a few screen-relative radii, so creases between cells go black at any depth
+      float ao = 0.0, w = 1.0;
+      for (int j = 1; j <= 4; j++) {
+        float r = foot * 3.0 * float(j * j);
+        ao += w * clamp((r - de(p + n * r, tr)) / r, 0.0, 1.0);
+        w *= 0.7;
+      }
+      ao = clamp(1.0 - 0.45 * ao, 0.0, 1.0);
+      ao *= ao;
+      vec3 l = normalize(-rd + uUp * 0.55 + uRight * 0.35);
+      float diff = clamp(dot(n, l), 0.0, 1.0);
+      float spec = pow(clamp(dot(n, normalize(l - rd)), 0.0, 1.0), 36.0);
+      float band = fract(log2(trap + 1e-4) * 0.27);
+      vec3 base = mix(tintA, tintB, smoothstep(0.3, 0.7, band));
+      col = base * (0.04 + 0.96 * diff) * ao * 1.25;
+      col += vec3(spec * 0.9) * ao;
+      col += vec3(rim * 0.9) * sqrt(ao);
+      col *= exp(-t / (uNear * 45.0));
+    }
+    col += tintA * glow * 0.004 * uEdge;
+    // grade: saturation and an S-curve, then a soft shoulder so rims and highlights stay white
+    float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));
+    col = max(mix(vec3(luma), col, 1.0 + 0.7 * uPunch), 0.0);
+    col = col / (1.0 + 0.35 * col);
+    col = mix(col, smoothstep(0.06, 0.8, col), uPunch);
+    fragColor = vec4(col, 1.0);
+  }`;
+  const comp = `#version 300 es
+  precision mediump float;
+  in vec2 vUv;
+  uniform sampler2D uLive, uHold;
+  uniform float uMix;
+  out vec4 fragColor;
+  void main() { fragColor = vec4(mix(texture(uHold, vUv).rgb, texture(uLive, vUv).rgb, uMix), 1.0); }`;
+
+  function program(fs) {
+    const p = gl.createProgram();
+    for (const [type, src] of [[gl.VERTEX_SHADER, vsrc], [gl.FRAGMENT_SHADER, fs]]) {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+      gl.attachShader(p, s);
+    }
+    gl.bindAttribLocation(p, 0, "aPos");
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    const u = {};
+    const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+    for (let i = 0; i < n; i++) { const name = gl.getActiveUniform(p, i).name; u[name] = gl.getUniformLocation(p, name); }
+    return { p, u };
+  }
+  const P = program(march);
+  const C = program(comp);
+  const vbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+  function target(w, h) {
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const fb = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    return { tex, fb, w, h };
+  }
+  let live = null, hold = null, scale = 0.6, cw = 0, ch = 0;
+  function resize() {
+    const dpr = Math.min(devicePixelRatio || 1, 1.5);
+    cw = Math.max(2, Math.round(canvas.clientWidth * dpr));
+    ch = Math.max(2, Math.round(canvas.clientHeight * dpr));
+    canvas.width = cw; canvas.height = ch;
+    alloc();
+  }
+  function alloc() {
+    const w = Math.max(2, Math.round(cw * scale)), h = Math.max(2, Math.round(ch * scale));
+    if (live && live.w === w && live.h === h) return;
+    for (const t of [live, hold]) if (t) { gl.deleteTexture(t.tex); gl.deleteFramebuffer(t.fb); }
+    live = target(w, h);
+    hold = target(w, h);
+  }
+  addEventListener("resize", resize);
+  resize();
+
+  // ---- flight
+  const DE_FLOOR = 2.5e-4; // below this float32 positions on the GPU start to shimmer
+  let place = findPlace(state.shape);
+  let mirrorNow = false;
+  let roll = 0, fadeStart = -1, now = 0, last = performance.now(), placeTime = 0, placeLife = 70;
+  function chooseMirror() { mirrorNow = state.mirror === "on" ? true : state.mirror === "off" ? false : rnd() < 0.45; }
+  mirrorNow = state.mirror !== "off";
+  function newPlace() {
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, live.fb);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, hold.fb);
+    gl.blitFramebuffer(0, 0, live.w, live.h, 0, 0, hold.w, hold.h, gl.COLOR_BUFFER_BIT, gl.LINEAR);
+    place = findPlace(state.shape);
+    placeTime = 0;
+    placeLife = 50 + rnd() * 50;
+    roll = (rnd() - 0.5) * 0.6;
+    chooseMirror();
+    fadeStart = now;
+  }
+
+  let frames = 0, acc = 0, fpsShown = 0;
+  function frame(ms) {
+    const dt = Math.min(0.1, (ms - last) / 1000);
+    last = ms;
+    if (!state.paused) { now += dt; placeTime += dt; }
+    const s = state.shape;
+    let d = de(place.p[0], place.p[1], place.p[2], s);
+    if (!state.paused) {
+      const v = state.flight * d * dt;
+      for (let i = 0; i < 3; i++) place.p[i] += place.fwd[i] * v;
+      d = de(place.p[0], place.p[1], place.p[2], s);
+      if ((d < DE_FLOOR || placeTime > placeLife) && fadeStart < 0) newPlace();
+    }
+    const { right, up } = basis(place.fwd);
+    const a = roll * now * 0.05;
+    const r = right.map((x, i) => Math.cos(a) * x + Math.sin(a) * up[i]);
+    const u = up.map((x, i) => Math.cos(a) * x - Math.sin(a) * right[i]);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, live.fb);
+    gl.viewport(0, 0, live.w, live.h);
+    gl.useProgram(P.p);
+    gl.uniform2f(P.u.uRes, live.w, live.h);
+    gl.uniform3fv(P.u.uPos, place.p);
+    gl.uniform3fv(P.u.uRight, r);
+    gl.uniform3fv(P.u.uUp, u);
+    gl.uniform3fv(P.u.uFwd, place.fwd);
+    gl.uniform1f(P.u.uTanHalf, 0.62);
+    gl.uniform1f(P.u.uScale, s);
+    gl.uniform1f(P.u.uNear, d);
+    gl.uniform1f(P.u.uHue, (0.72 + state.turn * now) % 1);
+    gl.uniform1f(P.u.uMirror, mirrorNow ? 1 : 0);
+    gl.uniform1f(P.u.uPunch, state.punch);
+    gl.uniform1f(P.u.uEdge, state.edges);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    let mix = 1;
+    if (fadeStart >= 0) {
+      mix = Math.min(1, (now - fadeStart) / 1.5);
+      mix = mix * mix * (3 - 2 * mix);
+      if (now - fadeStart >= 1.5) fadeStart = -1;
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, cw, ch);
+    gl.useProgram(C.p);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, live.tex);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, hold.tex);
+    gl.uniform1i(C.u.uLive, 0);
+    gl.uniform1i(C.u.uHold, 1);
+    gl.uniform1f(C.u.uMix, mix);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    // keep the frame near 30 ms by trading resolution
+    frames++; acc += dt;
+    if (acc > 1) {
+      fpsShown = frames / acc;
+      const ms = 1000 / fpsShown;
+      if (ms > 34 && scale > 0.3) { scale = Math.max(0.3, scale * 0.85); alloc(); }
+      else if (ms < 20 && scale < 1) { scale = Math.min(1, scale * 1.1); alloc(); }
+      frames = 0; acc = 0;
+      const zoom = Math.exp(state.flight);
+      document.getElementById("stat").textContent =
+        `${fpsShown.toFixed(0)} fps · ${live.w}×${live.h} · ×${zoom.toFixed(2)}/s · depth ${Math.log(0.15 / d).toFixed(1)} e-folds · ${mirrorNow ? "mirrored" : "free"}`;
+      document.documentElement.style.setProperty("--accent", `hsl(${(((0.72 + state.turn * now) % 1) * 360).toFixed(0)} 80% 76%)`);
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  // ---- controls
+  const fmt = {
+    flight: (v) => (v === 0 ? "hover" : `×${Math.exp(v).toFixed(2)}/s`),
+    turn: (v) => (v === 0 ? "held" : `1 turn / ${Math.round(1 / v)} s`),
+    shape: (v) => `scale ${v.toFixed(2)}`,
+    edges: (v) => v.toFixed(2),
+    punch: (v) => v.toFixed(2),
+  };
+  for (const key of ["flight", "turn", "shape", "edges", "punch"]) {
+    const el = document.getElementById(key), out = document.getElementById(key + "Out");
+    const set = () => { state[key] = +el.value; out.textContent = fmt[key](state[key]); };
+    el.addEventListener("input", set);
+    if (key === "shape") el.addEventListener("change", () => newPlace());
+    set();
+  }
+  const mBtns = { off: "mOff", on: "mOn", auto: "mAuto" };
+  for (const [mode, id] of Object.entries(mBtns)) {
+    document.getElementById(id).addEventListener("click", () => {
+      state.mirror = mode;
+      for (const [m2, id2] of Object.entries(mBtns)) document.getElementById(id2).setAttribute("aria-pressed", String(m2 === mode));
+      if (mode !== "auto") mirrorNow = mode === "on";
+    });
+  }
+  document.getElementById("next").addEventListener("click", () => newPlace());
+  const pauseBtn = document.getElementById("pause");
+  const syncPause = () => { pauseBtn.textContent = state.paused ? "Play" : "Pause"; };
+  pauseBtn.addEventListener("click", () => { state.paused = !state.paused; syncPause(); });
+  syncPause();
+  document.getElementById("hide").addEventListener("click", () => { document.getElementById("panel").hidden = true; document.getElementById("show").hidden = false; });
+  document.getElementById("show").addEventListener("click", () => { document.getElementById("panel").hidden = false; document.getElementById("show").hidden = true; });
+  addEventListener("keydown", (e) => {
+    if (e.key === "h" || e.key === "H") document.getElementById(document.getElementById("panel").hidden ? "show" : "hide").click();
+    if (e.key === "n" || e.key === "N") newPlace();
+  });
+
+  // test hook for headless checks
+  window.__sketch = {
+    set(o) { Object.assign(state, o); if ("mirror" in o && o.mirror !== "auto") mirrorNow = o.mirror === "on"; },
+    seed(n) { seed = n; newPlace(); fadeStart = -1; },
+    info() { return { d: de(place.p[0], place.p[1], place.p[2], state.shape), scale, w: live.w, h: live.h, fps: fpsShown, mirrorNow, now }; },
+    skip(sec) { const s = state.shape; for (let t = 0; t < sec; t += 0.05) { const d = de(place.p[0], place.p[1], place.p[2], s); for (let i = 0; i < 3; i++) place.p[i] += place.fwd[i] * state.flight * d * 0.05; } now += sec; placeTime += sec; },
+  };
+})();
+</script>
