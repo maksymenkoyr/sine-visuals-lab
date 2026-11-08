@@ -40,10 +40,10 @@ export const FIELD_OCTAVES = 6;
  *  per unit of churn phase, in the base octave's lattice frame. They point
  *  different ways so the warps bend rather than travel. */
 export const WARP_SITE_RATES: ReadonlyArray<readonly [number, number]> = [
-  [0.063, -0.036],
-  [-0.045, 0.057],
-  [0.051, 0.042],
-  [-0.033, -0.06],
+  [0.1, -0.058],
+  [-0.072, 0.091],
+  [0.082, 0.067],
+  [-0.053, -0.096],
 ];
 /** How far each octave's drift turns from the one below it, in radians,
  *  and how much faster it runs. */
@@ -56,7 +56,7 @@ export const DRIFT_LEN = WARP_SITE_RATES.length * WARP_OCTAVES * 2;
  *  boils. The reference's big layout never moves at all (an hour's mean
  *  frame keeps a quarter of its variance) while its detail turns over in
  *  seconds; ours lets the layout change over minutes instead of never. */
-export const BOIL_RATE = 0.015;
+export const BOIL_RATE = 0.05;
 export const BOIL_OCTAVE_GROWTH = 2.0;
 /** Golden-ratio stagger between octaves' depths: value noise loses contrast
  *  halfway between two lattice slices, and octaves passing that point
@@ -91,44 +91,55 @@ export const SWEEP_DEPTH = 0.5;
 export const FLASH_TAU_SEC = 0.18;
 
 /** Lines per unit of z at Lines = 1, each line's half-width in z, where
- *  the levels sit (LINE_PHASE puts one on the rim of the dark holes and the
- *  next on the edge of the lit plateaus), and the value a line's core
- *  burns at. */
-const LINE_DENSITY = 0.65;
+ *  the levels sit (LINE_PHASE puts one on the rim of the dark holes, the
+ *  next across the mid-crimson ground and the next on the lit zones), and
+ *  the value a line's core burns at. */
+const LINE_DENSITY = 1.0;
 const LINE_WIDTH = 0.005;
-const LINE_PHASE = 0.15;
+const LINE_PHASE = 0.5;
 const LINE_V = 1.0;
-/** A line's screen-space e-fold in half-heights, matched to the reference's
- *  rims measured the same way at 1280x720: 3 px across at half height
- *  (docs/scenes/plasma.md). */
-const LINE_EFOLD_HH = 0.0055;
+/** A line's screen-space width scale in half-heights, matched to the
+ *  reference's rims measured the same way at 1280x720: 3 px across at half
+ *  height (docs/scenes/plasma.md). */
+const LINE_EFOLD_HH = 0.007;
 /** One standard deviation of the warped fbm, all octaves and the first
  *  SOFT_OCTAVES (the soft shading), measured on our own frames rendered
  *  raw across many layouts (a few shots of one layout read high: only a
  *  handful of base cells fit on screen). */
-const FIELD_SPREAD = 0.073;
-const SOFT_SPREAD = 0.098;
+const FIELD_SPREAD = 0.083;
+const SOFT_SPREAD = 0.112;
+const LINE_SPREAD = 0.098;
+/** The spread of what the octaves past LINE_OCTAVES add (the field less
+ *  the line field), measured the same way. */
+const FINE_RESIDUAL_SPREAD = 0.025;
 const SOFT_OCTAVES = 3;
+/** The lines follow the field's first LINE_OCTAVES octaves: on five or six
+ *  they broke into short glittering fragments, where the reference's are
+ *  long curves outlining its plateaus and holes. */
+const LINE_OCTAVES = 4;
 /** Base frequencies in noise cells per half-height, and how many
  *  half-heights' worth of q and r the two warps add. */
 const BASE_FREQ = 1.2;
-const FIELD_FREQ = 1.5;
+const FIELD_FREQ = 1.8;
 const WARP_Q = 1.4;
 const WARP_R = 1.6;
 const WARP_GAIN = 0.65;
 const FIELD_GAIN = 0.75;
-/** The field's first octave's weight (the rest follow FIELD_GAIN from 1):
- *  at full weight the big bright and dark zones carried half again the
- *  reference's large-scale contrast. */
-const FIELD_AMP0 = 1.0;
+/** The share of the warp the fine octaves take (see fieldFbm). */
+const FINE_WARP = 0.45;
 
-/** The tone curve's knots, z (the full field in standard units) to value,
- *  read off the reference's value quantiles below the share the lines add
- *  on top. Its gentle middle is the crimson shelf a third of the
- *  reference's pixels sit on, which keeps the plateaus smooth while the
- *  steeper flanks show the detail in the bright and dark zones. */
-export const TONE_Z: readonly number[] = [-3.0, -2.5, -1.8, -1.43, -1.14, -0.51, 0.32, 0.83, 1.16, 1.5, 1.8, 2.2, 3.0];
-export const TONE_V: readonly number[] = [0.04, 0.07, 0.12, 0.16, 0.205, 0.3, 0.4, 0.49, 0.58, 0.67, 0.75, 0.84, 0.93];
+/** The tone curve's knots, z (the full field in standard units) to value:
+ *  a histogram match. Each inner knot's z is where our raw field (rendered
+ *  over 16 fresh mounts, so 16 layouts: one mount's layout alone moves
+ *  the percentiles by a few hundredths) has the share of pixels below it that the
+ *  reference has below that value, so the two value distributions agree;
+ *  the values sit a notch lower (about 0.02, a little more at the top),
+ *  because the reference's distribution already counts its lines and ours
+ *  add theirs, and their halos, on top.
+ *  The gentle middle is the crimson shelf a third of the reference's pixels
+ *  sit on. Re-fit it whenever the field's octaves or warps change. */
+export const TONE_Z: readonly number[] = [-3.2, -2.481, -1.773, -1.441, -1.158, -0.544, 0.354, 0.827, 1.158, 1.489, 1.773, 2.103, 3.0];
+export const TONE_V: readonly number[] = [0.01, 0.04, 0.085, 0.13, 0.18, 0.28, 0.38, 0.48, 0.58, 0.65, 0.73, 0.81, 0.9];
 
 /** Fritsch–Carlson tangents for a monotone cubic through (xs, ys): the
  *  curve never overshoots between knots, and its slope has no jumps, which
@@ -287,23 +298,34 @@ float warpFbm(vec2 p, int site, uint seed) {
 // The field, each octave read at its own depth along the time axis, its
 // octaves past the soft ones scaled by the local detail mask. Returns (its
 // first SOFT_OCTAVES octaves, all of them), each normalised.
-vec2 fieldFbm(vec2 p, float detail) {
+// The fine octaves take only FINE_WARP of the warp: the full warp
+// stretched them into parallel wrinkles, where the reference's fine detail
+// is rounder lace and holes riding on the folded big shapes.
+// Returns (the first SOFT_OCTAVES octaves, the first LINE_OCTAVES, all of
+// them), each normalised.
+vec3 fieldFbm(vec2 p0, vec2 warp, float detail) {
   float sum = 0.0;
-  float amp = ${FIELD_AMP0.toFixed(3)};
+  float amp = 1.0;
   float norm = 0.0;
   vec2 soft = vec2(0.0);
+  vec2 mid = vec2(0.0);
+  vec2 pa = p0 + warp;
+  vec2 pb = p0 + ${FINE_WARP.toFixed(3)} * warp;
   mat2 rot = mat2(0.8, 0.6, -0.6, 0.8);
   for (int k = 0; k < FOCT; k++) {
     // The mask scales an octave's swing about its mean, never the mean,
     // or the lace zones would come out brighter as a whole.
-    float n = vnoise3(p, uBoilDepth[k], 7u + uint(k));
-    sum += amp * (k < ${SOFT_OCTAVES} ? n : 0.5 + detail * (n - 0.5));
+    bool isSoft = k < ${SOFT_OCTAVES};
+    float n = vnoise3(isSoft ? pa : pb, uBoilDepth[k], 7u + uint(k));
+    sum += amp * (isSoft ? n : 0.5 + detail * (n - 0.5));
     norm += amp;
     if (k == ${SOFT_OCTAVES - 1}) soft = vec2(sum, norm);
-    p = rot * p * 2.03 + vec2(1.7, 9.2);
-    amp = (k == 0 ? 1.0 : amp) * ${FIELD_GAIN.toFixed(3)};
+    if (k == ${LINE_OCTAVES - 1}) mid = vec2(sum, norm);
+    pa = rot * pa * 2.03 + vec2(1.7, 9.2);
+    pb = rot * pb * 2.03 + vec2(1.7, 9.2);
+    amp *= ${FIELD_GAIN.toFixed(3)};
   }
-  return vec2(soft.x / soft.y, sum / norm);
+  return vec3(soft.x / soft.y, mid.x / mid.y, sum / norm);
 }
 
 const float TZ[${TONE_Z.length}] = ${glslFloats(TONE_Z)};
@@ -354,9 +376,10 @@ void main() {
   // smooth plateaus in others (its local detail varies far more than plain
   // fbm's), so the first warp, a slow field, turns the fine octaves up or down.
   float detail = 0.5 + 0.8 * smoothstep(-0.05, 0.2, q.x - 0.6 * q.y);
-  vec2 f = fieldFbm(hh * ${FIELD_FREQ.toFixed(3)} + vec2(91.0, 17.0) + ${WARP_R.toFixed(3)} * fold * r, detail);
+  vec3 f = fieldFbm(hh * ${FIELD_FREQ.toFixed(3)} + vec2(91.0, 17.0), ${WARP_R.toFixed(3)} * fold * r, detail);
   float zs = (f.x - 0.5) / ${SOFT_SPREAD.toFixed(4)};
-  float z = (f.y - 0.5) / ${FIELD_SPREAD.toFixed(4)};
+  float zl = (f.y - 0.5) / ${LINE_SPREAD.toFixed(4)};
+  float z = (f.z - 0.5) / ${FIELD_SPREAD.toFixed(4)};
 
   float base = tone(z);
 
@@ -364,7 +387,7 @@ void main() {
   // header), kept to the brighter regions as in the reference.
   float flash = clamp(uFlash * uFlashEnv, 0.0, 2.0);
   float density = ${LINE_DENSITY.toFixed(3)} * uLines;
-  float x = z * density + ${LINE_PHASE.toFixed(3)} + uSweepPhase;
+  float x = zl * density + ${LINE_PHASE.toFixed(3)} + uSweepPhase;
   float d = abs(fract(x) - 0.5);
   // The width is the wider of a fixed screen width (LINE_EFOLD_HH, the
   // reference's measured rim) and a width in field units, which only wins
@@ -378,14 +401,24 @@ void main() {
   // ripples, so they fade out there. By the soft field, they stay out of
   // the dark voids and out of the brightest zones, which the reference
   // keeps as smooth glows: its veins run over mid-crimson ground.
-  float line = exp(-d / w) * (1.0 - smoothstep(0.06, 0.2, perPx))
+  // The profile falls off like the reference's rims: an exponential core
+  // whose tail is cut by the square term, so a line lights 2-3 px on each
+  // side and not the ground around it (a plain exponential's tail lifted
+  // whole lit zones by a few hundredths).
+  float u = d / w;
+  float line = exp(-u - 0.25 * u * u) * (1.0 - smoothstep(0.06, 0.2, perPx))
     * smoothstep(-0.3, 0.7, zs) * (1.0 - 0.6 * smoothstep(1.2, 2.0, zs));
   // A line burns at one brightness wherever it runs, as the reference's
   // rims do (their cores sit near the top whether the ground beside them is
   // a dark hole or a lit plateau), so it pulls the value toward LINE_V
   // rather than adding to it. The lace zones carry the lines, not the
   // bright ones: the reference's brightest zones are often smooth glows.
-  float burn = clamp(1.3 * line * mix(0.25, 1.0, smoothstep(0.7, 1.2, detail)) * uGlow * (1.0 + 1.5 * flash), 0.0, 2.0);
+  // What the finest octave adds on top of the line field brightens a line
+  // in one stretch and lets it fade in the next, as the reference's do,
+  // instead of an even neon tube.
+  float along = smoothstep(-1.2, 1.2, (f.z - f.y) / ${FINE_RESIDUAL_SPREAD.toFixed(4)});
+  float burn = clamp(1.5 * line * mix(0.6, 1.0, smoothstep(0.7, 1.2, detail)) * mix(0.65, 1.25, along)
+    * uGlow * (1.0 + 1.5 * flash), 0.0, 2.0);
   float v = mix(base, ${LINE_V.toFixed(3)}, min(burn, 1.0)) + 0.15 * max(burn - 1.0, 0.0);
   // A soft shoulder instead of a clip, so a flash brightens without
   // flattening the brightest lines into one value.
