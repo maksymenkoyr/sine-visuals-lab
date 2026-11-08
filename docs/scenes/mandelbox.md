@@ -5,7 +5,7 @@ turning hues on black, about half the places on the fractal's own mirror
 lines, so they open as a kaleidoscope or a mirrored vault. The music's
 loudness sets the pace of the flight and of the colours, so silence holds
 still; kicks and claps flash the rims; a drop moves on to a new place. In
-development, not yet on main.
+development, in draft PR #826.
 
 ## Where the code is
 
@@ -181,5 +181,4 @@ development, not yet on main.
 
 ## History
 
-- First version: the scene, its record and materials, on branch
-  `worktree-fractal-ref`.
+- #826 (draft): the first version, its record and materials.
