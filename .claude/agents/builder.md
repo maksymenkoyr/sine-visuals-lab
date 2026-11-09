@@ -10,7 +10,7 @@
 # passes 100K tokens, and a general-purpose agent starts at 40-50K, so the
 # slim prompt and tool list keep it under that line; CLAUDE.md is the one
 # thing added back. The caller's prompt carries the plan: one part of a
-# hand-off, in the rules and layout of .claude/commands/handoff.md. The hooks
+# hand-off, in the rules and layout of the global handoff skill. The hooks
 # in .claude/settings.json record each build (the tools/workflow-stats.mjs
 # header).
 name: builder
