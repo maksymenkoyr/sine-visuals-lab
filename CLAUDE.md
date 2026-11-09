@@ -46,6 +46,14 @@ A browser-based, real-time WebGL2 audio visualizer.
   `builder`. A workflow is a script in `.claude/workflows/` that runs
   several agents, like `/plan-code-review`. Start a workflow only when I type
   its command or say "workflow"; never on your own.
+- `/handoff` here: issues on this repo are public, so paid-scene work and
+  anything I say isn't public goes in issues on the private scenes repo
+  (`gh ... -R <owner/repo>` from `git -C src/render/scenes/private remote
+  get-url origin`; if it lacks the labels, `gh label clone <this owner/repo>
+  -R <private>` once). A public issue never names or links a private one.
+  Besides the labels above, a part with written steps gets `plan`, a research
+  part `research`, and a parent with sub-issues a topic label they all share.
+  An issue's Read first names the headers listed here and scene records.
 - Hand work on with `/handoff`: issues for a later session. Once a change is
   settled (I asked for it, straight away or after we discussed or researched
   it), build it with `/plan-build` (you plan, a `builder` agent builds on the
