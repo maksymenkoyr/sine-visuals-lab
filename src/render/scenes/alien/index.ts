@@ -3,7 +3,9 @@
  * short loops, each a captured dance seen from its own angle (LOOPS in
  * reel.ts), drawn live every frame by renderer.ts. The music decides how:
  *   - Move: its wire (Level by default) times the slider is the dance's
- *     speed, eased so it glides; silence buys no frames and the alien holds;
+ *     speed over the one pace every dance keeps (DANCE_PACE_HZ in reel.ts,
+ *     each dance's moves counted by pace.ts), eased so it glides; silence
+ *     buys no frames and the alien holds;
  *   - Dance cut: a dance repeats until its wire (Drop by default) makes a
  *     climb that stands out from its everyday ones (the dotted line on its
  *     graph, src/render/standout.ts), then the scene cuts to another dance,
@@ -47,7 +49,8 @@ import { CLIP_LIBRARY_URL, decodeClipLibrary, sampleClip, type Clip, type ClipLi
 import { createPose } from "../dancers/rig.ts";
 import { createAlienRenderer, floorPivot, type AlienRenderer, type Squash } from "./renderer.ts";
 import { decodeAlienMesh, MESH_URL, type AlienModel } from "./meshFile.ts";
-import { BOUNCE_MAX, chipLoop, chipView, clipSeconds, createBounce, createReel, easeSpeed, LOOPS, showLoop, stepBounce, stepCuts, VIEWS, type Reel } from "./reel.ts";
+import { BOUNCE_MAX, chipLoop, chipView, clipSeconds, createBounce, createReel, easeSpeed, LOOPS, pacedSeconds, showLoop, stepBounce, stepCuts, VIEWS, type Reel } from "./reel.ts";
+import { danceMoves } from "./pace.ts";
 import { card, MOVE_GAIN, SETTINGS } from "./card.ts";
 import { easeHand, HAND_AT_REST, handCamera, type CameraHand } from "./camera.ts";
 
@@ -69,6 +72,7 @@ const SETTING_BY_KEY = new Map(SETTINGS.map((s) => [s.key, s]));
 
 interface LiveLoop {
   clip: Clip;
+  /** One loop at speed 1, at the pace every dance keeps (reel.ts's `pacedSeconds`). */
   seconds: number;
   /** Bounce's floor point, x and z in metres (renderer.ts's floorPivot). */
   pivot: [number, number];
@@ -78,7 +82,7 @@ function liveLoops(library: ClipLibrary): LiveLoop[] {
   return LOOPS.map((spec) => {
     const clip = library.byName.get(spec.clip);
     if (!clip) throw new Error(`alien: no clip ${spec.clip}`);
-    return { clip, seconds: clipSeconds(clip), pivot: floorPivot(clip) };
+    return { clip, seconds: pacedSeconds(clipSeconds(clip), danceMoves(clip)), pivot: floorPivot(clip) };
   });
 }
 

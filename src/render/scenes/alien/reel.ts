@@ -6,9 +6,12 @@
  * each dance with one of the cameras in VIEWS. The scene (index.ts) draws
  * them live.
  *
- * **Move: music pays for frames.** The loop on screen plays at `speed` × its
- * captured speed, where the target speed is the Move setting times what its wire
- * reads. The speed eases toward that target over SPEED_EASE_SEC
+ * **Move: music pays for frames.** Every dance keeps one pace, DANCE_PACE_HZ
+ * moves a second: its loop lasts `pacedSeconds`, the moves pace.ts counts in
+ * its clip over that pace, so a cut never makes him dance faster or slower.
+ * The loop on screen plays at `speed` × that pace, where the target speed is
+ * the Move setting times what its wire reads. The speed eases toward that
+ * target over SPEED_EASE_SEC
  * (`easeSpeed`), so the dance doesn't twitch with every flicker of the
  * level. Silence reads 0: the speed eases down and the loop holds on the
  * frame it reached.
@@ -169,6 +172,25 @@ export function chipView(value: number): number | null {
 /** Seconds a clip's loop lasts as it was captured. */
 export function clipSeconds(clip: { beats: number; nativeBpm: number }): number {
   return clip.nativeBpm > 0 ? (clip.beats * 60) / clip.nativeBpm : 0;
+}
+
+/** The pace every dance keeps at speed 1, in moves a second (pace.ts): the
+ *  shipped dances' geometric mean, so on average a dance plays at its
+ *  captured speed and Move's tuning holds. tests/alien.test.ts keeps it there. */
+export const DANCE_PACE_HZ = 1.5;
+
+/** How many times faster or slower than captured a dance may play to keep
+ *  that pace, so a clip that barely moves isn't run at many times its speed.
+ *  The scene record's Measurements has the dances that reach it. */
+export const PACE_STRETCH_MAX = 2;
+
+/** Seconds a dance's loop lasts at speed 1: as long as its `moves` (pace.ts's
+ *  `danceMoves`) take at DANCE_PACE_HZ, within PACE_STRETCH_MAX of the
+ *  `capturedSec` it was captured over. A clip with no moves keeps that. */
+export function pacedSeconds(capturedSec: number, moves: number): number {
+  if (!(moves > 0)) return capturedSec;
+  const paced = moves / DANCE_PACE_HZ;
+  return Math.min(capturedSec * PACE_STRETCH_MAX, Math.max(capturedSec / PACE_STRETCH_MAX, paced));
 }
 
 /** Seconds the speed takes to get most of the way to a new target. */

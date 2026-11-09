@@ -14,9 +14,12 @@ import {
   createReel,
   CUT_VIEWS,
   DANCE_HOLD_SEC,
+  DANCE_PACE_HZ,
   easeSpeed,
   LOOP_VIEW,
   LOOPS,
+  PACE_STRETCH_MAX,
+  pacedSeconds,
   pickOther,
   pickView,
   showLoop,
@@ -33,7 +36,8 @@ import { card, SETTINGS } from "../src/render/scenes/alien/card.ts";
 import { easeHand, HAND_AT_REST, handCamera } from "../src/render/scenes/alien/camera.ts";
 import { STANDOUT_THRESHOLD_DEFAULT } from "../src/render/standout.ts";
 import { BAKED } from "../src/render/scenes/alien/loops/manifest.ts";
-import { CLIP_LIBRARY_URL, decodeClipLibrary } from "../src/render/scenes/dancers/clipFormat.ts";
+import { CLIP_LIBRARY_URL, decodeClipLibrary, type Clip } from "../src/render/scenes/dancers/clipFormat.ts";
+import { danceMoves } from "../src/render/scenes/alien/pace.ts";
 import { BONE_COUNT } from "../src/render/scenes/dancers/rig.ts";
 
 describe("alien mesh", () => {
@@ -498,6 +502,75 @@ describe("alien loops", () => {
     expect(chipView(0)).toBeNull();
     expect(chipView(VIEWS.length)).toBe(VIEWS.length - 1);
     expect(chipView(VIEWS.length + 1)).toBeNull();
+  });
+});
+
+describe("alien pace", () => {
+  const dances = LOOPS.map((l) => library.byName.get(l.clip)!);
+  const paced = (clip: Clip): number => pacedSeconds(clipSeconds(clip), danceMoves(clip));
+
+  it("counts a dance's moves from its frames alone, whatever tempo it was captured at", () => {
+    for (const clip of dances.slice(0, 6)) {
+      const moves = danceMoves(clip);
+      expect(moves, clip.name).toBeGreaterThan(0);
+      expect(danceMoves({ ...clip, nativeBpm: clip.nativeBpm * 2 })).toBe(moves);
+      expect(danceMoves({ ...clip, nativeBpm: clip.nativeBpm / 3 })).toBe(moves);
+    }
+  });
+
+  it("plays a dance at the same pace however fast it was captured", () => {
+    for (const clip of dances) {
+      const own = paced(clip);
+      const ratio = clipSeconds(clip) / own;
+      if (ratio * 1.25 > PACE_STRETCH_MAX || ratio * PACE_STRETCH_MAX < 1.25) continue;
+      expect(paced({ ...clip, nativeBpm: clip.nativeBpm * 1.2 }), clip.name).toBeCloseTo(own, 9);
+      expect(paced({ ...clip, nativeBpm: clip.nativeBpm / 1.2 }), clip.name).toBeCloseTo(own, 9);
+    }
+  });
+
+  it("gives a loop that holds its dance twice over twice the moves, so it keeps the same pace", () => {
+    for (const clip of dances.slice(0, 6)) {
+      const data = new Float32Array(clip.data.length * 2);
+      data.set(clip.data, 0);
+      data.set(clip.data, clip.data.length);
+      const twice = { ...clip, frames: clip.frames * 2, beats: clip.beats * 2, data };
+      expect(danceMoves(twice) / danceMoves(clip), clip.name).toBeCloseTo(2, 6);
+      expect(paced(twice) / paced(clip), clip.name).toBeCloseTo(2, 6);
+    }
+  });
+
+  it("counts no moves in a clip that stands still, and keeps its captured length", () => {
+    const clip = dances[0];
+    const data = new Float32Array(clip.data.length);
+    const still = clip.data.subarray(0, clip.data.length / clip.frames);
+    for (let f = 0; f < clip.frames; f++) data.set(still, f * still.length);
+    const frozen = { ...clip, data };
+    expect(danceMoves(frozen)).toBe(0);
+    expect(paced(frozen)).toBe(clipSeconds(clip));
+  });
+
+  it("stretches a dance no further than PACE_STRETCH_MAX either way to keep the pace", () => {
+    const captured = 4;
+    expect(pacedSeconds(captured, DANCE_PACE_HZ * captured)).toBeCloseTo(captured, 12);
+    expect(pacedSeconds(captured, DANCE_PACE_HZ * captured * 1.5)).toBeCloseTo(captured * 1.5, 12);
+    expect(pacedSeconds(captured, DANCE_PACE_HZ * captured * 100)).toBe(captured * PACE_STRETCH_MAX);
+    expect(pacedSeconds(captured, DANCE_PACE_HZ * captured * 0.01)).toBe(captured / PACE_STRETCH_MAX);
+  });
+
+  it("keeps nearly every shipped dance at DANCE_PACE_HZ, and DANCE_PACE_HZ at their geometric mean", () => {
+    let atPace = 0;
+    let logSum = 0;
+    for (const clip of dances) {
+      const seconds = paced(clip);
+      const rate = clipSeconds(clip) / seconds;
+      expect(rate, clip.name).toBeGreaterThanOrEqual(1 / PACE_STRETCH_MAX - 1e-9);
+      expect(rate, clip.name).toBeLessThanOrEqual(PACE_STRETCH_MAX + 1e-9);
+      if (Math.abs(danceMoves(clip) / seconds - DANCE_PACE_HZ) < 1e-9) atPace++;
+      logSum += Math.log(danceMoves(clip) / clipSeconds(clip));
+    }
+    expect(atPace).toBeGreaterThanOrEqual(Math.ceil(dances.length * 0.9));
+    // Move's tuning assumes a dance plays at about its captured speed on average.
+    expect(Math.abs(Math.log(Math.exp(logSum / dances.length) / DANCE_PACE_HZ))).toBeLessThan(Math.log(1.1));
   });
 });
 

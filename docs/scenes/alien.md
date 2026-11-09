@@ -2,8 +2,10 @@
 
 One grey alien dancing as a glowing green wireframe on black, in short
 loops: each loop is one captured dance seen from its own angle, drawn live
-every frame. The music pays for the frames: the Move setting's wire sets how
-fast the dance on screen plays, and silence holds him still. Bounce squashes him toward
+every frame. Every dance keeps one pace, measured from how it moves, so a cut
+never makes him dance faster or slower. The music pays for the frames: the
+Move setting's wire sets how fast the dance on screen plays, and silence
+holds him still. Bounce squashes him toward
 the floor and springs him back on its wire's hits; Bounce smoothness turns
 that spring from a snap and a wobble into an ease and a glide. A dance
 repeats until Dance cut's wire makes a hit that stands out from its everyday
@@ -27,9 +29,10 @@ the camera by hand. In development, on main since #374.
   Camera sliders, `easeHand()` glides them.
 - `src/render/scenes/alien/index.ts`: the body, loaded after first paint. It
   loads the model and the dancers' clip library (`sceneMedia`, both fetched
-  on the first mount and decoded once per page; black until both land), keeps
-  each loop's place in its clip, samples the pose and has `renderer.ts` draw
-  it. Its `probe()` feeds the Move readout and names the Dance and View
+  on the first mount and decoded once per page; black until both land), times
+  each loop at the one pace (`pacedSeconds()` from `danceMoves()`, once when
+  the clips land), keeps each loop's place in its clip, samples the pose and
+  has `renderer.ts` draw it. Its `probe()` feeds the Move readout and names the Dance and View
   chips on screen (`dance`, `view`). Also the `?loop=<n>` DEV pin and the
   `window.__alien` DEV hook (reel, last wire readings, each loop's place).
 - `meshFile.ts`: `MESH_URL`, the model the scene draws
@@ -44,9 +47,15 @@ the camera by hand. In development, on main since #374.
   loop: clip, Dance chip name and the view it is seen through; `LOOP_VIEW`
   resolves those), `CUT_VIEWS` (the views Camera cut picks from),
   `chipLoop()` and `chipView()` (which loop or view a chip holds) and the
-  rules: `easeSpeed()` (Move), `stepCuts()` (Dance cut and Camera cut, with
-  `showLoop()` and `pickView()`), `stepBounce()` (Bounce) and
-  `bounceSpring()` (Bounce smoothness). Its header has them in words.
+  rules: `DANCE_PACE_HZ` and `pacedSeconds()` (one pace for every dance,
+  within `PACE_STRETCH_MAX`), `easeSpeed()` (Move), `stepCuts()` (Dance cut
+  and Camera cut, with `showLoop()` and `pickView()`), `stepBounce()`
+  (Bounce) and `bounceSpring()` (Bounce smoothness). Its header has them in
+  words.
+- `pace.ts`: `danceMoves()`, how many moves a dance makes in one loop of its
+  clip: the geometric mean of three measures of its hands, feet and head,
+  counted in the clip's own frames and beats, so the tempo it was captured
+  at doesn't enter. Its header has why not the captured tempo.
 - `glsl.ts`: the look: GPU skinning, Bounce's squash on the skinned figure,
   the barycentric wireframe, the fresnel rim and outline, the eyeballs drawn
   black, the blur and composite.
@@ -397,6 +406,49 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
     Silence: "the picture holds still" on both, so no cut fires without
     music. The camera cuts don't move the song's numbers: about one 100 ms
     sample in 30 holds a cut, under the p95's reach.
+- 2026-11-07, one pace for every dance (Decisions). As captured, the 34
+  dances' tempos (`nativeBpm`) run 90–190 bpm, and the pace they move at
+  0.70–2.91 moves a second (`pacecheck.mjs`; spread, the sd of log2 across
+  the dances, 0.48). Slowest Lean back, Fold in and Freestyle; fastest
+  Charleston 2, Charleston and Salsa.
+  - Ways to even them out, judged on three measures of how fast each dance
+    looks (`pacemethods.mjs`: accents a second, the tip speed's spectral
+    centroid, the tips' RMS frequency), the spread of each after, without
+    the two slow modern moves:
+
+    | way | accents | centroid | RMS frequency | mean speed |
+    | --- | --- | --- | --- | --- |
+    | as captured | 0.39 | 0.58 | 0.45 | 0.72 |
+    | every captured beat at 128 bpm | 0.38 | 0.72 | 0.47 | 0.77 |
+    | the same, folded to the nearest octave | 0.57 | 0.73 | 0.62 | 0.93 |
+    | even accents alone | 0.00 | 0.52 | 0.43 | 0.79 |
+    | even the three's geometric mean | 0.24 | 0.36 | 0.32 | 0.75 |
+
+    The captured tempos barely predict how fast a dance looks (rank
+    correlation with accents a second 0.43, with the centroid −0.01), so
+    one tempo evened out nothing. Folding sped up the dances already the
+    fastest-looking (Charleston 2 to about 4.8 accents a second) and slowed
+    Freestyle further. Evening out any one measure left the other two
+    about as spread; the three's geometric mean narrowed all three.
+  - Shipped as `pace.ts`'s `danceMoves()`, on the stored frames, with the
+    centroid capped at `CENTROID_MAX_PER_BEAT` cycles a beat: it ranks the
+    dances as the judged version does (Spearman 0.96). Uncapped it was 0.95
+    and narrowed the centroid less (0.76 → 0.38, against 0.62 → 0.31
+    capped), since the noisiest clips' jitter counted as moves.
+  - The stretch runs from ×0.52 (Charleston 2) to ×2.00 (Lean back, held at
+    `PACE_STRETCH_MAX`; Fold in ×1.99). `DANCE_PACE_HZ` is 1.5 moves a
+    second; the dances' geometric mean as captured is 1.498. Measuring all
+    34 takes about 20 ms in node.
+  - Live, `livepace.mjs` (headless Chromium on Metal, synthetic audio,
+    eight dances pinned with `?loop=`): moves a second on screen at speed 1,
+    main 0.70–2.59 (3.7×) → this change 1.41–1.50 (1.07×; the 1.41 is Lean
+    back, at the limit).
+  - `tune-real` on a real song (around-the-world, 55 s from 4 s) then
+    silence, main → this change, one run each: song change median
+    0.93 → 0.86, p95 1.92 → 1.89; silence median 0.00 → 0.00, p95
+    0.00 → 0.00 ("the picture holds still" on both); hits a minute on the
+    song 385 → 380, in silence 0 → 0. The reel opens on Toprock 2, now
+    played at ×0.88, and stays on it most of the song.
 
 ## Decisions and pivots
 
@@ -692,11 +744,27 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
     0.00 → 0.00, p95 0.00 → 0.00; hits a minute on the song
     356 → 372, in silence 0 → 0; drops a minute on the song
     0 → 2, in silence 0 → 0.
+- 2026-11-07, the owner: "in alian different moves have different base
+  speed. can we synch them?" Every dance now keeps one pace,
+  `DANCE_PACE_HZ`, measured from how it moves (`pace.ts`), not from the
+  tempo it was captured at: playing every captured beat at one tempo evened
+  the dances out no better than as captured, and folding octaves made them
+  worse (Measurements). I read "sync" as one pace for every dance, not his
+  steps locked to the song's beat: Move still pays for frames, so at speed 1
+  he dances at the shared pace whatever the song's tempo. Following the
+  song's tempo is still open. `DANCE_PACE_HZ` is the dances' average as
+  captured, so Move's tuning holds; `PACE_STRETCH_MAX` keeps Lean back a
+  little slower than the rest. Whether the measured pace looks even is the
+  owner's call.
 
 ## Tuning notes
 
-- Move's slider multiplies the wire: 1 plays a loud song at about captured
-  speed. Raise it for a faster dance on quiet material.
+- Move's slider multiplies the wire: 1 plays a loud song at about the pace
+  every dance keeps (`DANCE_PACE_HZ`). Raise it for a faster dance on quiet
+  material.
+- A dance that still looks fast or slow next to the rest: its moves come
+  from `pace.ts` (`pacecheck.mjs` prints them); `DANCE_PACE_HZ` moves every
+  dance's pace at once.
 - Bounce's slider is the depth; its spring (`BOUNCE_HZ`, `BOUNCE_DAMPING`)
   sets how snappy it is and how far it overshoots. Bounce smoothness eases
   that spring toward `SMOOTH_HZ`, `SMOOTH_DAMPING`; if its smooth end sits
@@ -737,6 +805,9 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   usual cost of automatic weights from a T-pose.
 - Where the skull's fold was relaxed out, a small knot of tiny triangles
   is left among the big ones; it shows in the side close-up.
+- The one pace is measured, not yet seen by the owner. Lean back reaches
+  the stretch limit and stays a little slower than the rest. The pace is
+  not the song's tempo, so his steps don't land on the beat.
 
 ## Materials
 
@@ -759,7 +830,11 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   edge. `loopframes.mjs` saves one full loop of each loop in a range, and
   `loopwebp.py` turns those into the animations on the moves' review page. `playcheck.mjs`
   checked the old video player in Chromium or WebKit, optionally with
-  play() refused until a click, the way iOS refuses it.
+  play() refused until a click, the way iOS refuses it. `pacecheck.mjs`
+  prints each dance's moves, pace and stretch from the shipped code,
+  `pacemethods.mjs` compares ways to even the pace on three measures of the
+  motion, and `livepace.mjs` reads the live playhead's pace with a loop
+  pinned.
 - Reference media: `tools/.cache/refs/alien-dance/` (local only).
 - The model (#772): `tools/alien-model/exportRig.ts`, `build.py` and
   `check.ts`, run as in Resume here. `public/media/alien/mesh-v1.bin` is
@@ -791,6 +866,9 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   audio always reads loud, so it can't test silence.
 - Gotcha: `__viz.probe()` doesn't carry drive readings. Read
   `window.__alien.last` instead.
+- The pace: `node docs/scenes/alien/scripts/pacecheck.mjs` prints every
+  dance's moves and stretch; `livepace.mjs --port <p> --loops 0,1,10` reads
+  the live scene's (a main server beside a branch server compares builds).
 - A changed model is a new file: rebuild as below, copy `alien.bin` to
   `public/media/alien/mesh-v2.bin`, point `MESH_URL` at it, and add the line
   `npx vitest run tests/sceneMedia.test.ts` prints to
@@ -840,3 +918,5 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 - #805 (draft, 2026-10-30): Dance cut and Camera cut on their own wires,
   Shortest dance and Shortest view, and the chip on screen outlined on the
   Dance and View rows.
+- #822 (draft, 2026-11-07): every dance keeps one pace, measured from how it
+  moves (`pace.ts`).
