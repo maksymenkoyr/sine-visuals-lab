@@ -18,8 +18,9 @@ says so as well as on `/plan-build` or the user naming it.
 3. **Pick the row.** Rate the build's difficulty by
    `docs/issue-labels.md` and take the row of
    `~/projects/agent-models.md` whose task covers it: a plan spelled out
-   to the diff is row 3, a build that still takes judgment is row 4. A row
-   that says "ask the user first" waits for their yes.
+   to the diff is row 6 (Haiku), a build that still takes judgment is row 4
+   (Sonnet) or row 3 (Opus). A row that says "ask the user first" waits for
+   their yes.
 4. **Spawn the builder** with `subagent_type: "builder"` and the row's
    `model` and `effort` both passed, never left to the fallback. Say the
    row in one line before it starts.
