@@ -1,11 +1,12 @@
 # Code Rain (`coderain`)
 
 A 3D field of falling glyph columns with a dancer drawn in tiny raining
-glyphs among them. The camera stands still; a viewer can walk through the
-rain and look round by hand, like in a game: click the picture, then the
-mouse looks and the keys walk, and Esc stops. Kicks start fresh heads from
-the top of the view and flare the heads; the overall level speeds the fall.
-In development, in the gallery's development section.
+glyphs among them. The camera stands still. In a dev build (`npm run dev`)
+only, a viewer can walk through the rain and look round by hand, like in a
+game: click the picture, then the mouse looks and the keys walk, and Esc
+stops. Kicks start fresh heads from the top of the view and flare the heads;
+the overall level speeds the fall. In development, in the gallery's
+development section.
 
 ## Where the code is
 
@@ -108,6 +109,12 @@ hear run but ~106.7 on the ref-shoot run.
     406 → 414 on the song, 0 → 0 in silence; drops a minute 2 → 2. With the
     walk gone, what moves in silence is the rain, the flicker and the
     dancer, so the music's share of the motion doubled.
+- 2026-11-10 — Owner: the walk "should work only on local build". app.ts
+  wires the mouse and keys, the HUD's "click the picture to walk" and the
+  keys list's Walk row only behind a literal `import.meta.env.DEV`, so
+  `npm run dev` walks and Stable, Insiders and the PR previews drop the code
+  and keep the still camera alone. Nothing the scene draws or hears changed,
+  so the tune-real numbers above stand.
 
 ## Known issues and next steps
 
