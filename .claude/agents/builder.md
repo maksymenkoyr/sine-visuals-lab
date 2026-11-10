@@ -1,9 +1,9 @@
 ---
 # The builder in plan-build (.claude/commands/plan-build.md): it carries out
 # a plan the session wrote. The caller passes `model` and `effort` on every
-# spawn, from docs/agent-models.md for the plan's difficulty. The pair below
+# spawn, from ~/projects/agent-models.md for the build. The pair below
 # is only the fallback for a spawn that names neither, so a forgotten pair
-# lands on Haiku instead of inheriting the session's Opus.
+# lands on Haiku instead of inheriting the session's model.
 # This body replaces Claude Code's system prompt, only the tools below load,
 # and CLAUDE.md is read (no omitClaudeMd), so the repo rules reach it without
 # the caller copying them. Haiku costs more per token once a request's prompt
@@ -14,7 +14,7 @@
 # in .claude/settings.json record each build (the tools/workflow-stats.mjs
 # header).
 name: builder
-description: Builds a change by following an exact plan given in the prompt. Spawn it with model and effort from docs/agent-models.md; it reads CLAUDE.md for the repo rules but knows nothing else about the repo beyond what the prompt says.
+description: Builds a change by following an exact plan given in the prompt. Spawn it with model and effort from ~/projects/agent-models.md; it reads CLAUDE.md for the repo rules but knows nothing else about the repo beyond what the prompt says.
 model: haiku
 effort: high
 tools: Read, Edit, Write, Bash, Grep, Glob
