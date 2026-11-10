@@ -52,7 +52,7 @@ const ID = card.id;
 /** The share of the gap closed per second at Flight speed 1: the reference zoomed in by this many e-folds a second. */
 const BASE_RATE = 0.073;
 /** Seconds per turn of the colour wheel at Colour drift 1: the reference's median within a minute.
- *  Its colours also jump as each new render dissolves in, which a new place's own `hueJump` does here. */
+ *  Its net turn rate is faster than that; a new place's `hueJump` is a guess at why. */
 const HUE_PERIOD_SEC = 52;
 /** Where the colour wheel starts: violet, with tintB on the far side of it (glsl.ts). */
 const HUE_START = 0.72;

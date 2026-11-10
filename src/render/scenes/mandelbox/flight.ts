@@ -15,9 +15,9 @@
  *   time budget each frame, so finding the next place never stalls a frame.
  * - A place's kind: the Mandelbox is symmetric under every swap and sign flip of its axes, so a
  *   camera on one of its symmetry axes, looking along it, sees a kaleidoscope (4-, 3- or 2-fold,
- *   `AXES`), and one on a mirror plane, looking within it, sees an exact left-right mirror. That
- *   is how the reference's mirrored stretches look: centred vaults, symmetric to the pixel, with
- *   no seam down the middle. Mirror (card.ts) sets the mix of kinds (`KIND_SHARES`).
+ *   `AXES`), and one on a mirror plane, looking within it, sees an exact left-right mirror.
+ *   Whether the reference was made this way or mirrored afterwards isn't known
+ *   (docs/scenes/mandelbox.md). Mirror (card.ts) sets the mix of kinds (`KIND_SHARES`).
  * - The pace: how fast the flight and the colours run, from the music's Level against its own
  *   recent average (`stepPace`), so a quiet song still flies at the usual pace, its loud stretches
  *   push harder, and silence holds still whatever the input's own loudness.
@@ -50,9 +50,9 @@ const GRID_SPREAD = 0.3;
  *  black), and no nearer than CENTRE_MIN gaps, or it is a wall, not an opening. */
 const VIEW_REACH = 90;
 const CENTRE_MIN = 8;
-/** A place ends once the flight has zoomed this many e-folds toward its target: the reference's
- *  places lasted about that much zoom. It also ends if the camera's gap ever grows ESCAPE times its
- *  start, which would mean it is leaving the fractal. */
+/** A place ends once the flight has zoomed this many e-folds toward its target: about a minute at
+ *  the reference's zoom rate, a guess: how long its looks last wasn't measured. It also ends if the
+ *  camera's gap ever grows ESCAPE times its start, which would mean it is leaving the fractal. */
 const ZOOM_MAX = 4.5;
 const ESCAPE = 8;
 /** Least share of the grid that must hit something, least mean face-on-ness, least depth spread.
