@@ -20,9 +20,14 @@
 # them. It never runs `git rebase --continue`, commits or pushes
 # (tools/fix-conflicts-pr.sh does, after this script says nothing
 # is left), and it does not run the typecheck: the pre-push hook runs
-# `npm run check`. When both sides changed the same logic in different ways it
-# stops and says so, leaving the file untouched, so you pick a stronger model
-# for that one.
+# `npm run check`. When both sides changed the same logic in different ways the
+# model stops and says so, so you pick a stronger model for that one.
+#
+# All or nothing: a run that leaves any conflict (a file needing judgment, the
+# model failing half-way) puts every file that was conflicted back exactly as
+# git left it, unmerged in the index too, and exits non-zero. Nothing half
+# resolved is left to be mistaken for finished work, and a second run starts
+# from the same place.
 #
 # With ANTHROPIC_API_KEY set the model runs `--bare` (no hooks or settings
 # loaded). Without a key (subscription login) `--bare` can't authenticate, so
@@ -48,6 +53,36 @@ if [ "$mode" = none ]; then
   echo "Conflicts but no rebase or merge in progress; fix them by hand." >&2
   exit 1
 fi
+
+# The files as git left them, by position in $initial (a path can hold a slash).
+initial="$(git diff --name-only --diff-filter=U)"
+snapshot="$(mktemp -d)"
+n=0
+while IFS= read -r f; do
+  n=$((n + 1))
+  if [ -e "$f" ]; then cp -p "$f" "$snapshot/$n"; fi
+done <<<"$initial"
+
+put_back() {
+  if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+    n=0
+    while IFS= read -r f; do
+      n=$((n + 1))
+      # A file the run resolved and added is unmerged again from the index's resolve-undo record.
+      git update-index --unresolve -- "$f" 2>/dev/null || true
+      if [ -e "$snapshot/$n" ]; then
+        mkdir -p "$(dirname "$f")" && cp -p "$snapshot/$n" "$f"
+      else
+        rm -f "$f"
+      fi
+    done <<<"$initial"
+    echo "Not every conflict was settled (see above): every conflicted file is back as git left it." >&2
+    rm -rf "$snapshot"
+    exit 1
+  fi
+  rm -rf "$snapshot"
+}
+trap put_back EXIT
 
 # Pass 1: no model. The script may be missing in an older checkout; then the
 # model gets everything.

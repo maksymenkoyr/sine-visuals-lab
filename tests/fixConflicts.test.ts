@@ -191,6 +191,63 @@ describe("fix-conflicts-pr.sh", () => {
     throw new Error("the script succeeded");
   };
 
+  // Adds to both branches a change to code.ts that no rule settles, and a fake model on PATH that
+  // resolves list.md's leftovers and gives up on code.ts after scribbling in it.
+  const needsJudgment = (root: string, work: string, git: (cwd: string, ...args: string[]) => string) => {
+    writeFileSync(join(root, "bin/claude"), "#!/bin/sh\necho half-done >code.ts\necho 'code.ts: needs judgment'\n");
+    chmodSync(join(root, "bin/claude"), 0o755);
+    writeFileSync(join(work, "code.ts"), "export const x = 3;\n");
+    git(work, "add", "code.ts");
+    git(work, "commit", "-qm", "main code");
+    git(work, "push", "-q", "origin", "main");
+    git(work, "checkout", "-q", "-b", "feature", "origin/feature");
+    writeFileSync(join(work, "code.ts"), "export const x = 2;\n");
+    git(work, "add", "code.ts");
+    // One commit, so both conflicts are in the same stop.
+    git(work, "commit", "-q", "--amend", "--no-edit");
+    git(work, "push", "-q", "-f", "origin", "feature");
+    git(work, "checkout", "-q", "main");
+    git(work, "branch", "-q", "-D", "feature");
+  };
+
+  it("undoes the rebase it started when a conflict needs judgment, leaving the branch as it was", () => {
+    const { root, work, git, run, pushed } = setup();
+    const wt = join(work, ".claude/worktrees/feature");
+    try {
+      needsJudgment(root, work, git);
+      expect(stderrOf(run)).toContain("feature is as it was before this run");
+      expect(git(wt, "status", "--porcelain")).toBe("");
+      expect(git(wt, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe("feature");
+      expect(git(wt, "rev-parse", "HEAD")).toBe(git(wt, "rev-parse", "origin/feature"));
+      expect(pushed().log).toEqual(["feature", "base"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("puts a rebase that was already stopped back as git left it when a conflict needs judgment", () => {
+    const { root, work, git, run } = setup();
+    const wt = join(work, ".claude/worktrees/feature");
+    try {
+      needsJudgment(root, work, git);
+      git(work, "worktree", "add", "-q", "-b", "feature", wt, "origin/feature");
+      expect(() => git(wt, "rebase", "origin/main")).toThrow();
+      const state = () => ({
+        status: git(wt, "status", "--porcelain"),
+        list: readFileSync(join(wt, "list.md"), "utf8"),
+        code: readFileSync(join(wt, "code.ts"), "utf8"),
+      });
+      const before = state();
+      expect(before.status).toBe("AA code.ts\nUU list.md\n");
+
+      // The plain-code pass resolves and adds list.md before the model gives up; that is undone too.
+      expect(stderrOf(run)).toContain("back as git left it");
+      expect(state()).toEqual(before);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("pushes again when the check refused only because a test ran out of time, as on a busy machine", () => {
     const { root, work, git, run, pushed } = setup();
     try {
