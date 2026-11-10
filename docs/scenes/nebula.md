@@ -330,7 +330,9 @@ hook; main and this change served side by side.
 
 2026-11-07, Gas drift reshapes in place (Levitating; the gas alone is
 flight, Surge, stars, Colour drift and every reaction at 0, in silence,
-20 s from 6 s; `scripts/slide.mjs` with frames 2 s apart).
+20 s from 6 s; `scripts/slide.mjs` with frames 2 s apart). First measured
+on 11-07 before the finer gas and the temporal resolve merged; measured
+again on 11-10 on top of them, both below.
 
 - Slide against reshape: correlation at no shift / at the best shift, the
   best shift's mean length, and how consistent its direction is (1 = one
@@ -338,25 +340,36 @@ flight, Surge, stars, Colour drift and every reaction at 0, in silence,
 
   | Gas drift | build | at 0 | best | shift | consistency |
   |---|---|---|---|---|---|
-  | 8 | main (flow + churn circle) | 0.295 | 0.588 | 10.8 px (the probe's limit) | 0.99 |
-  | 8 | churn circle alone | 0.926 | 0.926 | 0 px | — |
-  | 8 | this change | 0.649 | 0.687 | 2.4 px | 0.17 |
-  | 1 | this change | 0.942 | 0.942 | 0 px | — |
+  | 8 | 11-07 main (flow + churn circle) | 0.295 | 0.588 | 10.8 px (the probe's limit) | 0.99 |
+  | 8 | 11-07 churn circle alone | 0.926 | 0.926 | 0 px | — |
+  | 8 | 11-07 this change | 0.649 | 0.687 | 2.4 px | 0.17 |
+  | 1 | 11-07 this change | 0.942 | 0.942 | 0 px | — |
+  | 8 | 11-10 main (finer gas, resolve) | 0.300 | 0.601 | 10.8 px (the probe's limit) | 0.99 |
+  | 8 | 11-10 this change on it | 0.667 | 0.703 | 2.3 px | 0.22 |
 
 - The gas alone, `tools/tune-real.mjs` change median / p95 in silence:
-  main 0.49 / 0.60 at Gas drift 1 and 3.36 / 4.56 at 8; the churn circle
-  without the flow 0.08 / 0.09 and 0.28 / 0.33; this change 0.23 / 0.28 at 1.
+  11-07 main 0.49 / 0.60 at Gas drift 1 and 3.36 / 4.56 at 8; the churn
+  circle without the flow 0.08 / 0.09 and 0.28 / 0.33; this change 0.23 /
+  0.28 at 1. On 11-10, at Gas drift 1: main 0.58 / 0.70, this change
+  0.31 / 0.39.
 - `tools/tune-real.mjs`, 30 s from 4 s, default settings, main then this
   change in the same session:
 
   | build | source | change med | change p95 | hits/min | energy | fps |
   |---|---|---|---|---|---|---|
-  | main | song | 5.05 | 6.84 | 316 | 0.66 | 120 |
-  | main | silence | 1.94 | 2.96 | 0 | 0.00 | 118 |
-  | this | song | 4.80 | 6.73 | 332 | 0.67 | 119 |
-  | this | silence | 1.92 | 2.79 | 0 | 0.00 | 120 |
+  | 11-07 main | song | 5.05 | 6.84 | 316 | 0.66 | 120 |
+  | 11-07 main | silence | 1.94 | 2.96 | 0 | 0.00 | 118 |
+  | 11-07 this | song | 4.80 | 6.73 | 332 | 0.67 | 119 |
+  | 11-07 this | silence | 1.92 | 2.79 | 0 | 0.00 | 120 |
+  | 11-10 main | song | 4.94 | 6.49 | 314 | 0.66 | 106 |
+  | 11-10 main | silence | 2.10 | 3.16 | 0 | 0.00 | 119 |
+  | 11-10 this | song | 4.68 | 6.44 | 334 | 0.66 | 120 |
+  | 11-10 this | silence | 2.09 | 3.07 | 0 | 0.00 | 120 |
 
-  Song over silence at p95 2.4×; the flight still sets the scene's pace.
+  Song over silence at p95 2.4× on 11-07 and 2.1× on 11-10, main and this
+  alike; the flight still sets the scene's pace. With the resolve, frames
+  of the gas alone at Gas drift 8 keep every outline crisp as it reshapes:
+  the history is held to what each frame shows.
 
 ## Decisions and pivots
 
@@ -517,7 +530,9 @@ flight, Surge, stars, Colour drift and every reaction at 0, in silence,
   each about half the warp's coarsest cell, so outlines change for good
   while every mass stays where it is; the probe finds no direction to it.
   Its pace at Gas drift 1 is my call: about half the old default's motion,
-  all of it reshaping; the owner hasn't seen it yet.
+  all of it reshaping; the owner hasn't seen it yet. Rebased on 11-10 onto
+  the temporal resolve, which had moved its history by the flow too: it now
+  follows the camera alone (history.ts's `prevCamUniforms`).
 
 ## Tuning notes
 
