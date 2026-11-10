@@ -50,9 +50,9 @@ const GRID_SPREAD = 0.3;
  *  black), and no nearer than CENTRE_MIN gaps, or it is a wall, not an opening. */
 const VIEW_REACH = 90;
 const CENTRE_MIN = 8;
-/** A place ends once the flight has zoomed this many e-folds toward its target: about a minute at
- *  the reference's zoom rate, a guess: how long its looks last wasn't measured. It also ends if the
- *  camera's gap ever grows ESCAPE times its start, which would mean it is leaving the fractal. */
+/** A place ends once the flight has zoomed this many e-folds toward its target, under a minute at
+ *  index.ts's BASE_RATE: a guess, since how long the reference's looks last wasn't measured. It also
+ *  ends if the camera's gap ever grows ESCAPE times its start, which would mean it is leaving the fractal. */
 const ZOOM_MAX = 4.5;
 const ESCAPE = 8;
 /** Least share of the grid that must hit something, least mean face-on-ness, least depth spread.

@@ -49,8 +49,9 @@ import {
 import { EXTRA_UNIFORMS, FOV_TAN, MARCH_BODY, OUT_BODY } from "./glsl.ts";
 
 const ID = card.id;
-/** The share of the gap closed per second at Flight speed 1: the reference zoomed in by this many e-folds a second. */
-const BASE_RATE = 0.073;
+/** The share of the distance ahead closed per second at Flight speed 1, scaled so the whole frame's median zoom
+ *  matches the reference's (docs/scenes/mandelbox.md, Measurements). */
+const BASE_RATE = 0.1;
 /** Seconds per turn of the colour wheel at Colour drift 1: the reference's median within a minute.
  *  Its net turn rate is faster than that; a new place's `hueJump` is a guess at why. */
 const HUE_PERIOD_SEC = 52;

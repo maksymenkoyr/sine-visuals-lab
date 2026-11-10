@@ -58,9 +58,10 @@ unless its line says it was read by eye or inferred:
   eye, about 1.5 s long at 75 s in the bundle. How long a look lasts isn't
   known.
 - Motion, from the bundle's 120 s window only (27:00–29:00, whole frame,
-  `tools/ref-scan.py`): zoom +0.073 log-scale/s (×1.08/s), rotation about
-  0, frame-to-frame activity 0.053; radial speed ∝ r^0.9 (a flat zoom) in
-  two of its five regimes.
+  `tools/ref-scan.py`): zoom mean +0.073 log-scale/s (×1.08/s) and median
+  +0.048 (×1.05/s; the window's cut and dissolve inflate the mean, from its
+  `series.tsv`), rotation about 0, frame-to-frame activity 0.053; radial
+  speed ∝ r^0.9 (a flat zoom) in two of its five regimes.
 - Colour: the chroma-weighted hue of lit pixels turns the same way in 74% of
   minutes, at a median of one turn per 52 s within a minute; 107 net turns
   in the hour, one per 35 s (`scripts/huerate.py`). What makes up the gap
@@ -127,6 +128,70 @@ the M1 Pro's GPU, the dev server):
 - Gallery: the In development tile draws (brightness 0.11 at rest, 0.13
   under the pointer); entering the scene, leaving and entering again drew
   each time (0.12–0.14), with no page or console errors.
+- Drop, on the cached songs (each a 60 s clip), the probe's drop jumps
+  beside a temporary log of each new place: Tarantula, Levitating, Seven
+  Nation Army and Still D.R.E. fired none. Billie Jean fired three: at
+  26.2 s and 46.8 s a new place followed within 0.02 s (the old ones had
+  shown 26.8 and 20.6 s); at 55.3 s the place had shown 2.2 s, and the
+  `DROP_WAIT_SEC` wait ran out before `MIN_PLACE_SEC`, so it stayed, as
+  designed. Around the World's two drops, at 26.8 and 51.4 s, each moved on
+  at once too. `tools/tune-real.mjs mandelbox --from 30 --seconds 60` on
+  Billie Jean, high, in a 960×540 window (the clip ends at 60 s, so the
+  song row holds 30 s of song and 30 s of silence):
+
+  | source | change med | change p95 | hits/min | kick/min | clap/min | hats/min | chord/min | drops/min | energy | fps |
+  |---|---|---|---|---|---|---|---|---|---|---|
+  | song | 12.08 | 21.84 | 290 | 67 | 6 | 131 | 55 | 2 | 0.37 | 119 |
+  | silence | 0.00 | 0.00 | 0 | 0 | 0 | 0 | 0 | 0 | 0.00 | 120 |
+
+- GPU time per frame at full screen, `tools/gpu-bench.mjs --app --dpr 2
+  --quality <preset>` (a 1512×945 window at twice the pixels, the M1 Pro,
+  synthetic audio, Crystal interleaved). On Metal a timer query around one
+  draw times the whole frame, so each figure is a frame, not a sum of
+  passes. `--wait 3` times a place's start. By 45 s the synthetic feed's
+  drops (one per `SECTION_PERIOD_SEC`, src/audio/synthetic.ts) have moved on
+  twice, so `--wait 45` timed the third place, whose straight path grazes a
+  wall: its gap falls to a hundredth of the way ahead within 5 s (replayed
+  in node), and rays down the opening creep along the wall until they run
+  out of steps. The costliest state measured:
+
+  | preset | canvas | march | a place's start | the third place, 6–10 s in |
+  |---|---|---|---|---|
+  | high | 3024×1890 | 1152×720 | 6.2 ms, 60 fps | 21.8 ms, 38 fps |
+  | mid | 2268×1418 | 864×540 | 5.3 ms, 60 fps | 9.9 ms, 60 fps |
+  | low | 1512×945 | 648×405 | 3.0 ms, 60 fps | 4.5 ms, 60 fps |
+  | floor | 1512×945 | 518×324 | 2.5 ms, 30 fps | 5.3 ms, 30 fps |
+
+  Crystal in the same runs: 20.5–20.6 ms at high (40 fps), 5.6–5.7 ms at low
+  (60 fps); 4.0–4.1 ms at low in a later run, so these readings vary by
+  about a third between runs. Depth alone costs little: on silence with
+  Push 0, the opening place 45 s in (15 folds against 10 at its start) took
+  6.9, 5.4, 4.0 and 3.0 ms at high, mid, low and floor. Mandelbox at floor
+  costs no more per frame than Crystal at low, so it has no `minQuality`:
+  the writer's rule from #829, since no TV was at hand to measure.
+- Whole-frame motion, one clip each (`scripts/record-clip.mjs`: Levitating,
+  Push 0 so the pace holds at 1, 1280×720, the app's Record button; then
+  `tools/ref-scan.py --dur 60`), beside the reference's 120 s window measured
+  the same way, in log-scale per second:
+
+  | clip | motion line's zoom mean | zoom median | one place's median | activity |
+  |---|---|---|---|---|
+  | the reference, 27:00–29:00 | +0.073 | +0.048 | | 0.053 |
+  | ours, `BASE_RATE` 0.073 | +0.046 | +0.035 | +0.035 (0–57 s) | 0.049 |
+  | ours, `BASE_RATE` 0.1 | +0.101 | +0.048 | +0.051 (0–40 s) | 0.051 |
+
+  The means count transitions and black frames as zoom: the reference's
+  window holds a cut and a dissolve, the first clip's last 3 s a dissolve,
+  and the second clip a dissolve and then 2 s of black (Known issues). The
+  medians follow the steady push in, and the one-place medians leave out
+  every change of place.
+- `tools/tune-real.mjs mandelbox` at `BASE_RATE` 0.1, Levitating then
+  silence, high, in a 960×540 window:
+
+  | source | change med | change p95 | hits/min | kick/min | clap/min | hats/min | chord/min | drops/min | energy | fps |
+  |---|---|---|---|---|---|---|---|---|---|---|
+  | song | 14.63 | 21.88 | 336 | 118 | 20 | 200 | 80 | 0 | 0.66 | 120 |
+  | silence | 0.00 | 0.00 | 0 | 0 | 0 | 0 | 0 | 0 | 0.00 | 120 |
 
 ## Decisions and pivots
 
@@ -162,6 +227,14 @@ the M1 Pro's GPU, the dev server):
   of its dissolves.
 - 2026-11-08: Rim flash toned down after it held the frame half white on a
   song with a kick and a clap every beat.
+- 2026-11-10 (#829): `BASE_RATE` from 0.073 to 0.1, so that our whole
+  frame's median zoom matches the reference's (Measurements). The first
+  version had set it to the reference's mean zoom, but its window's cut and
+  dissolve inflate that mean, and our whole frame read slower than our
+  target's rate. #829 said to scale by the ratio of the two motion lines
+  (×1.59, to 0.116); their means count transitions as zoom, so this took
+  the ratio of the medians (×1.37) instead: the owner's call to confirm. A
+  place now runs about 45 s at a steady pace, not about a minute.
 
 ## Tuning notes
 
@@ -173,8 +246,12 @@ the M1 Pro's GPU, the dev server):
   `scripts/lumastats.py` against the reference's medians above; judge the
   reactions with `tools/tune-real.mjs`, which must show a still picture in
   silence.
-- Quality presets change only the march target's height and step count
-  (`MARCH_HEIGHT`, `MARCH_STEPS`); only high has been measured.
+- Quality presets change the march target's height and step count
+  (`MARCH_HEIGHT`, `MARCH_STEPS`); the app also shrinks the canvas below
+  high and caps floor's frame rate. Every preset's cost is in Measurements.
+- To force a preset in a headless run, store it as the Quality choice
+  (`vibe.quality`), as `tools/gpu-bench.mjs --quality` does: `?quality=`
+  alone yields to the stored choice, High on a fresh profile.
 
 ## Known issues and next steps
 
@@ -183,12 +260,35 @@ the M1 Pro's GPU, the dev server):
 - Axis places look alike: each axis is one family of views along a line.
 - The camera never steers: a place ends when its zoom is spent, where the
   reference's camera may turn through openings.
-- No preset below high measured yet (`tools/gpu-bench.mjs`); a TV may need a
-  `minQuality`.
+- Mirror On's views aren't mirrored to the pixel, though the fractal is:
+  `MARCH_BODY` finds the normal and the rims from four probes at the corners
+  of a tetrahedron about 2 px across, which isn't mirror-symmetric, at a
+  scale where the fractal has detail, and its light comes from the upper
+  right. In a lab copy (2026-11-10, the 20 views above), six probes along
+  the axes took the median correlation from 0.74 to 0.97, and a light with
+  no sideways part as well to 1.000. A change to the look: the owner's call,
+  with #830.
+- At Flight speed 0 a free place keeps rolling, by up to `ROLL_MAX`: the roll
+  follows the pace, not Flight speed.
+- Places whose straight path grazes a wall, found by replaying the flight
+  in node at a pace of 1 (2026-11-10, the first 10 places at the default
+  settings, in order from `FIRST_SEED`); the view test only judges a place's
+  first view:
+  - Two of them reach `DE_FLOOR` within seconds (after 3.2 and 6.5 s at the
+    old `BASE_RATE`), where the others run 45–62 s. Seen live on Billie Jean
+    and Around the World: the third place lasted 6.4 and 6.8 s.
+  - The second place's gap falls to a ninetieth of the way ahead about 3 s
+    in, the march's reach, so the picture goes black for about 2 s; then it
+    faces a wall a few gaps away, dim and nearly still, for over half a
+    minute (seen in the second motion clip). It is the second place every
+    viewer meets.
+- Colour drift's description says the colours go round about every
+  half-minute; at 1 they take `HUE_PERIOD_SEC` a turn, about a minute.
+- At high, full screen on the M1 Pro, a place whose path grazes a wall
+  costs 21.8 ms a frame (38 fps), 3.5 times a place's start: the same short
+  places as above. Mid and below hold their frame rate.
 - A section-boundary edge in `src/audio/` would allow the move to a new place
   on a new section, as first proposed.
-- The Drop reaction hasn't been seen live: no drop landed in the 30 s
-  tune-real window.
 
 ## Materials
 

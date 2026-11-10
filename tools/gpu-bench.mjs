@@ -28,9 +28,11 @@
 //     Retina canvas). This is what the user actually sees, render cap and
 //     all — the fps it prints is draws per second. Timing starts --wait
 //     seconds after the scene loads (raise it for a scene whose opening
-//     costs differently from its steady state). --quality forces a preset
-//     (src/render/quality.ts's `?quality=`), so one machine can read what
-//     each preset costs.
+//     costs differently from its steady state). --quality forces a preset,
+//     so one machine can read what each preset costs: it stores it as the
+//     device's Quality choice (src/render/qualityPref.ts) as well as passing
+//     `?quality=`, because `?quality=` alone only sets the detected preset,
+//     which a stored choice (High on a fresh profile) overrides.
 //
 // Why each bench frame is followed by a 1-pixel readPixels: a tile-based GPU
 // (every Apple GPU) skips shading opaque fragments that a later draw in the
@@ -163,9 +165,10 @@ async function appMode() {
       return gl;
     };
   });
+  const quality = get("quality");
+  if (quality) await context.addInitScript((q) => localStorage.setItem("vibe.quality", q), quality);
   const page = await context.newPage();
   page.on("pageerror", (e) => console.error("[pageerror]", e.message));
-  const quality = get("quality");
   await page.goto(`https://localhost:${port}/?${quality ? `quality=${quality}&` : ""}audio=synthetic&bpm=124#/v/${scene}`);
   await page.waitForFunction(() => window.__viz, null, { timeout: 30_000 });
   await page.waitForTimeout(Number(get("wait", "2.5")) * 1000);
