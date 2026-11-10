@@ -5,7 +5,7 @@ turning hues on black, about half the places on the fractal's own mirror
 lines, so they open as a kaleidoscope or a mirrored vault. The music's
 loudness sets the pace of the flight and of the colours, so silence holds
 still; kicks and claps flash the rims; a drop moves on to a new place. In
-development, in draft PR #826.
+development, in draft PR #842.
 
 ## Where the code is
 
@@ -328,4 +328,7 @@ the M1 Pro's GPU, the dev server):
 
 ## History
 
-- #826 (draft): the first version, its record and materials.
+- #826 (draft, closed): the first version, its record and materials.
+- #842 (draft, supersedes #826 after a rebase): #829, the checks the first
+  version skipped, the record saying only what was measured, and
+  `BASE_RATE` 0.1.
