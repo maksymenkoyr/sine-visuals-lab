@@ -52,11 +52,11 @@ import {
   advanceFlight,
   cameraUniforms,
   cameraWorld,
+  churnOffset,
   createFlight,
   gasDriftRate,
   hueWander,
   pathUniforms,
-  PERIOD,
   type Flight,
 } from "./flight.ts";
 import { EXTRA_UNIFORMS, FOV_TAN, GAS_BODY, OCCLUDE, OUT_BODY, RESOLVE_BODY, T_MAX } from "./glsl.ts";
@@ -146,6 +146,7 @@ function createNebulaScene(): Scene {
   const prevCam = new Float32Array(16);
   let camNow = createCameraFrame();
   let camThen = createCameraFrame();
+  const churn = new Float32Array(3);
   const bandsBuf = new Float32Array(NUM_BANDS);
 
   function sizedTarget(gl: WebGL2RenderingContext, preset: QualityPreset): ColorTarget {
@@ -237,8 +238,8 @@ function createNebulaScene(): Scene {
 
       const tgt = sizedTarget(gl, ctx.quality.preset);
       const [histIn, histOut] = [hist[front], hist[1 - front]];
-      captureCamera(camPos, cam, flight.flowX, flight.flowY, camNow);
-      if (histOk && prevCamUniforms(camThen, camNow, PERIOD, prevCam) > MAX_JUMP) histOk = false;
+      captureCamera(camPos, cam, camNow);
+      if (histOk && prevCamUniforms(camThen, camNow, prevCam) > MAX_JUMP) histOk = false;
       [camNow, camThen] = [camThen, camNow];
       jitterAt(frameNo, jitter);
       const frameNoise = frameNoiseAt(frameNo);
@@ -254,8 +255,7 @@ function createNebulaScene(): Scene {
       gasProg.setV4v("uCam", cam);
       gasProg.setV4v("uPath", path);
       gasProg.setF("uHueDrift", hueDrift);
-      gasProg.setF("uChurn", flight.churn);
-      gasProg.setV2("uFlow", flight.flowX, flight.flowY);
+      gasProg.setV3v("uChurn", churnOffset(flight, churn));
       gasProg.setV4v("uShockAt", shockAt);
       gasProg.setF("uShockAmp", setting("shock") * shockAmp(reactions));
       gasProg.setF("uIgnite", setting("shock") * igniteAmp(reactions));

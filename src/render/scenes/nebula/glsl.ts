@@ -157,8 +157,6 @@ export const OCCLUDE = 0.3;
 const FLARE_GAIN = 1.6;
 /** How much brighter the whole cloud gets at full drive at Glow 1. */
 const GLOW_GAIN = 0.35;
-/** Radius of the churn clock's circle in the warp field, in world units. */
-const CHURN_R = 0.35;
 const EXPOSURE = 1.25;
 /** Glare: the two mip levels blurred into it, the brightness it starts above, and its strength. */
 const BLOOM_LODS = [2, 3.5];
@@ -208,8 +206,7 @@ uniform sampler2D uGasTex;
 uniform vec4 uCam[4];
 uniform vec4 uPath[2];
 uniform float uHueDrift;
-uniform float uChurn;
-uniform vec2 uFlow;
+uniform vec3 uChurn;
 uniform vec4 uShockAt;
 uniform float uShockAmp;
 uniform float uIgnite;
@@ -284,8 +281,7 @@ vec3 hueTurn(vec3 c, float deg) {
 void main() {
   vec2 p;
   vec3 dir = viewRay(vUv + uJitter / uResolution, p);
-  // The gas streams by uFlow while the tunnel stays on the camera's path, so the flow never fills it.
-  vec3 cam = uCam[0].xyz - vec3(uFlow, 0.0);
+  vec3 cam = uCam[0].xyz;
   vec2 here = vec2(pathX(0.0), pathY(0.0));
 
   float th = mix(0.69, 0.55, uGas);
@@ -294,7 +290,6 @@ void main() {
   float innerLit = uInner * uInnerLevel;
   float innerK = 1.0 + ${f(INNER_GAIN)} * innerLit;
   float innerFill = 1.0 + ${f(INNER_FILL)} * innerLit;
-  vec3 churn = ${f(CHURN_R)} * vec3(cos(uChurn), sin(uChurn), 0.0);
 
   // Interleaved gradient noise: a per-pixel start offset that turns step banding into fine grain, moved
   // on every frame so RESOLVE_BODY averages the grain away.
@@ -326,7 +321,7 @@ void main() {
     vec3 wp = cam + rel;
     // Level 0 throughout but for the fine reads: in this loop's uneven control flow the implicit
     // derivatives that would pick a mip level are undefined.
-    vec4 wv = textureLod(uVol, (wp + churn) * BASE_SCALE, 0.0);
+    vec4 wv = textureLod(uVol, (wp + uChurn) * BASE_SCALE, 0.0);
     vec3 qw = wp + ${f(WARP)} * vec3(wv.z - 0.5, wv.w - 0.5, wv.z - wv.w);
     vec2 fine = textureLod(uVol, qw * DETAIL_SCALE, 0.0).rg;
     float det = fine.y;
@@ -517,7 +512,7 @@ void main() {
   if (uHistOk < 0.5) return;
 
   // The same gas a frame ago, seen from the last camera: uPrevCam[0] is how far this camera has moved
-  // from that one, less how far the gas itself streamed (flight.ts's flow).
+  // from that one.
   vec2 p;
   vec3 q = viewRay(uv, p) * (depth * ${f(T_MAX)}) + uPrevCam[0].xyz;
   float z = dot(q, uPrevCam[3].xyz);

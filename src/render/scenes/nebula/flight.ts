@@ -1,7 +1,7 @@
 /**
  * Nebula's camera, on the JS side: where it is in the gas, which way it
  * looks, how far the view has rolled, how far the colours have wandered,
- * and how far the gas has drifted on its own.
+ * and how far the gas has churned on its own.
  *
  * The gas is a volume texture that repeats every `PERIOD` world units
  * across the flight and every `PERIOD_Z` along it (volume.ts, glsl.ts).
@@ -69,11 +69,17 @@ const HUE_WANDER: readonly PathSine[] = [
   { amp: 80, wavelength: 6100, phase: 0.0 },
 ];
 
-// The gas's own motion at Gas drift 1: its churn clock in radians per second, and how far the whole
-// cloud streams across the flight in world units per second (x, y). The flow stays well under the
-// flight's own pace (index.ts's BASE_SPEED) so at the default the reference's fly-through still leads.
-const CHURN_RATE = 0.05;
-const FLOW: readonly [number, number] = [0.04, 0.015];
+// The gas's own reshaping at Gas drift 1: the point where glsl.ts reads the warp wanders through the
+// warp field, one sine per axis (x, y, z), amplitudes in world units and wavelengths in seconds. Only
+// that read point moves, never the gas: the owner wants the clouds to change shape, not stream one way
+// like wind, and a shift of the whole gas reads as the camera moving. Each amplitude is about half the
+// warp's coarsest cell on its axis (volume.ts's WARP_CELLS per PERIOD, PERIOD_Z), far enough that the
+// bends at a point stop resembling where they began; with no common period the shapes never come back.
+const CHURN: readonly PathSine[] = [
+  { amp: 2.5, wavelength: 211, phase: 0 },
+  { amp: 2.5, wavelength: 263, phase: 0 },
+  { amp: 7.5, wavelength: 241, phase: 0 },
+];
 // How much a full reading on Gas drift's wire adds to the gas's own motion, as a share of the slider.
 // Tuned on a real song (docs/scenes/nebula.md): a level at the top wire weight runs the gas about as
 // fast as the slider's own top, and a hit still reads as a push.
@@ -86,26 +92,21 @@ export interface Flight {
   travel: number;
   /** Seconds of colour wander, advanced by wall time scaled by Colour drift. */
   hueClock: number;
-  /** A slow clock for the gas's own churn, in radians, kept in [0, 2π). */
-  churn: number;
-  /** How far the whole cloud has streamed across the flight, x and y, kept in [0, PERIOD). */
-  flowX: number;
-  flowY: number;
+  /** Seconds of the gas's own reshaping, advanced by wall time scaled by Gas drift. */
+  churnClock: number;
 }
 
 export function createFlight(): Flight {
-  return { travel: 0, hueClock: 0, churn: 0, flowX: 0, flowY: 0 };
+  return { travel: 0, hueClock: 0, churnClock: 0 };
 }
 
 /** Moves the camera on by one frame: `speed` world units per second along
  *  the path, the colour clock by `hueRate` seconds per second, and the gas's
- *  churn and flow by `gasDrift` times their rates at Gas drift 1. */
+ *  reshaping clock by `gasDrift` seconds per second. */
 export function advanceFlight(f: Flight, dtSec: number, speed: number, hueRate: number, gasDrift: number): void {
   f.travel += dtSec * speed;
   f.hueClock += dtSec * hueRate;
-  f.churn = (f.churn + dtSec * CHURN_RATE * gasDrift) % TAU;
-  f.flowX = wrap(f.flowX + dtSec * FLOW[0] * gasDrift, PERIOD);
-  f.flowY = wrap(f.flowY + dtSec * FLOW[1] * gasDrift, PERIOD);
+  f.churnClock += dtSec * gasDrift;
 }
 
 /** Gas drift's slider as its wire moves it. A factor, not `slider * reading`: an empty jack or a silent
@@ -133,6 +134,12 @@ function sum(sines: readonly PathSine[], z: number): number {
 /** The path's centre at distance `z`, x and y. */
 function pathAt(z: number): [number, number] {
   return [sum(PATH_X, z), sum(PATH_Y, z)];
+}
+
+/** Where glsl.ts reads the warp this frame, as an offset in world units (x, y, z) for `uChurn`. */
+export function churnOffset(f: Flight, out = new Float32Array(3)): Float32Array {
+  for (let i = 0; i < 3; i++) out[i] = CHURN[i].amp * Math.sin(sinePhase(CHURN[i], f.churnClock));
+  return out;
 }
 
 /** The colour wander this frame, in degrees. */
