@@ -1,0 +1,492 @@
+{
+ "scene": "mandelbox",
+ "bundle": "fractal-loop-2T33",
+ "settings": null,
+ "offsets": [
+  -80,
+  0,
+  160
+ ],
+ "shots": [
+  {
+   "beat": 2,
+   "rank": 8,
+   "t": 1.5557,
+   "offsetMs": -80,
+   "file": "b002_r08_-080.png",
+   "lagMs": 35,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0.5395482906969088,
+    "scene": "mandelbox"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 0,
+    "energy": 0.466,
+    "section": 0.613
+   }
+  },
+  {
+   "beat": 2,
+   "rank": 8,
+   "t": 1.5557,
+   "offsetMs": 0,
+   "file": "b002_r08_+000.png",
+   "lagMs": 91,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0.5197166777390786,
+    "scene": "mandelbox"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 0,
+    "energy": 0.466,
+    "section": 0.613
+   }
+  },
+  {
+   "beat": 2,
+   "rank": 8,
+   "t": 1.5557,
+   "offsetMs": 160,
+   "file": "b002_r08_+160.png",
+   "lagMs": 66,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0.44294481812191105,
+    "scene": "mandelbox"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 0,
+    "energy": 0.466,
+    "section": 0.613
+   }
+  },
+  {
+   "beat": 6,
+   "rank": 4,
+   "t": 3.483,
+   "offsetMs": -80,
+   "file": "b006_r04_-080.png",
+   "lagMs": 172,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0.3859823039967089,
+    "scene": "mandelbox"
+   },
+   "heard": {
+    "onset": false,
+    "bpm": 0,
+    "energy": 0.435,
+    "section": 0.976
+   }
+  },
+  {
+   "beat": 6,
+   "rank": 4,
+   "t": 3.483,
+   "offsetMs": 0,
+   "file": "b006_r04_+000.png",
+   "lagMs": 479,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0.32607241091562017,
+    "scene": "mandelbox"
+   },
+   "heard": {
+    "onset": false,
+    "bpm": 0,
+    "energy": 0.435,
+    "section": 0.976
+   }
+  },
+  {
+   "beat": 6,
+   "rank": 4,
+   "t": 3.483,
+   "offsetMs": 160,
+   "file": "b006_r04_+160.png",
+   "lagMs": 759,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0.5656889720509451,
+    "scene": "mandelbox"
+   },
+   "heard": {
+    "onset": false,
+    "bpm": 0,
+    "energy": 0.435,
+    "section": 0.976
+   }
+  },
+  {
+   "beat": 10,
+   "rank": 16,
+   "t": 5.387,
+   "offsetMs": -80,
+   "file": "b010_r16_-080.png",
+   "lagMs": 38,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0.5259182697494301,
+    "scene": "mandelbox"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 0,
+    "energy": 0.462,
+    "section": 0.999
+   }
+  },
+  {
+   "beat": 10,
+   "rank": 16,
+   "t": 5.387,
+   "offsetMs": 0,
+   "file": "b010_r16_+000.png",
+   "lagMs": 115,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0.5043169005208105,
+    "scene": "mandelbox"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 0,
+    "energy": 0.462,
+    "section": 0.999
+   }
+  },
+  {
+   "beat": 10,
+   "rank": 16,
+   "t": 5.387,
+   "offsetMs": 160,
+   "file": "b010_r16_+160.png",
+   "lagMs": 121,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0.4117715180718354,
+    "scene": "mandelbox"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 0,
+    "energy": 0.462,
+    "section": 0.999
+   }
+  },
+  {
+   "beat": 14,
+   "rank": 4,
+   "t": 7.3143,
+   "offsetMs": -80,
+   "file": "b014_r04_-080.png",
+   "lagMs": 76,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0.4299945702471057,
+    "scene": "mandelbox"
+   },
+   "heard": {
+    "onset": false,
+    "bpm": 0,
+    "energy": 0.377,
+    "section": 1
+   }
+  },
+  {
+   "beat": 14,
+   "rank": 4,
+   "t": 7.3143,
+   "offsetMs": 0,
+   "file": "b014_r04_+000.png",
+   "lagMs": 180,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0.5384608879687193,
+    "scene": "mandelbox"
+   },
+   "heard": {
+    "onset": false,
+    "bpm": 0,
+    "energy": 0.377,
+    "section": 1
+   }
+  },
+  {
+   "beat": 14,
+   "rank": 4,
+   "t": 7.3143,
+   "offsetMs": 160,
+   "file": "b014_r04_+160.png",
+   "lagMs": 185,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0.4749611675894509,
+    "scene": "mandelbox"
+   },
+   "heard": {
+    "onset": false,
+    "bpm": 0,
+    "energy": 0.377,
+    "section": 1
+   }
+  },
+  {
+   "beat": 18,
+   "rank": 8,
+   "t": 9.2415,
+   "offsetMs": -80,
+   "file": "b018_r08_-080.png",
+   "lagMs": 46,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0.639945449346366,
+    "scene": "mandelbox"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 0,
+    "energy": 0.451,
+    "section": 1
+   }
+  },
+  {
+   "beat": 18,
+   "rank": 8,
+   "t": 9.2415,
+   "offsetMs": 0,
+   "file": "b018_r08_+000.png",
+   "lagMs": 133,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0.529800769732295,
+    "scene": "mandelbox"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 0,
+    "energy": 0.451,
+    "section": 1
+   }
+  },
+  {
+   "beat": 18,
+   "rank": 8,
+   "t": 9.2415,
+   "offsetMs": 160,
+   "file": "b018_r08_+160.png",
+   "lagMs": 149,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0.4029435019171312,
+    "scene": "mandelbox"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 0,
+    "energy": 0.451,
+    "section": 1
+   }
+  },
+  {
+   "beat": 22,
+   "rank": 4,
+   "t": 11.1688,
+   "offsetMs": -80,
+   "file": "b022_r04_-080.png",
+   "lagMs": 29,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0.4358081347887439,
+    "scene": "mandelbox"
+   },
+   "heard": {
+    "onset": false,
+    "bpm": 0,
+    "energy": 0.451,
+    "section": 1
+   }
+  },
+  {
+   "beat": 22,
+   "rank": 4,
+   "t": 11.1688,
+   "offsetMs": 0,
+   "file": "b022_r04_+000.png",
+   "lagMs": 97,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0.4699025471390433,
+    "scene": "mandelbox"
+   },
+   "heard": {
+    "onset": false,
+    "bpm": 0,
+    "energy": 0.451,
+    "section": 1
+   }
+  },
+  {
+   "beat": 22,
+   "rank": 4,
+   "t": 11.1688,
+   "offsetMs": 160,
+   "file": "b022_r04_+160.png",
+   "lagMs": 131,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0.41342546443392564,
+    "scene": "mandelbox"
+   },
+   "heard": {
+    "onset": false,
+    "bpm": 0,
+    "energy": 0.451,
+    "section": 1
+   }
+  },
+  {
+   "beat": 26,
+   "rank": 16,
+   "t": 13.1193,
+   "offsetMs": -80,
+   "file": "b026_r16_-080.png",
+   "lagMs": 42,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0.6012658868766366,
+    "scene": "mandelbox"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 0,
+    "energy": 0.488,
+    "section": 0.994
+   }
+  },
+  {
+   "beat": 26,
+   "rank": 16,
+   "t": 13.1193,
+   "offsetMs": 0,
+   "file": "b026_r16_+000.png",
+   "lagMs": 171,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0.39372818152519923,
+    "scene": "mandelbox"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 0,
+    "energy": 0.488,
+    "section": 0.994
+   }
+  },
+  {
+   "beat": 26,
+   "rank": 16,
+   "t": 13.1193,
+   "offsetMs": 160,
+   "file": "b026_r16_+160.png",
+   "lagMs": 261,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0.46415346100413263,
+    "scene": "mandelbox"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 0,
+    "energy": 0.488,
+    "section": 0.994
+   }
+  },
+  {
+   "beat": 30,
+   "rank": 4,
+   "t": 15.0233,
+   "offsetMs": -80,
+   "file": "b030_r04_-080.png",
+   "lagMs": 39,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0.42276169173419476,
+    "scene": "mandelbox"
+   },
+   "heard": {
+    "onset": false,
+    "bpm": 0,
+    "energy": 0.401,
+    "section": 0.993
+   }
+  },
+  {
+   "beat": 30,
+   "rank": 4,
+   "t": 15.0233,
+   "offsetMs": 0,
+   "file": "b030_r04_+000.png",
+   "lagMs": 115,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0.472081193778043,
+    "scene": "mandelbox"
+   },
+   "heard": {
+    "onset": false,
+    "bpm": 0,
+    "energy": 0.401,
+    "section": 0.993
+   }
+  },
+  {
+   "beat": 30,
+   "rank": 4,
+   "t": 15.0233,
+   "offsetMs": 160,
+   "file": "b030_r04_+160.png",
+   "lagMs": 142,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0.4550648209406063,
+    "scene": "mandelbox"
+   },
+   "heard": {
+    "onset": false,
+    "bpm": 0,
+    "energy": 0.401,
+    "section": 0.993
+   }
+  }
+ ]
+}
