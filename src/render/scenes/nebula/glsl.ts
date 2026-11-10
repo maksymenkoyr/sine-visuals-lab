@@ -512,7 +512,7 @@ void main() {
   if (uHistOk < 0.5) return;
 
   // The same gas a frame ago, seen from the last camera: uPrevCam[0] is how far this camera has moved
-  // from that one, less how far the gas itself streamed (flight.ts's flow).
+  // from that one.
   vec2 p;
   vec3 q = viewRay(uv, p) * (depth * ${f(T_MAX)}) + uPrevCam[0].xyz;
   float z = dot(q, uPrevCam[3].xyz);

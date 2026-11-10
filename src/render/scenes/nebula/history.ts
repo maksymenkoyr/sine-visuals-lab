@@ -17,23 +17,21 @@ export const JITTER_CYCLE = 8;
 /** A camera move longer than this in one frame (world units) is a cut, not motion: the history restarts. */
 export const MAX_JUMP = 0.5;
 
-/** One frame's camera: the unwrapped position (flight.ts's cameraWorld), the basis vectors
- *  (cameraUniforms' right, up, forward) and the gas's flow offset, which wraps at `period`. */
+/** One frame's camera: the unwrapped position (flight.ts's cameraWorld) and the basis vectors
+ *  (cameraUniforms' right, up, forward). */
 export interface CameraFrame {
   world: [number, number, number];
   basis: Float32Array;
-  flow: [number, number];
 }
 
 export function createCameraFrame(): CameraFrame {
-  return { world: [0, 0, 0], basis: new Float32Array(12), flow: [0, 0] };
+  return { world: [0, 0, 0], basis: new Float32Array(12) };
 }
 
 /** Copies this frame's camera into `out`: `cam` is cameraUniforms' 16 floats. */
-export function captureCamera(world: readonly number[], cam: Float32Array, flowX: number, flowY: number, out: CameraFrame): void {
+export function captureCamera(world: readonly number[], cam: Float32Array, out: CameraFrame): void {
   out.world = [world[0], world[1], world[2]];
   out.basis.set(cam.subarray(4, 16));
-  out.flow = [flowX, flowY];
 }
 
 function halton(i: number, base: number): number {
@@ -61,20 +59,15 @@ export function frameNoiseAt(frame: number): number {
   return (frame * 0.618034) % 1;
 }
 
-function unwrap(d: number, period: number): number {
-  return d - period * Math.round(d / period);
-}
-
 /**
- * RESOLVE_BODY's `uPrevCam`: [0] where this camera stands seen from the last one, less the gas's own
- * flow over the frame (a gas parcel streamed along with it); [1], [2], [3] the last camera's right,
- * up and forward. Returns the length of the move, so the caller can restart the history on a cut.
+ * RESOLVE_BODY's `uPrevCam`: [0] where this camera stands seen from the last one; [1], [2], [3] the
+ * last camera's right, up and forward. The gas itself never moves (Gas drift only reshapes it where
+ * it is, flight.ts), so the camera's move is the whole reprojection. Returns the length of the move,
+ * so the caller can restart the history on a cut.
  */
-export function prevCamUniforms(prev: CameraFrame, cur: CameraFrame, period: number, out = new Float32Array(16)): number {
-  const dfx = unwrap(cur.flow[0] - prev.flow[0], period);
-  const dfy = unwrap(cur.flow[1] - prev.flow[1], period);
-  const dx = cur.world[0] - prev.world[0] - dfx;
-  const dy = cur.world[1] - prev.world[1] - dfy;
+export function prevCamUniforms(prev: CameraFrame, cur: CameraFrame, out = new Float32Array(16)): number {
+  const dx = cur.world[0] - prev.world[0];
+  const dy = cur.world[1] - prev.world[1];
   const dz = cur.world[2] - prev.world[2];
   out.set([dx, dy, dz, 0], 0);
   out.set(prev.basis.subarray(0, 3), 4);
@@ -83,5 +76,5 @@ export function prevCamUniforms(prev: CameraFrame, cur: CameraFrame, period: num
   out[11] = 0;
   out.set(prev.basis.subarray(8, 11), 12);
   out[15] = 0;
-  return Math.hypot(cur.world[0] - prev.world[0], cur.world[1] - prev.world[1], dz);
+  return Math.hypot(dx, dy, dz);
 }

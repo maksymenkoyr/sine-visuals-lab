@@ -46,8 +46,7 @@ wheel over most of an hour. In development.
   jump at the camera's wrap, deterministic stars, and Gas drift leaving the
   camera's read of the gas alone.
 - `tests/nebulaHistory.test.ts` — the sub-pixel offsets, and a gas parcel
-  reprojected to where the last camera saw it across the flow's and the
-  camera's wraps.
+  reprojected to where the last camera saw it across the camera's wraps.
 - Drives (src/render/drives.ts): `glow` on `anim.energy`, `flare` on
   `anim.kickOnset` (read as a level in GLSL), `surge` on
   `anim.sectionIntensity` (read in JS through `drives.value`), `inner` on

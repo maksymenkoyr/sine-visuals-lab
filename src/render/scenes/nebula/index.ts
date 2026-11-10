@@ -57,7 +57,6 @@ import {
   gasDriftRate,
   hueWander,
   pathUniforms,
-  PERIOD,
   type Flight,
 } from "./flight.ts";
 import { EXTRA_UNIFORMS, FOV_TAN, GAS_BODY, OCCLUDE, OUT_BODY, RESOLVE_BODY, T_MAX } from "./glsl.ts";
@@ -239,8 +238,8 @@ function createNebulaScene(): Scene {
 
       const tgt = sizedTarget(gl, ctx.quality.preset);
       const [histIn, histOut] = [hist[front], hist[1 - front]];
-      captureCamera(camPos, cam, flight.flowX, flight.flowY, camNow);
-      if (histOk && prevCamUniforms(camThen, camNow, PERIOD, prevCam) > MAX_JUMP) histOk = false;
+      captureCamera(camPos, cam, camNow);
+      if (histOk && prevCamUniforms(camThen, camNow, prevCam) > MAX_JUMP) histOk = false;
       [camNow, camThen] = [camThen, camNow];
       jitterAt(frameNo, jitter);
       const frameNoise = frameNoiseAt(frameNo);
