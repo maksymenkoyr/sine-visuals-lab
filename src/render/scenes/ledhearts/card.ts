@@ -112,6 +112,17 @@ const SETTINGS: SceneSetting[] = [
     description: "How much light spills between the LEDs and past each heart.",
   },
   {
+    key: "blur",
+    label: "Blur",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    default: 0.05,
+    description: "How soft the hearts' edges and glow are. A wire pushes them softer from here.",
+    drive: { default: { mix: "add", sources: [] } },
+  },
+  {
     key: "hue",
     label: "Hue",
     group: "Look",
