@@ -2,8 +2,9 @@ import { addLook, releaseFreeLook, setMoveKey, type MoveKey } from "../render/fr
 
 /**
  * The mouse and the keys for walking through a scene like in a game; the
- * camera's half is src/render/freeLook.ts. In a scene whose card says
- * `freeLook`, a click on the picture locks the pointer to it: the mouse then
+ * camera's half is src/render/freeLook.ts. app.ts wires it in a dev build
+ * only. In a scene whose card says `freeLook`, a click on the picture locks
+ * the pointer to it: the mouse then
  * looks round, the keys in MOVE_KEYS walk, climb and sink, and Esc, the
  * browser's own way out of a pointer lock, stops.
  *
