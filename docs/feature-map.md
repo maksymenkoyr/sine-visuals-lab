@@ -49,6 +49,7 @@ flowchart LR
   view --> panel["Controls panel"]
 
   picture --> crossfade["Crossfades"]
+  picture --> walk["Walk through a scene"]
   corner --> fs["Fullscreen"]
   corner --> sceneList["Scene list"]
   corner --> fx["Held effects"]
@@ -74,7 +75,7 @@ flowchart LR
 
   class app,gallery,view,start,picture,featured,fs,analysis,auto core
   class drafts,out,popout,room,crossfade,fx,rec,corner,show,sceneList key
-  class panel,soundIn,look,wires depth
+  class panel,soundIn,look,wires,walk depth
   class engine,power,governor hood
 ```
 
@@ -112,6 +113,10 @@ Darker means more important.
     list · `src/render/crossfade.ts`, `src/render/sceneTransition.ts`
   - ●○○ **Pro options** — scene options locked until a Pro subscription exists;
     playable only in a dev build · `src/render/pro.ts`
+  - ●○○ **Walk through a scene** — in a scene that lets you (Code Rain), a
+    click on the picture locks the mouse to it: the mouse looks round and the
+    keys walk, like in a game, until Esc · `src/ui/freeLook.ts`,
+    `src/render/freeLook.ts`
 - ●●○ **Corner controls**
   - ●●● **Fullscreen** — the chrome fades away while the picture plays ·
     `src/ui/fullscreen.ts`

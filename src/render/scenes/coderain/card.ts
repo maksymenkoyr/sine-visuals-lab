@@ -49,19 +49,9 @@ export const SETTINGS: SceneSetting[] = [
   },
   // Motion
   {
-    key: "speed",
-    label: "Speed",
-    description: "How fast everything moves — the camera walks and looks round faster, and the rain falls faster",
-    group: "Motion",
-    min: 0.1,
-    max: 3,
-    step: 0.05,
-    default: 1,
-  },
-  {
     key: "fall",
     label: "Fall speed",
-    description: "How fast the heads fall down the columns, against the Speed",
+    description: "How fast the heads fall down the columns",
     group: "Motion",
     min: 0.1,
     max: 2.5,
@@ -134,34 +124,13 @@ export const SETTINGS: SceneSetting[] = [
     step: 1,
     default: 0,
   },
-  // Camera
-  {
-    key: "turn",
-    label: "Turn",
-    description: "How far the camera swings round to a new heading on a drop",
-    group: "Camera",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.6,
-    drive: { default: "anim.dropOnset", hit: { reactionLabel: "turn" } },
-  },
-  {
-    key: "tilt",
-    label: "Tilt",
-    description: "Where the camera looks — left looks down, right looks up into the rain",
-    group: "Camera",
-    min: -0.5,
-    max: 1,
-    step: 0.05,
-    default: 0.25,
-  },
 ];
 
 export const card: SceneCard = {
   id: "coderain",
   name: "Code Rain",
   settings: SETTINGS,
+  freeLook: true,
 };
 
 export const loadBody = (): Promise<Scene> => import("./index.ts").then((m) => m.codeRainScene);

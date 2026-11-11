@@ -1,5 +1,5 @@
-// Code Rain -- a 3D field of falling glyph columns that the camera glides
-// through, with a dancer drawn in glyphs among them. Built from a measured
+// Code Rain -- a 3D field of falling glyph columns, with a dancer drawn in
+// glyphs among them, that a viewer can walk through. Built from a measured
 // reference (docs/scenes/coderain.md has the record: the bundle, the numbers,
 // and why each choice was made). glyphs.ts draws the glyph set and its
 // atlas, figure.ts poses the dancer (the Dancers scene's rig, reused),
@@ -21,11 +21,8 @@
 // - Downpour: on a kick, a share of the columns starts a fresh, brighter
 //   head at the top of the view (the burst ring, BURST_SLOTS deep).
 // - Hit glow: the heads flare on a kick.
-// - Turn: on a drop, the camera swings to a new heading, smoothly (the
-//   reference has no hard cuts; neither does this).
-// The camera is an explorer on foot (explorer.ts): it walks on without
-// stopping, slowing to look round, on time. Speed scales the explorer's clock and the
-// fall clock together.
+// The camera moves only by hand (the card's `freeLook`, src/render/freeLook.ts)
+// and otherwise stands still: the owner's call, in docs/scenes/coderain.md.
 //
 // Time: this scene's own delta of anim.timeSec -- the gallery preview hands
 // render() an un-latched anim, so anim.dtSec is not used (as swarm, coil).
@@ -40,7 +37,7 @@ import { sceneMedia } from "../../../pinnedAssets.ts";
 import { CLIP_LIBRARY_URL, decodeClipLibrary, type ClipLibrary } from "../dancers/clipFormat.ts";
 import { ATLAS_PX, buildGlyphAtlas } from "./glyphs.ts";
 import { createFigure, FIGURE_HEIGHT, type Figure } from "./figure.ts";
-import { createExplorer, WALK_PACE, type Explorer } from "./explorer.ts";
+import { createWalker, takeFreeLook, type Walker } from "../../freeLook.ts";
 import { BURST_SLOTS, FIGURE_FRAG, FIGURE_VERT, RAIN_FRAG, RAIN_VERT } from "./glsl.ts";
 import { card, SETTINGS } from "./card.ts";
 import { levelOf } from "../../signals.ts";
@@ -85,13 +82,10 @@ const DOWNPOUR_SHARE = 0.3;
 const BURST_MIN_GAP_SEC = 0.15;
 /** Head brightness lift at Hit glow 1 on a full hit: x (1 + this). */
 const HEAD_LIFT = 1.6;
-/** A drop turns the heading by this much at Turn 1, plus up to TURN_SPREAD. */
-const TURN_MIN = (60 * Math.PI) / 180;
-const TURN_SPREAD = (60 * Math.PI) / 180;
-const TURN_TAU = 1.4;
-/** Tilt 1 looks this far up. */
-const TILT_MAX = (35 * Math.PI) / 180;
-/** Tilt plus the explorer's own pitch stops here, or the view flips over. */
+/** Walking by hand, world units a second: about ten glyph widths, a brisk
+ *  walk; climbing and sinking a little slower. */
+const WALK_SPEED = 2.6;
+const CLIMB_SPEED = 2;
 const PITCH_MAX = (80 * Math.PI) / 180;
 /** The depth fade, world units: columns fade in from NEAR_FADE[0] to [1]
  *  (so none passes through the camera), are full from there out to
@@ -101,13 +95,14 @@ const PITCH_MAX = (80 * Math.PI) / 180;
  *  of thin far strips falls well short of an even field's past ~20 units. */
 const NEAR_FADE = [1.4, 2.6] as const;
 const FAR_FADE = [20, 36] as const;
-/** The figure: how far ahead of the camera, how many world units per rig
- *  metre, how slowly it follows the walk's turns, and its glyph cell. It
- *  follows where the explorer walks, not where it looks, so a look round
- *  sweeps off the dancer and back. */
+/** The figure: how far ahead of where the camera starts it dances (at eye
+ *  height, so a still camera has it in the middle of the view), how many
+ *  world units per rig metre, and its glyph cell. It stands in the world,
+ *  so a walk goes past it and round it; like the columns it repeats every
+ *  FIELD, so a walk away meets it again, and it fades with distance as
+ *  they do (NEAR_FADE, FAR_FADE), so no repeat is seen to jump. */
 const FIG_DIST = 7;
 const FIG_SCALE = 2.5;
-const FIG_FOLLOW_TAU = 2.6;
 const FIG_CELL = FIGURE_HEIGHT / 72;
 const FIG_WIDTH = 2.4;
 /** The classic look (sRGB): the head and the trail from the head's side to
@@ -131,6 +126,18 @@ function settingFor(key: string): SceneSetting {
 function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
 }
+
+function smoothstep(e0: number, e1: number, x: number): number {
+  const t = clamp01((x - e0) / (e1 - e0));
+  return t * t * (3 - 2 * t);
+}
+
+/** v moved by whole FIELDs to its nearest copy of 0, in [-FIELD / 2, FIELD / 2]. */
+function nearestCopy(v: number): number {
+  return v - FIELD * Math.round(v / FIELD);
+}
+
+const newWalker = (): Walker => createWalker({ walkSpeed: WALK_SPEED, climbSpeed: CLIMB_SPEED, pitchMax: PITCH_MAX, period: FIELD });
 
 /** A small deterministic generator for the grid's jitter and seeds. */
 function mulberry32(seed: number): () => number {
@@ -184,16 +191,11 @@ function createCodeRainScene(): Scene {
 
   // Camera and clocks.
   let lastTime: number | null = null;
-  let camX = 0;
-  let camZ = 0;
-  let yaw = 0;
-  let yawTarget = 0;
-  let figYaw = 0;
   let fallClock = 0;
-  const rng = mulberry32(SEED ^ 0x9e3779b9);
   const right = new Float32Array(3);
   const up = new Float32Array(3);
-  let explorer: Explorer = createExplorer(mulberry32(SEED ^ 0x85ebca6b));
+  const fwd = new Float32Array(3);
+  let walker = newWalker();
 
   // The burst ring: per slot (fall clock at start, share, id, start time).
   const bursts = new Float32Array(BURST_SLOTS * 4);
@@ -252,7 +254,7 @@ function createCodeRainScene(): Scene {
       buildAtlas(gl);
       freeGeometry(gl);
       figure = createFigure();
-      explorer = createExplorer(mulberry32(SEED ^ 0x85ebca6b));
+      walker = newWalker();
       // The clip library arrives asynchronously after the first mount; until
       // it does (or if it can't) the dancer sways. A later mount (context
       // loss, the gallery tile and then the full view) makes a new figure,
@@ -294,7 +296,6 @@ function createCodeRainScene(): Scene {
       const glyphSize = resolveSceneSetting(ID, settingFor("glyphSize"));
       const trailLen = resolveSceneSetting(ID, settingFor("trail"));
       const figureGain = resolveSceneSetting(ID, settingFor("figure"));
-      const speed = resolveSceneSetting(ID, settingFor("speed"));
       const fall = resolveSceneSetting(ID, settingFor("fall"));
       const rush = resolveSceneSetting(ID, settingFor("rush"));
       const downpour = resolveSceneSetting(ID, settingFor("downpour"));
@@ -302,12 +303,10 @@ function createCodeRainScene(): Scene {
       const brightness = resolveSceneSetting(ID, settingFor("brightness"));
       const hitGlow = resolveSceneSetting(ID, settingFor("hitGlow"));
       const colour = Math.round(resolveSceneSetting(ID, settingFor("colour")));
-      const turn = resolveSceneSetting(ID, settingFor("turn"));
-      const tilt = resolveSceneSetting(ID, settingFor("tilt"));
 
       // The fall clock, in rows at speed factor 1.
       const level = rush > 0.001 ? drives.value("rush", levelOf(frame), 0.5) : 0.5;
-      fallClock += FALL_BASE * speed * fall * Math.max(0.25, 1 + RUSH_GAIN * rush * (level - 0.5)) * dt;
+      fallClock += FALL_BASE * fall * Math.max(0.25, 1 + RUSH_GAIN * rush * (level - 0.5)) * dt;
 
       // Bursts: a hit starts fresh heads at the top of the view.
       const downpourFired = drives.fired("downpour", anim.song.kickOnset);
@@ -333,41 +332,22 @@ function createCodeRainScene(): Scene {
       }
       const headLift = 1 + HEAD_LIFT * hitGlow * clamp01(drives.value("hitGlow", anim.song.kickPulse));
 
-      // The camera: the explorer walks and looks; a drop swings it all.
-      const turnFired = drives.fired("turn", anim.dropOnset);
-      if (turn > 0.001 && turnFired) {
-        const amount = turn * Math.max(0.4, clamp01(drives.value("turn", anim.dropPulse))) * drives.hitSize("turn");
-        yawTarget += (rng() < 0.5 ? -1 : 1) * (TURN_MIN + TURN_SPREAD * rng()) * amount;
-      }
-      yaw += (yawTarget - yaw) * (1 - Math.exp(-dt / TURN_TAU));
-      const walkDt = dt * speed;
-      const pose = explorer.step(walkDt);
-      const heading = yaw + pose.gaze;
-      const pitch = Math.max(-PITCH_MAX, Math.min(PITCH_MAX, tilt * TILT_MAX + pose.pitch));
-      const walkHeading = yaw + pose.body;
-      figYaw += (walkHeading - figYaw) * (1 - Math.exp(-walkDt / FIG_FOLLOW_TAU));
-
-      const cp = Math.cos(pitch);
-      const fwd = [Math.sin(heading) * cp, Math.sin(pitch), -Math.cos(heading) * cp];
-      const flatRight = [Math.cos(heading), 0, Math.sin(heading)];
-      const flatUp = [
-        flatRight[1] * fwd[2] - flatRight[2] * fwd[1],
-        flatRight[2] * fwd[0] - flatRight[0] * fwd[2],
-        flatRight[0] * fwd[1] - flatRight[1] * fwd[0],
-      ];
-      const cr = Math.cos(pose.roll);
-      const sr = Math.sin(pose.roll);
-      for (let i = 0; i < 3; i++) {
-        right[i] = flatRight[i] * cr - flatUp[i] * sr;
-        up[i] = flatUp[i] * cr + flatRight[i] * sr;
-      }
-      camX += Math.sin(walkHeading) * WALK_PACE * pose.pace * walkDt;
-      camZ += -Math.cos(walkHeading) * WALK_PACE * pose.pace * walkDt;
+      // The camera: where the walker stands and looks.
+      const pose = walker.step(dt, takeFreeLook());
+      const { pitch } = pose;
+      const camX = pose.x;
       const camY = pose.y;
-      // The grid is periodic in FIELD, so the camera can be too: keeps the
-      // fp32 uploads small however long the walk runs.
-      camX -= Math.floor(camX / FIELD) * FIELD;
-      camZ -= Math.floor(camZ / FIELD) * FIELD;
+      const camZ = pose.z;
+      const cp = Math.cos(pitch);
+      fwd[0] = Math.sin(pose.yaw) * cp;
+      fwd[1] = Math.sin(pitch);
+      fwd[2] = -Math.cos(pose.yaw) * cp;
+      right[0] = Math.cos(pose.yaw);
+      right[1] = 0;
+      right[2] = Math.sin(pose.yaw);
+      up[0] = right[1] * fwd[2] - right[2] * fwd[1];
+      up[1] = right[2] * fwd[0] - right[0] * fwd[2];
+      up[2] = right[0] * fwd[1] - right[1] * fwd[0];
 
       const tanHalf = Math.tan(FOV_Y / 2);
       const aspect = roomW / roomH;
@@ -415,20 +395,23 @@ function createCodeRainScene(): Scene {
 
       // The figure first: the rain lands over it, as the reference's
       // columns pass in front of its ghosts.
-      if (figureGain > 0.001) {
+      const figX = nearestCopy(0 - camX);
+      const figZ = nearestCopy(-FIG_DIST - camZ);
+      const figD = Math.hypot(figX, camY, figZ);
+      const figFade = smoothstep(NEAR_FADE[0], NEAR_FADE[1], figD) * smoothstep(FAR_FADE[1], FAR_FADE[0], figD);
+      if (figureGain * figFade > 0.001) {
         const f = figure.advance(anim, frame.bpm, dt, 1);
         const figH = FIGURE_HEIGHT * FIG_SCALE;
-        const centreY = camY + FIG_DIST * Math.tan(tilt * TILT_MAX);
         figProg.use();
         camera(figProg);
-        figProg.setV3v("uFigOrigin", [camX + Math.sin(figYaw) * FIG_DIST, centreY - figH * 0.5, camZ - Math.cos(figYaw) * FIG_DIST]);
+        figProg.setV3v("uFigOrigin", [camX + figX, -figH * 0.5, camZ + figZ]);
         figProg.setF("uFigScale", FIG_SCALE);
         gl.uniform2f(gl.getUniformLocation(figProg.program, "uFigSize"), FIG_WIDTH, FIGURE_HEIGHT);
         figProg.setV4v("uCaps", f.caps);
         figProg.setFv("uCapR", f.radii);
         figProg.setV3v("uSkull", f.skull);
         figProg.setF("uFigCell", FIG_CELL);
-        figProg.setF("uFigGain", figureGain * brightness);
+        figProg.setF("uFigGain", figureGain * figFade * brightness);
         figProg.setV3v("uFigCol", figCol);
         figProg.setV3v("uTrailCol", trailCol);
         gl.bindVertexArray(emptyVao);

@@ -297,6 +297,7 @@ import { thisDevice } from "./net/deviceKind.ts";
 import type { OutputPower, ToMain, ToOutput } from "./net/outputSync.ts";
 import { createOutputControls, labelPlayKey, type OutputControls } from "./ui/outputControls.ts";
 import { createEffectControls, effectShortcutId, type EffectControls } from "./ui/effectControls.ts";
+import { WALK_KEYS, wireFreeLook } from "./ui/freeLook.ts";
 import { createClipRecorder, type ClipRecorder } from "./ui/clipRecorder.ts";
 import { createRecordControls, type RecordControls } from "./ui/recordControls.ts";
 import {
@@ -2536,7 +2537,8 @@ async function enterViz(next: Scene): Promise<void> {
   updateSceneVersionLabel(next);
 
   if (!quietScreen()) {
-    showHud(`${isController ? "remote" : mode}${roomCode ? ` (${roomCode})` : ""}  quality: ${quality.preset}  scene: ${scene.name}  palette: ${palette.name}`);
+    const walk = next.freeLook && !isController ? "\nclick the picture to walk" : "";
+    showHud(`${isController ? "remote" : mode}${roomCode ? ` (${roomCode})` : ""}  quality: ${quality.preset}  scene: ${scene.name}  palette: ${palette.name}${walk}`);
   }
   activeConn()?.sendHello(scene.id, palette.id, viewport);
 
@@ -2855,6 +2857,14 @@ async function boot(): Promise<void> {
   fsBtn.addEventListener("click", () => immersive!.toggle());
   // A phone or iPad screen shows nothing but the picture until it is tapped.
   if (handheldScreen) immersive.enterHidden();
+
+  // Ahead of wireOutputKeys: while walking, Space is the walk's, not the Cue's.
+  wireFreeLook({
+    canvas,
+    enabled: () => inViz && !isController && scene.freeLook === true,
+    onStart: () => showHud(["Walking", ...WALK_KEYS].join("\n")),
+    onRefused: () => showHud("Click the picture again to walk"),
+  });
 
   // The bar (CUE / PLAY / state line). A laptop has the pop-out window with its
   // own Cue and Play; a keyed room's Main is one more output (net/roomBridge.ts);
