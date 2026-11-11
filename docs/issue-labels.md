@@ -7,7 +7,7 @@ and one token label; `human` is added when it applies.
 ## Difficulty: who builds it
 
 One of `high dif`, `mid dif`, `low dif`. The label says which model and effort
-should pick the issue up, using the table in `docs/agent-models.md` (the
+should pick the issue up, using the table in `~/projects/agent-models.md` (the
 label's own description in GitHub carries the short version):
 
 - `high dif`: plans, architecture, look and shader work judged by eye, DSP and
