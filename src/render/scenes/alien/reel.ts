@@ -22,14 +22,16 @@
  * dance, picked at random among the others, seen through its own view
  * (`showLoop`). Camera cut keeps the dance and moves to another view among
  * CUT_VIEWS (`pickView`). Each waits until what it changes has been on screen
- * for its Shortest slider; a climb sooner is skipped. At its Longest slider
+ * for its Shortest; a climb sooner is skipped. At its Longest
  * it cuts by itself (on the first beat after it with on-beat on, never in
  * silence), and Sink lowers the Line as Longest nears so a signal that falls
  * short still gets across. A dance cut moves the camera too, so Camera cut's
  * wait starts over with it, and the two never land on one tick. Nothing else
  * changes the dance but the Dance setting: while it holds one (`chipLoop`),
  * the scene holds Dance cut off, and while View holds one camera
- * (`chipView`), Camera cut. Each loop keeps its own place, so cutting back
+ * (`chipView`), Camera cut. Shortest, Longest, Sink and On the beat are
+ * each cut's own rows under its line in the wire panel (lineTrigger.ts,
+ * `drive.trigger`), not sliders. Each loop keeps its own place, so cutting back
  * finds the alien where it was left. (The Line was once a fixed height, then
  * a standout detector, src/render/standout.ts; that one counted only a quick
  * climb, so a slow rise never cut and Drop level could sit high with no cut
@@ -205,17 +207,15 @@ export function easeSpeed(speed: number, target: number, dtSec: number): number 
   return speed + (Math.max(0, target) - speed) * k;
 }
 
-/** Shortest dance's and Shortest view's defaults (card.ts), in seconds. */
+/** Dance cut's and Camera cut's Shortest defaults (card.ts's `drive.trigger`), in seconds. */
 export const DANCE_HOLD_SEC = 4;
 export const VIEW_HOLD_SEC = 3;
 /** Both cuts' Line default, in the units of the graph it is drawn on. */
 export const CUT_LINE_DEFAULT = 0.7;
-/** Longest dance's and Longest view's defaults, in seconds. */
+/** Their Longest defaults, in seconds. */
 export const DANCE_LONGEST_SEC = 30;
 export const VIEW_LONGEST_SEC = 30;
-/** The Longest sliders' far right, read as never (card.ts). */
-export const LONGEST_NEVER_SEC = 120;
-/** Dance line sink's and View line sink's defaults. */
+/** Their Sink defaults. */
 export const DANCE_SINK_DEFAULT = 0.5;
 export const VIEW_SINK_DEFAULT = 0;
 

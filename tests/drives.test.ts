@@ -22,7 +22,7 @@ import {
   type DriveSetting,
 } from "../src/render/drives.ts";
 import { createAnimClock, BEAT_PULSE_DECAY_PER_SEC } from "../src/render/animClock.ts";
-import { getDriveSetting, setDriveLine, setDriveLineStrength, setDriveSetting, setDriveSmoothness, setDriveSmoothnessOn, setDriveThreshold, setDriveThresholdOn, setDriveWindowMax } from "../src/render/driveStore.ts";
+import { getDriveSetting, setDriveLine, setDriveLineStrength, setDriveSetting, setDriveSmoothness, setDriveSmoothnessOn, setDriveThreshold, setDriveThresholdOn, setDriveTrigger, setDriveWindowMax } from "../src/render/driveStore.ts";
 import { clearDriveSolo, setDriveSolo } from "../src/render/driveSolo.ts";
 import { createWireModState, freshWireMod, stepWireMod, type WireMod } from "../src/render/wireMod.ts";
 import { bandLineDrive } from "../src/audio/bandLine.ts";
@@ -36,6 +36,7 @@ import { listScenes } from "../src/render/scene.ts";
 // Side-effect import: registers every scene, same convention as signals.test.ts.
 import "../src/render/scenes/index.ts";
 import { causticsScene } from "../src/render/scenes/caustics.ts";
+import { LONGEST_NEVER_SEC } from "../src/render/lineTrigger.ts";
 import { STANDOUT_THRESHOLD_DEFAULT } from "../src/render/standout.ts";
 import { GATE_FORMULA_DEFAULT, GENERIC_THRESHOLD_DEFAULT, hasHitStrength } from "../src/render/gateWindow.ts";
 
@@ -2169,5 +2170,47 @@ describe("drives: wire modifiers (wireMod.ts)", () => {
     expect(setSourceMod(on, "anim.low", null)).toEqual(setting);
     expect(setSourceMod("scene", "anim.low", mod())).toBe("scene");
     expect(setSourceMod(setting, { source: "line" }, mod({ windowOn: true }))).toBe(setting);
+  });
+});
+
+describe("drives: trigger drivers (SceneSetting.drive.trigger) — the line and the wait, read together", () => {
+  const WAIT = { shortestSec: 4, longestSec: 30, sink: 0.5, onBeat: true };
+  const cutSpec: SceneSetting = {
+    ...settingWithDrive("cut", "anim.energy"),
+    drive: { default: "anim.energy", threshold: { default: 0.7, label: "Line", hint: "h" }, trigger: WAIT },
+  };
+
+  function drivesFor(sceneId: string, specs: SceneSetting[]) {
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+    const anim = clock.advance(DT, frame());
+    engine.accumulate(DT, frame(), 0.5, anim, sceneId, specs);
+    return engine.forScene(sceneId, specs, anim);
+  }
+
+  it("reads its declared line and wait until moved, then its stored ones", () => {
+    const sceneId = "trigger-defaults";
+    expect(drivesFor(sceneId, [cutSpec]).lineTrigger("cut")).toEqual({ line: 0.7, sink: 0.5, shortestSec: 4, longestSec: 30, onBeat: true });
+    setDriveTrigger(sceneId, cutSpec, { shortestSec: 2, longestSec: 12, sink: 0.25, onBeat: false });
+    setDriveThreshold(sceneId, cutSpec, 0.4);
+    expect(drivesFor(sceneId, [cutSpec]).lineTrigger("cut")).toEqual({ line: 0.4, sink: 0.25, shortestSec: 2, longestSec: 12, onBeat: false });
+  });
+
+  it("has no line while the threshold is Off", () => {
+    const sceneId = "trigger-off";
+    setDriveThresholdOn(sceneId, cutSpec, false);
+    expect(drivesFor(sceneId, [cutSpec]).lineTrigger("cut")?.line).toBeNull();
+  });
+
+  it("reads Longest at the top of its range as never", () => {
+    const sceneId = "trigger-never";
+    setDriveTrigger(sceneId, cutSpec, { longestSec: LONGEST_NEVER_SEC });
+    expect(drivesFor(sceneId, [cutSpec]).lineTrigger("cut")?.longestSec).toBe(Infinity);
+  });
+
+  it("is undefined for a setting that isn't a trigger driver, and under PASSTHROUGH_DRIVES", () => {
+    const plain = settingWithDrive("plain", "anim.energy");
+    expect(drivesFor("trigger-plain", [plain]).lineTrigger("plain")).toBeUndefined();
+    expect(PASSTHROUGH_DRIVES.lineTrigger("cut")).toBeUndefined();
   });
 });

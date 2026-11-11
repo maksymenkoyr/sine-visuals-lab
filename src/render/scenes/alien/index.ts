@@ -10,10 +10,11 @@
  *     climbs up through the dotted line on its graph (src/render/lineTrigger.ts),
  *     then the scene cuts to another dance, through its own camera; Camera
  *     cut does the same on its own wire (Kick by default) but changes only
- *     the camera. Shortest dance and Shortest view are how long each must
- *     stay on screen first, Longest dance and Longest view how long at most
- *     (then it cuts by itself, on the next beat with the on-beat switch on,
- *     and not in silence), and line sink lowers the line as Longest nears;
+ *     the camera. Each cut's Shortest is how long what it changes must stay
+ *     on screen first, its Longest how long at most (then it cuts by itself,
+ *     on the next beat with On the beat on, and not in silence), and its Sink
+ *     lowers the line as Longest nears; they are rows under the cut's line
+ *     in its wire panel (`drive.trigger`, read with `drives.lineTrigger`);
  *   - Bounce: its wire (Kick by default) squashes the alien toward the
  *     floor under him and springs him back, on top of the dance (MESH_VERT
  *     in glsl.ts); Bounce smoothness turns that spring from a snap and a
@@ -45,14 +46,14 @@ import type { AnimFrame } from "../../animClock.ts";
 import { PASSTHROUGH_DRIVES, type SceneDrives } from "../../drives.ts";
 import { publishSettingMarks } from "../../settingMarks.ts";
 import { SONG_EDGE_MIN_DIMMER } from "../../animClock.ts";
-import { lineAt, type LineTriggerSettings } from "../../lineTrigger.ts";
+import { lineAt, lineTriggerSettings, type LineTriggerSettings } from "../../lineTrigger.ts";
 import { resolveSceneSetting } from "../../autoTune.ts";
 import { sceneMedia } from "../../../pinnedAssets.ts";
 import { CLIP_LIBRARY_URL, decodeClipLibrary, sampleClip, type Clip, type ClipLibrary } from "../dancers/clipFormat.ts";
 import { createPose } from "../dancers/rig.ts";
 import { createAlienRenderer, floorPivot, type AlienRenderer, type Squash } from "./renderer.ts";
 import { decodeAlienMesh, MESH_URL, type AlienModel } from "./meshFile.ts";
-import { BOUNCE_MAX, CUT_LINE_DEFAULT, LONGEST_NEVER_SEC, chipLoop, chipView, clipSeconds, createBounce, createReel, easeSpeed, LOOPS, pacedSeconds, showLoop, stepBounce, stepCuts, VIEWS, type Reel } from "./reel.ts";
+import { BOUNCE_MAX, chipLoop, chipView, clipSeconds, createBounce, createReel, easeSpeed, LOOPS, pacedSeconds, showLoop, stepBounce, stepCuts, VIEWS, type Reel } from "./reel.ts";
 import { danceMoves } from "./pace.ts";
 import { card, MOVE_GAIN, SETTINGS } from "./card.ts";
 import { easeHand, HAND_AT_REST, handCamera, type CameraHand } from "./camera.ts";
@@ -89,25 +90,10 @@ function liveLoops(library: ClipLibrary): LiveLoop[] {
   });
 }
 
-/** One cut's line, Shortest, Longest, Sink and on-beat as its settings hold them. */
-function cutSettings(
-  drives: SceneDrives,
-  get: (key: string) => number,
-  cutKey: string,
-  holdKey: string,
-  longestKey: string,
-  sinkKey: string,
-  onBeatKey: string,
-): LineTriggerSettings {
-  const line = drives.threshold(cutKey);
-  const longest = get(longestKey);
-  return {
-    line: line === undefined ? CUT_LINE_DEFAULT : line,
-    shortestSec: get(holdKey),
-    longestSec: longest >= LONGEST_NEVER_SEC ? Infinity : longest,
-    sink: get(sinkKey),
-    onBeat: get(onBeatKey) >= 0.5,
-  };
+/** A cut's line and wait: the drive engine's, else (gallery previews) the declared defaults. */
+function cutSettings(drives: SceneDrives, key: string): LineTriggerSettings {
+  const drive = SETTING_BY_KEY.get(key)!.drive!;
+  return drives.lineTrigger(key) ?? lineTriggerSettings(drive.threshold!.default, drive.trigger!);
 }
 
 export const alienScene: Scene = (() => {
@@ -224,8 +210,8 @@ export const alienScene: Scene = (() => {
       const heldDance = chipLoop(get("dance"));
       if (heldDance !== null) showLoop(reel, heldDance);
       const heldView = chipView(get("view"));
-      const danceLine = cutSettings(drives, get, "cut", "cutHold", "cutLongest", "cutSink", "cutOnBeat");
-      const cameraLine = cutSettings(drives, get, "cameraCut", "cameraHold", "cameraLongest", "cameraSink", "cameraOnBeat");
+      const danceLine = cutSettings(drives, "cut");
+      const cameraLine = cutSettings(drives, "cameraCut");
       const cut = stepCuts(
         reel,
         dt,

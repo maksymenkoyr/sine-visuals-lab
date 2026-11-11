@@ -26,6 +26,8 @@ import {
   getDriveLineStrength,
   setDriveLineStrength,
   resetDriveLineStrength,
+  getDriveTrigger,
+  setDriveTrigger,
 } from "../src/render/driveStore.ts";
 import { freshWireMod, legacyNodeFrom, type LegacyNode } from "../src/render/wireMod.ts";
 import { normalizeDriveSetting } from "../src/render/drives.ts";
@@ -33,6 +35,7 @@ import { driveSettingFromChoice, type DrivePatch } from "../src/render/drives.ts
 import { LINE_HEIGHT_DEFAULT, LINE_STRENGTH_DEFAULT, LINE_STRENGTH_MAX, LINE_STRENGTH_MIN } from "../src/audio/bandLine.ts";
 import { NUM_BANDS } from "../src/audio/types.ts";
 import type { SceneSetting } from "../src/render/sceneSettings.ts";
+import { LONGEST_MIN_SEC, LONGEST_NEVER_SEC, SHORTEST_MAX_SEC } from "../src/render/lineTrigger.ts";
 import { GENERIC_SMOOTHNESS_DEFAULT, GENERIC_WINDOW_MAX_DEFAULT } from "../src/render/gateWindow.ts";
 
 // vitest runs under environment: "node" (vitest.config.ts), so there is no
@@ -302,6 +305,24 @@ describe("driveStore: patch-editing helpers (togglePatchSource, setSourceWeight,
     expect(getDriveThresholdState(sceneId, spec)).toEqual({ on: true, value: 0.25 });
   });
 
+  it("a trigger driver's wait: declared values until moved, clamped, NaN ignored, undefined for any other setting, cleared by Reset", () => {
+    const sceneId = "trigger-1";
+    const declared = { shortestSec: 4, longestSec: 30, sink: 0.5, onBeat: true };
+    const spec: SceneSetting = { ...SPARKLE, drive: { ...SPARKLE.drive!, threshold: { default: 0.7, label: "T", hint: "h" }, trigger: declared } };
+    expect(getDriveTrigger(sceneId, SPARKLE)).toBeUndefined();
+    setDriveTrigger(sceneId, SPARKLE, { shortestSec: 2 });
+    expect(getDriveTrigger(sceneId, SPARKLE)).toBeUndefined();
+    expect(getDriveTrigger(sceneId, spec)).toEqual(declared);
+    setDriveTrigger(sceneId, spec, { shortestSec: 2.5, onBeat: false });
+    expect(getDriveTrigger(sceneId, spec)).toEqual({ ...declared, shortestSec: 2.5, onBeat: false });
+    setDriveTrigger(sceneId, spec, { shortestSec: 99, longestSec: 1, sink: 7 });
+    expect(getDriveTrigger(sceneId, spec)).toEqual({ shortestSec: SHORTEST_MAX_SEC, longestSec: LONGEST_MIN_SEC, sink: 1, onBeat: false });
+    setDriveTrigger(sceneId, spec, { longestSec: 500, sink: Number.NaN, shortestSec: Number.NaN });
+    expect(getDriveTrigger(sceneId, spec)).toEqual({ shortestSec: SHORTEST_MAX_SEC, longestSec: LONGEST_NEVER_SEC, sink: 1, onBeat: false });
+    resetDriveSetting(sceneId, spec);
+    expect(getDriveTrigger(sceneId, spec)).toEqual(declared);
+  });
+
   it("a generic (undeclared) threshold: off and at GENERIC_THRESHOLD_DEFAULT until touched", () => {
     const sceneId = "threshold-2";
     expect(getDriveThresholdState(sceneId, SPARKLE)).toEqual({ on: false, value: 0.25 });
@@ -510,6 +531,17 @@ describe("driveStore with a stubbed localStorage", () => {
   afterEach(() => {
     (globalThis as { localStorage?: unknown }).localStorage = originalLocalStorage;
     vi.resetModules();
+  });
+
+  it("a trigger driver's garbage stored values fall back to the declared ones", async () => {
+    const fake = makeFakeLocalStorage();
+    fake.setItem("vibe.drives", JSON.stringify({ alien: { cut: { triggerShortest: "x", triggerLongest: null, triggerSink: "0.5", triggerOnBeat: 1 } } }));
+    (globalThis as { localStorage?: unknown }).localStorage = fake;
+    vi.resetModules();
+    const fresh = await import("../src/render/driveStore.ts");
+    const declared = { shortestSec: 4, longestSec: 30, sink: 0.5, onBeat: true };
+    const spec: SceneSetting = { ...SPARKLE, key: "cut", drive: { ...SPARKLE.drive!, threshold: { default: 0.7, label: "T", hint: "h" }, trigger: declared } };
+    expect(fresh.getDriveTrigger("alien", spec)).toEqual(declared);
   });
 
   it("migrates a scene's legacy non-Hits beat grid onto a Beat-default drive setting, once, persisting it", async () => {

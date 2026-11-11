@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   BEAT_WAIT_MAX_SEC,
   createLineTrigger,
+  LONGEST_NEVER_SEC,
   lineAt,
+  lineTriggerSettings,
   stepLineTrigger,
   type LineTriggerSettings,
   type LineTriggerTick,
@@ -149,5 +151,24 @@ describe("lineTrigger", () => {
     expect(cuts.map((c) => c.kind)).toEqual(["timer", "timer"]);
     expect(cuts[0]!.t).toBeCloseTo(30, 1);
     expect(run(300, (t) => (t % 1 < 0.5 ? 1 : 0), { line: null, longestSec: Infinity }).cuts).toEqual([]);
+  });
+});
+
+describe("lineTriggerSettings", () => {
+  const wait = { shortestSec: 4, longestSec: 30, sink: 0.5, onBeat: true };
+
+  it("carries the line and the wait through", () => {
+    expect(lineTriggerSettings(0.7, wait)).toEqual({ line: 0.7, sink: 0.5, shortestSec: 4, longestSec: 30, onBeat: true });
+    expect(lineTriggerSettings(null, wait).line).toBeNull();
+  });
+
+  it("reads Longest at the top of its range as never", () => {
+    expect(lineTriggerSettings(0.7, { ...wait, longestSec: LONGEST_NEVER_SEC }).longestSec).toBe(Infinity);
+    expect(lineTriggerSettings(0.7, { ...wait, longestSec: LONGEST_NEVER_SEC - 1 }).longestSec).toBe(LONGEST_NEVER_SEC - 1);
+  });
+
+  it("clamps the sink to 0..1", () => {
+    expect(lineTriggerSettings(0.7, { ...wait, sink: 2 }).sink).toBe(1);
+    expect(lineTriggerSettings(0.7, { ...wait, sink: -1 }).sink).toBe(0);
   });
 });

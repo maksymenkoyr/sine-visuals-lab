@@ -156,6 +156,7 @@ import {
   unitStyle,
 } from "./controlsKit.ts";
 import { GENERIC_SMOOTHNESS_DEFAULT, GENERIC_THRESHOLD_DEFAULT } from "../render/gateWindow.ts";
+import { LONGEST_MIN_SEC, LONGEST_NEVER_SEC, SHORTEST_MAX_SEC, type LineTriggerWait } from "../render/lineTrigger.ts";
 import { getGateFormula, getWireGateFormula, setGateFormula, setWireGateFormula } from "../render/gateFormulas.ts";
 import { buildGateFormulaPicker } from "./gateFormulaPicker.ts";
 
@@ -554,6 +555,9 @@ export interface DeviceMenuDeps {
   /** Flat or Sized (SceneSetting.drive.hit); undefined for a setting that isn't a hit driver. */
   getDriveReadout: (sceneId: string, spec: SceneSetting) => HitReadout | undefined;
   onSetDriveReadout: (sceneId: string, spec: SceneSetting, readout: HitReadout) => void;
+  /** A trigger driver's wait (SceneSetting.drive.trigger), shown under its line; undefined for any other setting. */
+  getDriveTrigger: (sceneId: string, spec: SceneSetting) => LineTriggerWait | undefined;
+  onSetDriveTrigger: (sceneId: string, spec: SceneSetting, part: Partial<LineTriggerWait>) => void;
   setDriveLineStrength: (sceneId: string, spec: SceneSetting, value: number) => void;
   onTap: (timeStamp: number) => void;
   /** Live value for a row on auto (autoTune.ts). */
@@ -2909,6 +2913,125 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return column;
   }
 
+  /** A trigger driver's wait (SceneSetting.drive.trigger) as four rows under
+   *  its line: Shortest, Longest, Sink, On the beat (lineTrigger.ts). Null for
+   *  any other setting. Live-write, no rebuild, as buildThresholdRow. */
+  function buildTriggerRows(sceneId: string, spec: SceneSetting, onLiveEdit: () => void): HTMLElement | null {
+    const trigger = spec.drive?.trigger;
+    if (!trigger) return null;
+    const r = trigger.reactionLabel ?? "reaction";
+    const column = document.createElement("div");
+    column.style.cssText = `display: flex; flex-direction: column; gap: 6px; margin-top: 6px;`;
+
+    const line = (text: string, hint: string) => {
+      const row = document.createElement("div");
+      row.style.cssText = `display: flex; align-items: center; gap: 8px; padding-left: 12px;`;
+      setHint(row, hint);
+      const name = document.createElement("span");
+      name.style.cssText = driveDrawHintStyle + " white-space: nowrap; min-width: 62px;";
+      name.textContent = text;
+      row.append(name);
+      return row;
+    };
+    const slider = (text: string, hint: string, min: number, max: number, step: number, format: (v: number) => string, read: () => number, write: (v: number) => void) => {
+      const row = line(text, hint);
+      const rng = document.createElement("input");
+      rng.type = "range";
+      rng.className = "vc-slider";
+      rng.min = String(min);
+      rng.max = String(max);
+      rng.step = String(step);
+      rng.setAttribute("aria-label", text);
+      rng.style.cssText = driveWeightRangeStyle;
+      const out = document.createElement("output");
+      out.style.cssText = driveWeightOutStyle + " min-width: 40px;";
+      const show = (v: number) => {
+        rng.value = String(v);
+        rng.style.setProperty("--vc-fill", `${((v - min) / (max - min)) * 100}%`);
+        const shown = format(v);
+        out.textContent = shown;
+        rng.setAttribute("aria-valuetext", shown);
+      };
+      show(read());
+      rng.addEventListener("input", () => {
+        const v = Number(rng.value);
+        show(v);
+        write(v);
+        onLiveEdit();
+      });
+      row.append(rng, out);
+      return row;
+    };
+
+    const wait = () => deps.getDriveTrigger(sceneId, spec)!;
+    const beatRow = line(
+      "On the beat",
+      `On: a ${r} at Longest waits for the first beat after it. Off: it comes the moment the time is up.`,
+    );
+    const seg = document.createElement("div");
+    seg.style.cssText = driveMiniSegStyle;
+    seg.setAttribute("role", "group");
+    seg.setAttribute("aria-label", "On the beat");
+    const onBtn = document.createElement("button");
+    onBtn.type = "button";
+    onBtn.textContent = "On";
+    const offBtn = document.createElement("button");
+    offBtn.type = "button";
+    offBtn.textContent = "Off";
+    seg.append(onBtn, offBtn);
+    const showOnOff = (on: boolean) => {
+      onBtn.setAttribute("aria-pressed", String(on));
+      offBtn.setAttribute("aria-pressed", String(!on));
+      onBtn.style.cssText = on ? driveMiniSegBtnLitStyle : driveMiniSegBtnStyle;
+      offBtn.style.cssText = !on ? driveMiniSegBtnLitStyle : driveMiniSegBtnStyle;
+    };
+    showOnOff(wait().onBeat);
+    for (const [btn, on] of [[onBtn, true], [offBtn, false]] as const) {
+      btn.addEventListener("click", () => {
+        if (btn.getAttribute("aria-pressed") === "true") return;
+        deps.onSetDriveTrigger(sceneId, spec, { onBeat: on });
+        showOnOff(on);
+        onLiveEdit();
+      });
+    }
+    beatRow.append(seg);
+
+    column.append(
+      slider(
+        "Shortest",
+        `The least time between two ${r}s, in seconds: a climb through the line sooner than this is skipped. Left: ${r}s can come fast. Right: each lasts longer.`,
+        0,
+        SHORTEST_MAX_SEC,
+        0.25,
+        (v) => `${v.toFixed(2)} s`,
+        () => wait().shortestSec,
+        (v) => deps.onSetDriveTrigger(sceneId, spec, { shortestSec: v }),
+      ),
+      slider(
+        "Longest",
+        `The most time between two ${r}s: at this time a ${r} comes by itself, even if nothing crossed the line. Left: more often. Far right: never by itself.`,
+        LONGEST_MIN_SEC,
+        LONGEST_NEVER_SEC,
+        1,
+        (v) => (v >= LONGEST_NEVER_SEC ? "never" : `${v} s`),
+        () => wait().longestSec,
+        (v) => deps.onSetDriveTrigger(sceneId, spec, { longestSec: v }),
+      ),
+      slider(
+        "Sink",
+        `How far the line drops between Shortest and Longest, so a rise that falls short still brings a ${r} as the time runs out. Left: the line stays put. Right: it falls to the floor.`,
+        0,
+        1,
+        0.05,
+        (v) => v.toFixed(2),
+        () => wait().sink,
+        (v) => deps.onSetDriveTrigger(sceneId, spec, { sink: v }),
+      ),
+      beatRow,
+    );
+    return column;
+  }
+
   /** A hit driver's Reaction row (SceneSetting.drive.hit): Flat or Sized, under
    *  the threshold row. A `flatOnly` setting shows Sized greyed out, the
    *  declaration's hint saying why. Live-write, no rebuild, as
@@ -3639,8 +3762,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         !!spec.drive && declared === undefined && !isEngineHitDriver(spec) && (deps.getDriveSmoothness(sceneId, spec) !== GENERIC_SMOOTHNESS_DEFAULT || !deps.getDriveSmoothnessOn(sceneId, spec));
       const hit = spec.drive?.hit;
       const readoutMoved = !!hit && hit.flatOnly === undefined && deps.getDriveReadout(sceneId, spec) !== (hit.readout ?? "flat");
+      const declaredWait = spec.drive?.trigger;
+      const wait = declaredWait && deps.getDriveTrigger(sceneId, spec);
+      const triggerMoved =
+        !!declaredWait &&
+        !!wait &&
+        (wait.shortestSec !== declaredWait.shortestSec || wait.longestSec !== declaredWait.longestSec || wait.sink !== declaredWait.sink || wait.onBeat !== declaredWait.onBeat);
       resetBtn.hidden =
-        !thresholdMoved && !smoothnessMoved && !readoutMoved && sameDriveSetting(deps.getDriveSetting(sceneId, spec), defaultDriveSetting(spec));
+        !thresholdMoved && !smoothnessMoved && !readoutMoved && !triggerMoved && sameDriveSetting(deps.getDriveSetting(sceneId, spec), defaultDriveSetting(spec));
     }
 
     const head = document.createElement("div");
@@ -3723,6 +3852,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       }
       panel.appendChild(buildThresholdRow(sceneId, spec, refreshResetVisibility));
     }
+    const triggerRows = buildTriggerRows(sceneId, spec, refreshResetVisibility);
+    if (triggerRows) panel.appendChild(triggerRows);
     const readoutRow = buildReadoutRow(sceneId, spec, refreshResetVisibility);
     if (readoutRow) panel.appendChild(readoutRow);
 

@@ -10,6 +10,12 @@
  * to meet a signal that never quite reaches it as the cut falls due. Unlike
  * standout.ts's detector, a slow rise counts: it only has to cross the line.
  *
+ * A setting becomes a trigger driver by declaring `SceneSetting.drive.trigger`
+ * (sceneSettings.ts): its line is the setting's threshold row, and the wait's
+ * values live in its drive entry (driveStore.ts's getDriveTrigger) and show
+ * under that line in the wire panel. The scene reads them with
+ * `drives.lineTrigger(key)` and steps this rule itself.
+ *
  * Pure and DOM/GL-free; tests/lineTrigger.test.ts drives it directly.
  */
 
@@ -25,6 +31,33 @@ export interface LineTriggerSettings {
   /** Infinity: never. */
   longestSec: number;
   onBeat: boolean;
+}
+
+/** The wait's four values in the form a setting declares and the drive entry stores. */
+export interface LineTriggerWait {
+  shortestSec: number;
+  /** LONGEST_NEVER_SEC: never. */
+  longestSec: number;
+  sink: number;
+  onBeat: boolean;
+}
+
+/** The wire panel's Longest slider tops out here, which means never. */
+export const LONGEST_NEVER_SEC = 120;
+/** The wire panel's Shortest slider range. */
+export const SHORTEST_MAX_SEC = 10;
+/** The wire panel's Longest slider starts here. */
+export const LONGEST_MIN_SEC = 5;
+
+/** The rule's settings from a line (null: no line) and a stored or declared wait. */
+export function lineTriggerSettings(line: number | null, wait: LineTriggerWait): LineTriggerSettings {
+  return {
+    line,
+    sink: Math.max(0, Math.min(1, wait.sink)),
+    shortestSec: wait.shortestSec,
+    longestSec: wait.longestSec >= LONGEST_NEVER_SEC ? Infinity : wait.longestSec,
+    onBeat: wait.onBeat,
+  };
 }
 
 export interface LineTrigger {

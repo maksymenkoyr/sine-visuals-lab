@@ -8,11 +8,11 @@ Move setting's wire sets how fast the dance on screen plays, and silence
 holds him still. Bounce squashes him toward
 the floor and springs him back on its wire's hits; Bounce smoothness turns
 that spring from a snap and a wobble into an ease and a glide. A dance
-repeats until Dance cut's wire makes a hit that stands out from its everyday
-ones (the dotted line on its graph), then another dance comes on through its
-own camera; Camera cut does the same on its own wire but changes only the
-camera. Shortest dance and Shortest view set how long each stays on screen
-first. Dance holds one dance, and Dance cut then waits; View shows every
+repeats until Dance cut's wire climbs up through the dotted line on its
+graph, then another dance comes on through its own camera; Camera cut does
+the same on its own wire but changes only the camera. Each cut's Shortest,
+Longest, Sink and On the beat are rows under its line in its wire panel.
+Dance holds one dance, and Dance cut then waits; View shows every
 dance through one camera, and Camera cut then waits. On Any, each row
 outlines the chip on screen. The camera sliders (the arrow keys too) move
 the camera by hand. In development, on main since #374.
@@ -21,8 +21,7 @@ the camera by hand. In development, on main since #374.
 
 - `src/render/scenes/alien/card.ts`: the scene's card, loaded with the page: id,
   name, `SETTINGS`, the Motion section in `PANEL` (Move with its readout,
-  Bounce, Bounce smoothness, Dance, Dance cut, Shortest dance, Longest dance, Dance
-  line sink and Dance on the beat), `MOVE_GAIN`, the `gallery`
+  Bounce, Bounce smoothness, Dance and Dance cut), `MOVE_GAIN`, the `gallery`
   record and `loadBody`, and `arrows`: which camera sliders the arrow keys
   move (`src/ui/sceneArrows.ts` handles the keys for any scene). The body
   spreads the card, so the registered settings are the body's own objects.
@@ -88,10 +87,13 @@ the camera by hand. In development, on main since #374.
   `alien.bin` beside the old mesh. `build.py`'s header has the method and the
   file layout. `alien.bin` is committed as `public/media/alien/mesh-v1.bin`.
 - Reused, not copied: the dancers' rig, clip format and clip library
-  (`../dancers/`, `CLIP_LIBRARY_URL`); the drive system (`drives.value`, `drives.threshold`);
+  (`../dancers/`, `CLIP_LIBRARY_URL`); the drive system (`drives.value`, `drives.lineTrigger`);
   the Level signal (`feature.level`, #368). The cuts' rule is
   `src/render/lineTrigger.ts` (a `LineTrigger` per cut, held in the reel as
-  `cut` and `cameraCut`); the standout detector (`src/render/standout.ts`)
+  `cut` and `cameraCut`); each cut declares it through `drive.trigger` in
+  `card.ts`, so its line and its Shortest, Longest, Sink and On the beat are
+  its own wire-panel rows, stored in its drive entry (`getDriveTrigger`,
+  `src/render/driveStore.ts`); the standout detector (`src/render/standout.ts`)
   is no longer used here, only by Caustics' Beat ripple and Physarum 2's
   Dose.
 - Tests: `tests/alien.test.ts`.
@@ -805,7 +807,8 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
     tempo not locked, a short wait after it). The far right of the Longest
     sliders reads as never; the threshold's Off means no line, only
     Longest. The rule is `src/render/lineTrigger.ts`; the saved keys
-    (`cut`, `cutHold`, `cameraCut`, `cameraHold`) keep their names.
+    (`cut`, `cutHold`, `cameraCut`, `cameraHold`) keep their names. (The
+    sliders and their keys moved into the wire panel on 2026-11-11, below.)
   - Why: a slow rise never counted for the detector, so Drop level reached
     0.89 on a real song with no cut in 225 s.
   - Settled by measurement, not asked; on 2026-11-11 the owner said "go"
@@ -825,6 +828,19 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   - The idea page, with the rules played on recorded songs:
 
     https://claude.ai/artifact/1dCYqkQbC6c7U1He8crppM
+- 2026-11-11, #840, the owner, on those sliders: "all those paramters should
+  have been a part of signal setting. not separate sliders. also to be
+  potentially reused for similar cases. such as camera cut".
+  - Shortest, Longest, Sink and On the beat are no longer scene sliders:
+    each cut declares `drive.trigger` (`src/render/sceneSettings.ts`), and
+    they are four rows right under its line in its wire panel, saved in the
+    setting's drive entry beside the threshold. Any setting that declares
+    `drive.trigger` gets the same rows, which is how Camera cut has them and
+    how a later cut-like setting will.
+  - A Shortest someone saved before is not carried over: Alien is In
+    development. The defaults are the ones above.
+  - The cuts are no longer hit drivers (`hit` dropped), so the Reaction row,
+    which was greyed to Flat for a cut, is gone from both.
 
 ## Tuning notes
 
@@ -839,15 +855,16 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   that spring toward `SMOOTH_HZ`, `SMOOTH_DAMPING`; if its smooth end sits
   too low on fast music, the damping is the knob that matters.
 - Dance cut on Drop level: the line catches each rise into a loud stretch,
-  and Dance line sink lowers it toward Longest dance, so a song that never
+  and its Sink row lowers it toward its Longest, so a song that never
   gets that loud still cuts on its biggest rise before the clock does. Drop
   itself fires a few times a song, so on Drop nearly every cut comes from
   the clock. Wired to Kick at Fixed height, every kick crosses any line
-  under 1 and Shortest dance sets the pace; Graded height lets the line
+  under 1 and its Shortest row sets the pace; Graded height lets the line
   pick the big kicks.
-- Camera cut on Kick: every kick crosses the line, so Shortest view sets
-  the pace. Raise Shortest view for longer shots, or set the wire's Height
-  to Graded and raise Camera cut line to cut only on the biggest kicks.
+- Camera cut on Kick: every kick crosses the line, so the Shortest row
+  under its line sets the pace. Raise it for longer shots, or set the
+  wire's Height to Graded and raise Camera cut line to cut only on the
+  biggest kicks.
 - Judge the look in loop 0 (`?loop=0`), whose framing is the closest to the
   reference.
 - To polish one dance, hold it on Dance and step through View; the strip's
@@ -993,4 +1010,5 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
 - #822 (draft, 2026-11-07): every dance keeps one pace, measured from how it
   moves (`pace.ts`).
 - #840 (2026-11-10): Dance cut and Camera cut on a Line and a Wait
-  (`src/render/lineTrigger.ts`).
+  (`src/render/lineTrigger.ts`); on 2026-11-11 the Wait became rows in each
+  cut's wire panel (`drive.trigger`).

@@ -19,7 +19,6 @@ import {
   DANCE_SINK_DEFAULT,
   DANCE_PACE_HZ,
   easeSpeed,
-  LONGEST_NEVER_SEC,
   LOOP_VIEW,
   LOOPS,
   PACE_STRETCH_MAX,
@@ -471,28 +470,38 @@ describe("alien loops", () => {
     }
   });
 
-  it("marks the chip on screen on both rows, and wires each cut on its own with its own Line, Shortest, Longest, Sink and on-beat settings", () => {
+  it("marks the chip on screen on both rows, and wires each cut on its own, with its line and its wait declared as a trigger driver", () => {
     const spec = (key: string) => SETTINGS.find((s) => s.key === key)!;
     expect(spec("dance").onScreen).toBe(true);
     expect(spec("view").onScreen).toBe(true);
     expect(spec("cut").drive?.default).not.toBe(spec("cameraCut").drive?.default);
-    expect(spec("cutHold").default).toBe(DANCE_HOLD_SEC);
-    expect(spec("cameraHold").default).toBe(VIEW_HOLD_SEC);
     expect(spec("cut").drive?.default).toBe("anim.dropLevel");
-    expect(spec("cut").drive?.threshold?.default).toBe(CUT_LINE_DEFAULT);
-    expect(spec("cameraCut").drive?.threshold?.default).toBe(CUT_LINE_DEFAULT);
-    expect(spec("cutLongest").default).toBe(DANCE_LONGEST_SEC);
-    expect(spec("cameraLongest").default).toBe(VIEW_LONGEST_SEC);
-    expect(spec("cutLongest").max).toBe(LONGEST_NEVER_SEC);
-    expect(spec("cameraLongest").max).toBe(LONGEST_NEVER_SEC);
-    expect(spec("cutSink").default).toBe(DANCE_SINK_DEFAULT);
-    expect(spec("cameraSink").default).toBe(VIEW_SINK_DEFAULT);
-    for (const key of ["cutOnBeat", "cameraOnBeat"]) {
-      expect(spec(key).type, key).toBe("boolean");
-      expect(spec(key).default, key).toBe(1);
+    for (const key of ["cut", "cameraCut"]) {
+      expect(spec(key).drive?.threshold?.default, key).toBe(CUT_LINE_DEFAULT);
+      expect(spec(key).drive?.hit, key).toBeUndefined();
     }
-    for (const key of ["cutHold", "cameraHold", "cutLongest", "cameraLongest", "cutSink", "cameraSink"]) expect(spec(key).masterScale, key).toBe(false);
-    expect(card.panel?.[0]?.settings).toEqual(expect.arrayContaining(["dance", "cut", "cutHold", "cutLongest", "cutSink", "cutOnBeat"]));
+    expect(spec("cut").drive?.trigger).toEqual({
+      shortestSec: DANCE_HOLD_SEC,
+      longestSec: DANCE_LONGEST_SEC,
+      sink: DANCE_SINK_DEFAULT,
+      onBeat: true,
+      reactionLabel: "cut",
+    });
+    expect(spec("cameraCut").drive?.trigger).toEqual({
+      shortestSec: VIEW_HOLD_SEC,
+      longestSec: VIEW_LONGEST_SEC,
+      sink: VIEW_SINK_DEFAULT,
+      onBeat: true,
+      reactionLabel: "cut",
+    });
+  });
+
+  it("keeps the cuts' wait out of the scene's own sliders", () => {
+    const keys = SETTINGS.map((s) => s.key);
+    for (const gone of ["cutHold", "cutLongest", "cutSink", "cutOnBeat", "cameraHold", "cameraLongest", "cameraSink", "cameraOnBeat"]) {
+      expect(keys, gone).not.toContain(gone);
+    }
+    expect(card.panel?.[0]?.settings).toEqual(["move", "bounce", "bounceSmooth", "dance", "cut"]);
   });
 
   it("sees every loop through a view VIEWS has", () => {
