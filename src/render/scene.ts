@@ -70,9 +70,11 @@ export interface SceneCard {
   /** Settings the arrow keys move while this scene is on screen — see
    *  SceneArrows. Omit for a scene the arrows leave alone. */
   arrows?: SceneArrows;
-  /** The viewer can walk through this scene and look round it by hand, like
-   *  in a game: src/ui/freeLook.ts has the mouse and keys, the scene's body
-   *  moves its camera with src/render/freeLook.ts. */
+  /** In a dev build (`npm run dev`), the viewer can walk through this scene
+   *  and look round it by hand, like in a game: src/ui/freeLook.ts has the
+   *  mouse and keys, the scene's body moves its camera with
+   *  src/render/freeLook.ts. A deployed build never wires the walk, so there
+   *  the camera stands where it starts. */
   freeLook?: true;
 }
 

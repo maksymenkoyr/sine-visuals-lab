@@ -7,8 +7,8 @@
  * with a `createWalker`; with no input the walker stands still.
  *
  * One input per page: a page shows one walkable scene at a time, and a page
- * that never binds the keys (the pop-out output, a TV, the gallery's tiles)
- * never fills it, so the scene there stands where it starts.
+ * that never binds the keys (a deployed build, the pop-out output, a TV, the
+ * gallery's tiles) never fills it, so the scene there stands where it starts.
  */
 
 /** A way to move; src/ui/freeLook.ts says which keys hold each. */

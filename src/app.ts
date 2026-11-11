@@ -2537,7 +2537,7 @@ async function enterViz(next: Scene): Promise<void> {
   updateSceneVersionLabel(next);
 
   if (!quietScreen()) {
-    const walk = next.freeLook && !isController ? "\nclick the picture to walk" : "";
+    const walk = import.meta.env.DEV && next.freeLook && !isController ? "\nclick the picture to walk" : "";
     showHud(`${isController ? "remote" : mode}${roomCode ? ` (${roomCode})` : ""}  quality: ${quality.preset}  scene: ${scene.name}  palette: ${palette.name}${walk}`);
   }
   activeConn()?.sendHello(scene.id, palette.id, viewport);
@@ -2858,13 +2858,17 @@ async function boot(): Promise<void> {
   // A phone or iPad screen shows nothing but the picture until it is tapped.
   if (handheldScreen) immersive.enterHidden();
 
-  // Ahead of wireOutputKeys: while walking, Space is the walk's, not the Cue's.
-  wireFreeLook({
-    canvas,
-    enabled: () => inViz && !isController && scene.freeLook === true,
-    onStart: () => showHud(["Walking", ...WALK_KEYS].join("\n")),
-    onRefused: () => showHud("Click the picture again to walk"),
-  });
+  // The walk is a dev build's alone, the owner's call (docs/scenes/coderain.md):
+  // a literal DEV check, so the deployed builds drop it. Ahead of
+  // wireOutputKeys: while walking, Space is the walk's, not the Cue's.
+  if (import.meta.env.DEV) {
+    wireFreeLook({
+      canvas,
+      enabled: () => inViz && !isController && scene.freeLook === true,
+      onStart: () => showHud(["Walking", ...WALK_KEYS].join("\n")),
+      onRefused: () => showHud("Click the picture again to walk"),
+    });
+  }
 
   // The bar (CUE / PLAY / state line). A laptop has the pop-out window with its
   // own Cue and Play; a keyed room's Main is one more output (net/roomBridge.ts);
