@@ -3,8 +3,14 @@
 # push it. Finds (or creates, from the PR's branch on origin) the PR's worktree
 # under .claude/worktrees/, starts `git rebase origin/<base>` there unless one
 # is already stopped, resolves each stop with tools/fix-conflicts.sh, continues
-# the rebase and pushes with --force-with-lease. It stops before the push when
-# a file needs judgment. Arguments after the PR number go to fix-conflicts.sh.
+# the rebase and pushes with --force-with-lease. Arguments after the PR number
+# go to fix-conflicts.sh.
+#
+# When a conflict needs judgment or the rebase can't finish, it stops before
+# the push and leaves things as it found them: a rebase this run started is
+# aborted, so the branch is where it was; a rebase that was already stopped
+# stays stopped, its conflicted files as git left them (fix-conflicts.sh puts
+# them back).
 #
 # The push runs the pre-push hook (npm run check), which takes minutes. Two
 # things can refuse it besides a real failure:
@@ -66,9 +72,18 @@ fi
 cd "$dir" || exit 1
 [ -n "${FIX_CONFLICTS_CD_FILE:-}" ] && printf '%s\n' "$dir" >"$FIX_CONFLICTS_CD_FILE"
 
+started=0
+give_up() {
+  if [ "$started" = 1 ] && rebasing; then
+    git rebase --abort && echo "Undid the rebase: $branch is as it was before this run." >&2
+  fi
+  exit 1
+}
+
 if ! conflicted && ! rebasing; then
   git fetch origin "$base" || exit 1
-  git rebase "origin/$base" || conflicted || exit 1
+  started=1
+  git rebase "origin/$base" || conflicted || give_up
 fi
 
 # Resolve, continue and repeat (a rebase of several commits can stop again).
@@ -76,16 +91,21 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
   if conflicted; then
     bash "$fixer" "$@"
     if conflicted; then
-      echo "Conflicts left that need judgment (see above): fix by hand, then run: fix-conflicts $pr" >&2
-      exit 1
+      if [ "$started" = 1 ]; then
+        echo "Conflicts that need judgment (see above). Try a stronger model: FIX_CONFLICTS_MODEL=opus fix-conflicts $pr" >&2
+        echo "Or by hand: git rebase origin/$base, fix them, then run: fix-conflicts $pr" >&2
+      else
+        echo "Conflicts left that need judgment (see above): fix by hand, then run: fix-conflicts $pr" >&2
+      fi
+      give_up
     fi
   fi
   rebasing || break
-  GIT_EDITOR=true git rebase --continue || conflicted || exit 1
+  GIT_EDITOR=true git rebase --continue || conflicted || give_up
 done
 if rebasing; then
   echo "Rebase did not finish: see git status." >&2
-  exit 1
+  give_up
 fi
 
 # Pushes in all when the check refuses only because a test ran out of time.
