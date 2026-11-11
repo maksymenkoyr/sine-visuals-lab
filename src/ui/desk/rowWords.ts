@@ -34,6 +34,10 @@ const DRIVE_FIELD_WORDS: ReadonlyMap<string, string> = new Map([
   ["smoothness", "smoothness"],
   ["smoothnessOn", "smoothness"],
   ["readout", "reaction"],
+  ["triggerShortest", "shortest"],
+  ["triggerLongest", "longest"],
+  ["triggerSink", "sink"],
+  ["triggerOnBeat", "on the beat"],
 ]);
 
 /** Names for the storage keys that are not a scene's own settings. */

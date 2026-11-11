@@ -7,7 +7,8 @@ import { createGridPulse, type GridPulse } from "./gridPulse.ts";
 import { beatGridBeats, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { bandLineDrive } from "../audio/bandLine.ts";
 import { HIT_HEIGHT_DEFAULT, advanceGateTracker, createGateTracker, hasHitStrength, stepHeightEnv, windowReading, type GateTrackerState, type HitHeight } from "./gateWindow.ts";
-import { getDriveLine, getDriveLineStrength, getDriveReadout, getDriveSetting, getDriveSmoothness, getDriveSmoothnessOn, getDriveThresholdState, getDriveWindowMax } from "./driveStore.ts";
+import { getDriveLine, getDriveLineStrength, getDriveReadout, getDriveSetting, getDriveSmoothness, getDriveSmoothnessOn, getDriveThresholdState, getDriveTrigger, getDriveWindowMax } from "./driveStore.ts";
+import { lineTriggerSettings, type LineTriggerSettings } from "./lineTrigger.ts";
 import { getGateFormula, getWireGateFormula } from "./gateFormulas.ts";
 import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type ValueTrigger } from "./valueTrigger.ts";
 import { advanceStandout, advanceStandoutAmount, advanceStandoutSized, createStandoutState, standoutLine, type HitReadout, type StandoutState } from "./standout.ts";
@@ -223,9 +224,10 @@ import { createWireModState, freshWireMod, clampWireMod, sameWireMod, stepWireMo
  * threshold` marks a setting scene-handled: the scene owns the whole idea of
  * "how far does this have to stand out before it counts" and reads the
  * user's own slider back with `drives.threshold(key)`, applying whatever
- * gate shape actually fits its signal — Physarum 2's Dose and Alien's Cut
- * read standout.ts's learned floor/peak trackers, not the generic one
- * below. (Caustics' Beat ripple takes both instead: the generic gate on its
+ * gate shape actually fits its signal — Physarum 2's Dose reads
+ * standout.ts's learned floor/peak trackers, and Alien's cuts read the
+ * threshold as their line (lineTrigger.ts), not the generic gate below.
+ * (Caustics' Beat ripple takes both instead: the generic gate on its
  * drive, then its own Ring threshold as a plain setting.) Declaring
  * `drive.threshold` is what opts a setting *out* of the engine's own gate;
  * every other patched setting (no `drive.threshold` on its spec) gets a
@@ -266,7 +268,7 @@ import { createWireModState, freshWireMod, clampWireMod, sameWireMod, stepWireMo
  * reset) declares `SceneSetting.drive.hit`, reads `fired()`, and scales its
  * reaction by `hitSize(key)`. Its threshold row is the standout detector
  * (src/render/standout.ts) instead of the generic gate, so a hit counts the
- * same way it does for Beat ripple, Dose and Cut. `fired()` runs that
+ * same way it does for Beat ripple and Dose. `fired()` runs that
  * detector itself, once per AnimFrame, on the setting's reading (or, on its
  * built-in reaction, on the `sceneSignal` the scene passes), and draws its
  * reach line and a dot per reaction on the setting's graph through
@@ -278,13 +280,23 @@ import { createWireModState, freshWireMod, clampWireMod, sameWireMod, stepWireMo
  * driver nobody has touched (Off, Flat) reads exactly what it did before hit
  * drivers existed. A `flatOnly` setting always reads Flat. A built-in
  * reaction whose scene passes no `sceneSignal` fires on the scene's own edge
- * at size 1, as before. A setting with `hit.ownDetector` (Beat ripple, Dose,
- * Cut) runs standout.ts itself and only reads `readout(key)`. The detector
+ * at size 1, as before. A setting with `hit.ownDetector` (Beat ripple, Dose)
+ * runs standout.ts itself and only reads `readout(key)`. The detector
  * learns from every frame it sees, so a scene calls `fired()` for a hit
  * driver every frame, never behind a check on its own amount. A setting
  * read with `fired()` that should stay out of all this declares
  * `drive.noStandout` (with its reason) instead of `drive.hit`, and its edges
  * pass through the generic gate as before hit drivers existed.
+ *
+ * **Trigger drivers.** A setting that does one thing each time its reading
+ * climbs through a line (Alien's cuts) declares `SceneSetting.drive.trigger`,
+ * beside the `threshold` that is its line. The wait's four values (Shortest,
+ * Longest, Sink, On the beat; lineTrigger.ts has the rule) live in its drive
+ * entry (driveStore.ts's getDriveTrigger) and show in the wire panel right
+ * under the line. The scene reads the line and the wait together with
+ * `lineTrigger(key)` and steps lineTrigger.ts itself. A trigger driver is
+ * scene-handled for its threshold, so the engine applies no generic gate to
+ * it.
  *
  * **Advancing.** Grid pulses, line peak-holds and Graded height
  * envelopes are per-tick state that has to see every rAF tick, not just the
@@ -420,6 +432,10 @@ export interface SceneDrives {
    *  (`hit.ownDetector`). Undefined for a non-hit-driver or under
    *  PASSTHROUGH_DRIVES. */
   readout(key: string): HitReadout | undefined;
+  /** A trigger driver's line (its threshold, null while Off) and wait, for the
+   *  scene to step lineTrigger.ts with. Undefined for any other setting or
+   *  under PASSTHROUGH_DRIVES. */
+  lineTrigger(key: string): LineTriggerSettings | undefined;
   /** Per-band excess behind the line source (bandLine.ts's
    *  BandLineDrive.excess), for the panel overlay; null without a line source. */
   excess(key: string): Float32Array | null;
@@ -462,6 +478,7 @@ export const PASSTHROUGH_DRIVES: SceneDrives = {
   fired: (_key, sceneDefaultFired) => sceneDefaultFired,
   hitSize: () => 1,
   readout: () => undefined,
+  lineTrigger: () => undefined,
   excess: () => null,
   uniformPair: () => ({ drive: 0, custom: 0 }),
   sourceValues: () => null,
@@ -1333,6 +1350,14 @@ export function createDriveEngine(): DriveEngine {
         readout(key) {
           const spec = specByKey.get(key);
           return spec ? getDriveReadout(sceneId, spec) : undefined;
+        },
+
+        lineTrigger(key) {
+          const spec = specByKey.get(key);
+          const wait = spec && getDriveTrigger(sceneId, spec);
+          if (!spec || !wait) return undefined;
+          const state = getDriveThresholdState(sceneId, spec);
+          return lineTriggerSettings(state.on ? state.value : null, wait);
         },
 
         excess(key) {

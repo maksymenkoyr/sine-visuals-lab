@@ -1,4 +1,5 @@
 import type { SignalId, SignalLink } from "./signals.ts";
+import type { LineTriggerWait } from "./lineTrigger.ts";
 import { EXPANSION_DEFAULT, EXPANSION_MAX, EXPANSION_MIN } from "../audio/sensitivity.ts";
 import { parseSyncedNumber, parseSyncedObject, registerSyncedStore } from "../net/syncedStores.ts";
 import { proUnlocked } from "./pro.ts";
@@ -211,7 +212,7 @@ export interface SceneSetting {
        *  hint saying why. */
       flatOnly?: string;
       /** The scene runs standout.ts itself on `drives.value` and only reads
-       *  the choice back with `drives.readout` (Beat ripple, Dose, Cut). Its
+       *  the choice back with `drives.readout` (Beat ripple, Dose). Its
        *  threshold row is then whatever `threshold` above or the generic gate
        *  makes it, as before. */
       ownDetector?: boolean;
@@ -225,6 +226,15 @@ export interface SceneSetting {
      *  row. The text says why (tests/hitDrivers.test.ts requires one or the
      *  other). */
     noStandout?: string;
+    /** Declares a trigger driver: a setting that does one thing each time its
+     *  reading climbs through a line (Alien's Dance cut). The line is the
+     *  `threshold` row above, which this requires. The four values are the
+     *  wait's defaults (lineTrigger.ts has the rule); the panel shows them
+     *  under the line, saved with the setting (driveStore.ts's
+     *  getDriveTrigger). The scene reads `drives.lineTrigger(key)` and steps
+     *  lineTrigger.ts itself. `reactionLabel` is the word the panel's hints
+     *  use for one reaction ("cut"), "reaction" when left out. */
+    trigger?: LineTriggerWait & { reactionLabel?: string };
   };
   /** This enum is the scene's *variant*: the one setting that decides what
    *  the rest of the settings are even acting on (Kaleidoscope's Style).

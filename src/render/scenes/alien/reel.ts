@@ -16,22 +16,26 @@
  * level. Silence reads 0: the speed eases down and the loop holds on the
  * frame it reached.
  *
- * **Cuts: triggers, not timers.** Two cuts, each on its own wire, each firing
- * when its signal makes a climb that stands out from its everyday ones
- * (src/render/standout.ts, the same detector Caustics' Beat ripple and
- * Physarum 2's Dose read). Dance cut moves to another dance, picked at random
- * among the others, seen through its own view (`showLoop`). Camera cut keeps
- * the dance and moves to another view among CUT_VIEWS (`pickView`). Each
- * waits until what it changes has been on screen for its Shortest slider
- * (`CutInput.holdSec`); a dance cut moves the camera too, so Camera cut's
+ * **Cuts: a line to climb, and a clock.** Two cuts, each on its own wire, each
+ * firing when its signal climbs up through its Line, the dotted line on its
+ * graph (src/render/lineTrigger.ts has the rule). Dance cut moves to another
+ * dance, picked at random among the others, seen through its own view
+ * (`showLoop`). Camera cut keeps the dance and moves to another view among
+ * CUT_VIEWS (`pickView`). Each waits until what it changes has been on screen
+ * for its Shortest; a climb sooner is skipped. At its Longest
+ * it cuts by itself (on the first beat after it with on-beat on, never in
+ * silence), and Sink lowers the Line as Longest nears so a signal that falls
+ * short still gets across. A dance cut moves the camera too, so Camera cut's
  * wait starts over with it, and the two never land on one tick. Nothing else
  * changes the dance but the Dance setting: while it holds one (`chipLoop`),
  * the scene holds Dance cut off, and while View holds one camera
- * (`chipView`), Camera cut. Each loop keeps its own place, so cutting back
- * finds the alien where it was left. (Before that, a cut was the signal
- * rising over a fixed line: on a hit signal nearly every hit cleared it, and
- * a hysteresis band either cut every beat or, under a sustained bassline,
- * never; the scene record has the measurements.)
+ * (`chipView`), Camera cut. Shortest, Longest, Sink and On the beat are
+ * each cut's own rows under its line in the wire panel (lineTrigger.ts,
+ * `drive.trigger`), not sliders. Each loop keeps its own place, so cutting back
+ * finds the alien where it was left. (The Line was once a fixed height, then
+ * a standout detector, src/render/standout.ts; that one counted only a quick
+ * climb, so a slow rise never cut and Drop level could sit high with no cut
+ * at all. The scene record has the history and the measurements.)
  *
  * **Bounce: squash and stretch.** On top of the dance the alien squashes
  * toward the floor under him and springs back past rest (`stepBounce`, a
@@ -46,7 +50,7 @@
  */
 import type { Vec3 } from "../dancers/rig.ts";
 import { GROUP_TUNING } from "../../bandEnergy.ts";
-import { createStandoutTrigger, stepStandoutTrigger, type StandoutTrigger } from "../../standout.ts";
+import { createLineTrigger, stepLineTrigger, type LineTrigger, type LineTriggerSettings } from "../../lineTrigger.ts";
 
 export interface LoopCamera {
   eye: Vec3;
@@ -203,20 +207,28 @@ export function easeSpeed(speed: number, target: number, dtSec: number): number 
   return speed + (Math.max(0, target) - speed) * k;
 }
 
-/** Shortest dance's and Shortest view's defaults (card.ts), in seconds. */
-export const DANCE_HOLD_SEC = 2;
+/** Dance cut's and Camera cut's Shortest defaults (card.ts's `drive.trigger`), in seconds. */
+export const DANCE_HOLD_SEC = 4;
 export const VIEW_HOLD_SEC = 3;
+/** Both cuts' Line default, in the units of the graph it is drawn on. */
+export const CUT_LINE_DEFAULT = 0.7;
+/** Their Longest defaults, in seconds. */
+export const DANCE_LONGEST_SEC = 30;
+export const VIEW_LONGEST_SEC = 30;
+/** Their Sink defaults. */
+export const DANCE_SINK_DEFAULT = 0.5;
+export const VIEW_SINK_DEFAULT = 0;
 
 export interface Reel {
   /** Index into LOOPS of the dance on screen. */
   loop: number;
   /** Index into VIEWS of the camera on screen, unless the View chip holds one. */
   view: number;
-  /** Dance cut: a standout in its signal. Its detector is what the panel's
-   *  dotted line reads. */
-  cut: StandoutTrigger;
+  /** Dance cut: its signal climbing through the Line. Its `sinceSec` is
+   *  what the panel's dotted line reads. */
+  cut: LineTrigger;
   /** Camera cut: the same on its own signal. */
-  cameraCut: StandoutTrigger;
+  cameraCut: LineTrigger;
   /** Cuts so far of each kind — running counts for probes and tests. */
   cuts: number;
   cameraCuts: number;
@@ -226,8 +238,8 @@ export function createReel(): Reel {
   return {
     loop: 0,
     view: LOOP_VIEW[0]!,
-    cut: createStandoutTrigger(DANCE_HOLD_SEC),
-    cameraCut: createStandoutTrigger(VIEW_HOLD_SEC),
+    cut: createLineTrigger(),
+    cameraCut: createLineTrigger(),
     cuts: 0,
     cameraCuts: 0,
   };
@@ -239,21 +251,18 @@ export function showLoop(reel: Reel, loop: number): void {
   if (reel.loop === loop) return;
   reel.loop = loop;
   reel.view = LOOP_VIEW[loop]!;
-  reel.cameraCut.sinceFireSec = 0;
+  reel.cameraCut.sinceSec = 0;
 }
 
 /** What one tick of the music hands one of the reel's two cuts. */
 export interface CutInput {
   /** Whether the cut may fire: its setting is on and no chip holds what it
-   *  changes. Off, the rule still listens, so the everyday climbs are
-   *  already learned when it comes back on. */
+   *  changes. Off, its wait holds at 0, so it starts afresh when it
+   *  comes back on. */
   on: boolean;
   signal: number;
-  /** Its threshold, as standout.ts's standoutThreshold reads it: the slider,
-   *  or null while its switch is Off (every climb out of near-silence cuts). */
-  threshold: number | null;
-  /** Its Shortest slider: seconds what it changes stays on screen first. */
-  holdSec: number;
+  /** Its Line, Shortest, Longest, Sink and on-beat (lineTrigger.ts). */
+  settings: LineTriggerSettings;
 }
 
 export type CutKind = "dance" | "camera";
@@ -273,18 +282,25 @@ export function pickView(current: number, rand: number): number {
   return CUT_VIEWS[pickOther(at, CUT_VIEWS.length, rand)]!;
 }
 
-/** Advances both cuts one tick. Returns the one that cut on this tick. */
-export function stepCuts(reel: Reel, dtSec: number, dance: CutInput, camera: CutInput, rand: () => number = Math.random): CutKind | null {
-  const dt = Math.max(0, dtSec);
-  reel.cut.minGapSec = Math.max(0, dance.holdSec);
-  reel.cameraCut.minGapSec = Math.max(0, camera.holdSec);
-  const danceCut = stepStandoutTrigger(reel.cut, dt, dance.signal, dance.threshold, dance.on);
+/** Advances both cuts one tick. `beat` is the metronome's beat edge and
+ *  `music` whether the silence gate is open enough for a cut by the clock.
+ *  Returns the one that cut on this tick. */
+export function stepCuts(
+  reel: Reel,
+  dtSec: number,
+  dance: CutInput,
+  camera: CutInput,
+  beat: boolean,
+  music: boolean,
+  rand: () => number = Math.random,
+): CutKind | null {
+  const danceCut = stepLineTrigger(reel.cut, dtSec, { signal: dance.signal, beat, armed: dance.on, music }, dance.settings);
   if (danceCut) {
     showLoop(reel, pickOther(reel.loop, LOOPS.length, rand()));
     reel.cuts++;
   }
-  // Stepped on a dance cut's tick too, disarmed, so it keeps learning.
-  const cameraCut = stepStandoutTrigger(reel.cameraCut, dt, camera.signal, camera.threshold, camera.on && !danceCut);
+  // Stepped on a dance cut's tick too, disarmed, so its wait starts over with the camera's.
+  const cameraCut = stepLineTrigger(reel.cameraCut, dtSec, { signal: camera.signal, beat, armed: camera.on && !danceCut, music }, camera.settings);
   if (cameraCut) {
     reel.view = pickView(reel.view, rand());
     reel.cameraCuts++;

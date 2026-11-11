@@ -6,6 +6,7 @@ import { RETIRED_SIGNALS, SIGNALS } from "./signals.ts";
 import { decodeWireMod, encodeWireMod, LEGACY_NODE_ID_RE, readLegacyNodes, type LegacyNode, type StoredWireMod, type WireMod } from "./wireMod.ts";
 import { settingScope, type SceneSetting } from "./sceneSettings.ts";
 import type { HitReadout } from "./standout.ts";
+import { LONGEST_MIN_SEC, LONGEST_NEVER_SEC, SHORTEST_MAX_SEC, type LineTriggerWait } from "./lineTrigger.ts";
 import {
   defaultDriveSetting,
   driveSettingFromChoice,
@@ -106,6 +107,14 @@ interface DriveEntry {
   smoothnessOn?: boolean;
   /** A hit driver's Reaction row, Flat or Sized — see getDriveReadout. */
   readout?: HitReadout;
+  /** A trigger driver's Shortest, in seconds — see getDriveTrigger. */
+  triggerShortest?: number;
+  /** Its Longest, in seconds; LONGEST_NEVER_SEC is never. */
+  triggerLongest?: number;
+  /** How far its line sinks between Shortest and Longest, 0..1. */
+  triggerSink?: number;
+  /** Whether its Longest cut waits for a beat. */
+  triggerOnBeat?: boolean;
 }
 
 type Store = Record<string, Record<string, DriveEntry>>;
@@ -517,6 +526,10 @@ export function resetDriveSetting(sceneId: string, spec: SceneSetting): void {
   delete entry.smoothness;
   delete entry.smoothnessOn;
   delete entry.readout;
+  delete entry.triggerShortest;
+  delete entry.triggerLongest;
+  delete entry.triggerSink;
+  delete entry.triggerOnBeat;
   persist();
 }
 
@@ -726,5 +739,35 @@ export function getDriveReadout(sceneId: string, spec: SceneSetting): HitReadout
 export function setDriveReadout(sceneId: string, spec: SceneSetting, readout: HitReadout): void {
   if (readout !== "flat" && readout !== "sized") return;
   entryFor(settingScope(sceneId, spec.key), spec.key).readout = readout;
+  persist();
+}
+
+function clampedOr(stored: unknown, min: number, max: number, fallback: number): number {
+  return typeof stored === "number" && Number.isFinite(stored) ? Math.min(max, Math.max(min, stored)) : fallback;
+}
+
+/** A trigger driver's wait (SceneSetting.drive.trigger, lineTrigger.ts): each
+ *  stored value that is valid, else the declaration's. Undefined for a
+ *  setting that isn't a trigger driver. */
+export function getDriveTrigger(sceneId: string, spec: SceneSetting): LineTriggerWait | undefined {
+  const declared = spec.drive?.trigger;
+  if (!declared) return undefined;
+  const stored = cache[settingScope(sceneId, spec.key)]?.[spec.key];
+  return {
+    shortestSec: clampedOr(stored?.triggerShortest, 0, SHORTEST_MAX_SEC, declared.shortestSec),
+    longestSec: clampedOr(stored?.triggerLongest, LONGEST_MIN_SEC, LONGEST_NEVER_SEC, declared.longestSec),
+    sink: clampedOr(stored?.triggerSink, 0, 1, declared.sink),
+    onBeat: typeof stored?.triggerOnBeat === "boolean" ? stored.triggerOnBeat : declared.onBeat,
+  };
+}
+
+/** Writes only the given fields, clamped; a non-finite number is ignored. */
+export function setDriveTrigger(sceneId: string, spec: SceneSetting, part: Partial<LineTriggerWait>): void {
+  if (!spec.drive?.trigger) return;
+  const entry = entryFor(settingScope(sceneId, spec.key), spec.key);
+  if (part.shortestSec !== undefined && Number.isFinite(part.shortestSec)) entry.triggerShortest = clampedOr(part.shortestSec, 0, SHORTEST_MAX_SEC, 0);
+  if (part.longestSec !== undefined && Number.isFinite(part.longestSec)) entry.triggerLongest = clampedOr(part.longestSec, LONGEST_MIN_SEC, LONGEST_NEVER_SEC, 0);
+  if (part.sink !== undefined && Number.isFinite(part.sink)) entry.triggerSink = clampedOr(part.sink, 0, 1, 0);
+  if (typeof part.onBeat === "boolean") entry.triggerOnBeat = part.onBeat;
   persist();
 }
