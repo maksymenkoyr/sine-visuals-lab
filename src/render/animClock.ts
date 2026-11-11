@@ -60,7 +60,7 @@ export interface AnimSong {
 }
 
 /** The gate dimmer a song edge needs: the song layer's edges carry no strength for hitPasses to weigh, so a half-shut gate is the cut-off. */
-const SONG_EDGE_MIN_DIMMER = 0.5;
+export const SONG_EDGE_MIN_DIMMER = 0.5;
 
 /** The Drop edge fires when audio v6's ranged drop level (FeatureFrame.song.dropLevel) climbs up through DROP_MARK, and re-arms once it has fallen under DROP_MARK - DROP_REARM_GAP. Both measured on audio-subsystem's rich test (#803): the edge found the drop starts through the mic cases and on line-in where the Section trend's old drop detector and the quantile triggers found almost none. */
 export const DROP_MARK = 0.75;

@@ -1,8 +1,18 @@
 // Alien's card: what every page needs before the scene's code loads (src/render/lazyScene.ts).
 import type { PanelSection, Scene, SceneCard } from "../../scene.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
-import { STANDOUT_THRESHOLD_DEFAULT } from "../../standout.ts";
-import { DANCE_HOLD_SEC, LOOPS, VIEW_HOLD_SEC, VIEWS } from "./reel.ts";
+import {
+  CUT_LINE_DEFAULT,
+  DANCE_HOLD_SEC,
+  DANCE_LONGEST_SEC,
+  DANCE_SINK_DEFAULT,
+  LONGEST_NEVER_SEC,
+  LOOPS,
+  VIEW_HOLD_SEC,
+  VIEW_LONGEST_SEC,
+  VIEW_SINK_DEFAULT,
+  VIEWS,
+} from "./reel.ts";
 
 // This scene's gallery section and the day it was added (scenes/sceneModules.ts).
 export const gallery = { stage: "development", added: "2026-10-05" } as const;
@@ -69,8 +79,8 @@ export const SETTINGS: SceneSetting[] = [
     key: "cut",
     label: "Dance cut",
     description:
-      "On: the dance repeats until the wired input node jumps out from its everyday ones, over the dotted line on its graph, " +
-      "then cuts to another dance, seen through the camera it was framed for. Off, or while Dance holds one, the dance on screen repeats",
+      "On: the dance repeats until the wired input node climbs up through the dotted line on its graph, once the dance has been on screen for Shortest dance, " +
+      "then cuts to another dance, seen through the camera it was framed for. It also cuts by itself at Longest dance. Off, or while Dance holds one, the dance on screen repeats",
     group: "Motion",
     type: "boolean",
     min: 0,
@@ -78,15 +88,14 @@ export const SETTINGS: SceneSetting[] = [
     step: 1,
     default: 1,
     drive: {
-      default: "anim.dropOnset",
+      default: "anim.dropLevel",
       // A cut has no size, so its Reaction row stays on Flat.
       hit: { ownDetector: true, flatOnly: "A cut either happens or it doesn't, so it can't be sized." },
-      // Scene-handled: the same standout as Physarum 2's Dose threshold
-      // (standout.ts's header has how one is wired).
+      // Scene-handled: the line is drawn on the graph and read by lineTrigger.ts.
       threshold: {
-        default: STANDOUT_THRESHOLD_DEFAULT,
-        label: "Dance cut threshold",
-        hint: "Moves the dotted line: how far a sound has to stand out from the everyday ones to cut to another dance. Left: more cuts, even from quiet sounds. Right: only clear standouts.",
+        default: CUT_LINE_DEFAULT,
+        label: "Dance cut line",
+        hint: "Moves the dotted line the wired input node has to climb through to cut to another dance. Left: lower, so more cuts. Right: higher, so only big climbs cut. Off: no line, it cuts only at Longest dance.",
       },
     },
   },
@@ -99,8 +108,46 @@ export const SETTINGS: SceneSetting[] = [
     max: 10,
     step: 0.25,
     default: DANCE_HOLD_SEC,
-    // Both Shortest sliders: scaled by Master, turning it up would cut less
-    // often, the other way from every other setting.
+    // The Shortest, Longest and Sink sliders: scaled by Master, turning it up
+    // would cut less often or move the line, the other way from every other
+    // setting.
+    masterScale: false,
+  },
+  {
+    key: "cutLongest",
+    label: "Longest dance",
+    description:
+      "The most time, in seconds, a dance stays on screen: Dance cut changes it by itself at this time, on the first beat after it when Dance on the beat is on. " +
+      "Left: it changes more often. Far right: never by itself",
+    group: "Motion",
+    min: 5,
+    max: LONGEST_NEVER_SEC,
+    step: 1,
+    default: DANCE_LONGEST_SEC,
+    masterScale: false,
+  },
+  {
+    key: "cutSink",
+    label: "Dance line sink",
+    description:
+      "How far the dotted line drops by Longest dance, from its height at Shortest dance, so a rise that stops short still cuts as the time runs out. Left: the line stays where it is. Right: it falls to the floor",
+    group: "Motion",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: DANCE_SINK_DEFAULT,
+    masterScale: false,
+  },
+  {
+    key: "cutOnBeat",
+    label: "Dance on the beat",
+    description: "On: at Longest dance the cut waits for the first beat after it. Off: it comes the moment the time is up",
+    group: "Motion",
+    type: "boolean",
+    min: 0,
+    max: 1,
+    step: 1,
+    default: 1,
     masterScale: false,
   },
   {
@@ -123,8 +170,8 @@ export const SETTINGS: SceneSetting[] = [
     key: "cameraCut",
     label: "Camera cut",
     description:
-      "On: the camera stays until the wired input node jumps out from its everyday ones, over the dotted line on its graph, " +
-      "then cuts to another view while the dance goes on. Off, or while View holds one, the camera stays",
+      "On: the camera stays until the wired input node climbs up through the dotted line on its graph, once the view has been on screen for Shortest view, " +
+      "then cuts to another view while the dance goes on. It also cuts by itself at Longest view. Off, or while View holds one, the camera stays",
     group: "Camera",
     type: "boolean",
     min: 0,
@@ -135,9 +182,9 @@ export const SETTINGS: SceneSetting[] = [
       default: "anim.kickOnset",
       hit: { ownDetector: true, flatOnly: "A cut either happens or it doesn't, so it can't be sized." },
       threshold: {
-        default: STANDOUT_THRESHOLD_DEFAULT,
-        label: "Camera cut threshold",
-        hint: "Moves the dotted line: how far a sound has to stand out from the everyday ones to cut to another view. Left: more cuts, even from quiet sounds. Right: only clear standouts.",
+        default: CUT_LINE_DEFAULT,
+        label: "Camera cut line",
+        hint: "Moves the dotted line the wired input node has to climb through to cut to another view. Left: lower, so more cuts. Right: higher, so only big climbs cut. Off: no line, it cuts only at Longest view.",
       },
     },
   },
@@ -152,6 +199,43 @@ export const SETTINGS: SceneSetting[] = [
     max: 10,
     step: 0.25,
     default: VIEW_HOLD_SEC,
+    masterScale: false,
+  },
+  {
+    key: "cameraLongest",
+    label: "Longest view",
+    description:
+      "The most time, in seconds, a view stays on screen: Camera cut changes it by itself at this time, on the first beat after it when View on the beat is on. " +
+      "Left: it changes more often. Far right: never by itself",
+    group: "Camera",
+    min: 5,
+    max: LONGEST_NEVER_SEC,
+    step: 1,
+    default: VIEW_LONGEST_SEC,
+    masterScale: false,
+  },
+  {
+    key: "cameraSink",
+    label: "View line sink",
+    description:
+      "How far the dotted line drops by Longest view, from its height at Shortest view, so a rise that stops short still cuts as the time runs out. Left: the line stays where it is. Right: it falls to the floor",
+    group: "Camera",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: VIEW_SINK_DEFAULT,
+    masterScale: false,
+  },
+  {
+    key: "cameraOnBeat",
+    label: "View on the beat",
+    description: "On: at Longest view the cut waits for the first beat after it. Off: it comes the moment the time is up",
+    group: "Camera",
+    type: "boolean",
+    min: 0,
+    max: 1,
+    step: 1,
+    default: 1,
     masterScale: false,
   },
   // The camera by hand, on top of the view (camera.ts). Master Scale leaves
@@ -217,7 +301,7 @@ export const SETTINGS: SceneSetting[] = [
  *  it (speed, frames bought per second, the loop's playhead), then Bounce,
  *  its smoothness, Dance and the dance's cut. */
 const PANEL: PanelSection[] = [
-  { widget: "alienPlay", title: "Motion", settings: ["move", "bounce", "bounceSmooth", "dance", "cut", "cutHold"] },
+  { widget: "alienPlay", title: "Motion", settings: ["move", "bounce", "bounceSmooth", "dance", "cut", "cutHold", "cutLongest", "cutSink", "cutOnBeat"] },
 ];
 
 export const card: SceneCard = {

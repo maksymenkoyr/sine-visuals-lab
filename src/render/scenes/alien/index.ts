@@ -6,12 +6,14 @@
  *     speed over the one pace every dance keeps (DANCE_PACE_HZ in reel.ts,
  *     each dance's moves counted by pace.ts), eased so it glides; silence
  *     buys no frames and the alien holds;
- *   - Dance cut: a dance repeats until its wire (Drop by default) makes a
- *     climb that stands out from its everyday ones (the dotted line on its
- *     graph, src/render/standout.ts), then the scene cuts to another dance,
- *     through its own camera; Camera cut does the same on its own wire
- *     (Kick by default) but changes only the camera. Shortest dance and
- *     Shortest view are how long each must stay on screen first;
+ *   - Dance cut: a dance repeats until its wire (Drop level by default)
+ *     climbs up through the dotted line on its graph (src/render/lineTrigger.ts),
+ *     then the scene cuts to another dance, through its own camera; Camera
+ *     cut does the same on its own wire (Kick by default) but changes only
+ *     the camera. Shortest dance and Shortest view are how long each must
+ *     stay on screen first, Longest dance and Longest view how long at most
+ *     (then it cuts by itself, on the next beat with the on-beat switch on,
+ *     and not in silence), and line sink lowers the line as Longest nears;
  *   - Bounce: its wire (Kick by default) squashes the alien toward the
  *     floor under him and springs him back, on top of the dance (MESH_VERT
  *     in glsl.ts); Bounce smoothness turns that spring from a snap and a
@@ -42,14 +44,15 @@ import type { Palette } from "../../palette.ts";
 import type { AnimFrame } from "../../animClock.ts";
 import { PASSTHROUGH_DRIVES, type SceneDrives } from "../../drives.ts";
 import { publishSettingMarks } from "../../settingMarks.ts";
-import { standoutLine, standoutMarks, standoutThreshold } from "../../standout.ts";
+import { SONG_EDGE_MIN_DIMMER } from "../../animClock.ts";
+import { lineAt, type LineTriggerSettings } from "../../lineTrigger.ts";
 import { resolveSceneSetting } from "../../autoTune.ts";
 import { sceneMedia } from "../../../pinnedAssets.ts";
 import { CLIP_LIBRARY_URL, decodeClipLibrary, sampleClip, type Clip, type ClipLibrary } from "../dancers/clipFormat.ts";
 import { createPose } from "../dancers/rig.ts";
 import { createAlienRenderer, floorPivot, type AlienRenderer, type Squash } from "./renderer.ts";
 import { decodeAlienMesh, MESH_URL, type AlienModel } from "./meshFile.ts";
-import { BOUNCE_MAX, chipLoop, chipView, clipSeconds, createBounce, createReel, easeSpeed, LOOPS, pacedSeconds, showLoop, stepBounce, stepCuts, VIEWS, type Reel } from "./reel.ts";
+import { BOUNCE_MAX, CUT_LINE_DEFAULT, LONGEST_NEVER_SEC, chipLoop, chipView, clipSeconds, createBounce, createReel, easeSpeed, LOOPS, pacedSeconds, showLoop, stepBounce, stepCuts, VIEWS, type Reel } from "./reel.ts";
 import { danceMoves } from "./pace.ts";
 import { card, MOVE_GAIN, SETTINGS } from "./card.ts";
 import { easeHand, HAND_AT_REST, handCamera, type CameraHand } from "./camera.ts";
@@ -84,6 +87,27 @@ function liveLoops(library: ClipLibrary): LiveLoop[] {
     if (!clip) throw new Error(`alien: no clip ${spec.clip}`);
     return { clip, seconds: pacedSeconds(clipSeconds(clip), danceMoves(clip)), pivot: floorPivot(clip) };
   });
+}
+
+/** One cut's line, Shortest, Longest, Sink and on-beat as its settings hold them. */
+function cutSettings(
+  drives: SceneDrives,
+  get: (key: string) => number,
+  cutKey: string,
+  holdKey: string,
+  longestKey: string,
+  sinkKey: string,
+  onBeatKey: string,
+): LineTriggerSettings {
+  const line = drives.threshold(cutKey);
+  const longest = get(longestKey);
+  return {
+    line: line === undefined ? CUT_LINE_DEFAULT : line,
+    shortestSec: get(holdKey),
+    longestSec: longest >= LONGEST_NEVER_SEC ? Infinity : longest,
+    sink: get(sinkKey),
+    onBeat: get(onBeatKey) >= 0.5,
+  };
 }
 
 export const alienScene: Scene = (() => {
@@ -195,37 +219,38 @@ export const alienScene: Scene = (() => {
       speed = easeSpeed(speed, last.target, dt);
       last.speed = speed;
       last.rate = speed < HELD_BELOW ? 0 : Math.min(MAX_RATE, speed);
-      last.cutSignal = drives.value("cut", anim.dropPulse, 0);
+      last.cutSignal = drives.value("cut", anim.song.dropLevel, 0);
       last.cameraSignal = drives.value("cameraCut", anim.song.kickPulse, 0);
       const heldDance = chipLoop(get("dance"));
       if (heldDance !== null) showLoop(reel, heldDance);
       const heldView = chipView(get("view"));
+      const danceLine = cutSettings(drives, get, "cut", "cutHold", "cutLongest", "cutSink", "cutOnBeat");
+      const cameraLine = cutSettings(drives, get, "cameraCut", "cameraHold", "cameraLongest", "cameraSink", "cameraOnBeat");
       const cut = stepCuts(
         reel,
         dt,
-        {
-          on: pinnedLoop === null && heldDance === null && get("cut") >= 0.5,
-          signal: last.cutSignal,
-          threshold: standoutThreshold(drives, "cut"),
-          holdSec: get("cutHold"),
-        },
-        {
-          on: pinnedLoop === null && heldView === null && get("cameraCut") >= 0.5,
-          signal: last.cameraSignal,
-          threshold: standoutThreshold(drives, "cameraCut"),
-          holdSec: get("cameraHold"),
-        },
+        { on: pinnedLoop === null && heldDance === null && get("cut") >= 0.5, signal: last.cutSignal, settings: danceLine },
+        { on: pinnedLoop === null && heldView === null && get("cameraCut") >= 0.5, signal: last.cameraSignal, settings: cameraLine },
+        anim.metronomeBeat,
+        anim.gateDimmer >= SONG_EDGE_MIN_DIMMER,
       );
       shownView = heldView ?? reel.view;
-      // The panel draws the line a climb has to reach, and a dot per cut
+      // The panel draws the line a climb has to cross, and a dot per cut
       // (settingMarks.ts); no line while the threshold is off.
-      last.cutLine = standoutMarks(reel.cut.detector)?.reach ?? 0;
-      last.cameraLine = standoutMarks(reel.cameraCut.detector)?.reach ?? 0;
-      publishSettingMarks(ALIEN_ID, "cut", { lines: standoutLine(reel.cut.detector, "reach to cut"), reactionLabel: "cut" }, cut === "dance" ? 1 : 0);
+      const danceAt = lineAt(danceLine, reel.cut.sinceSec);
+      const cameraAt = lineAt(cameraLine, reel.cameraCut.sinceSec);
+      last.cutLine = danceAt ?? 0;
+      last.cameraLine = cameraAt ?? 0;
+      publishSettingMarks(
+        ALIEN_ID,
+        "cut",
+        { lines: danceAt === null ? [] : [{ value: danceAt, label: "line to cross" }], reactionLabel: "cut" },
+        cut === "dance" ? 1 : 0,
+      );
       publishSettingMarks(
         ALIEN_ID,
         "cameraCut",
-        { lines: standoutLine(reel.cameraCut.detector, "reach to cut"), reactionLabel: "cut" },
+        { lines: cameraAt === null ? [] : [{ value: cameraAt, label: "line to cross" }], reactionLabel: "cut" },
         cut === "camera" ? 1 : 0,
       );
       const hit = Math.max(0, Math.min(1, drives.value("bounce", anim.song.kickPulse, 0)));

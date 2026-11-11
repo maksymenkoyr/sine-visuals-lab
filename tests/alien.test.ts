@@ -12,10 +12,14 @@ import {
   clipSeconds,
   createBounce,
   createReel,
+  CUT_LINE_DEFAULT,
   CUT_VIEWS,
   DANCE_HOLD_SEC,
+  DANCE_LONGEST_SEC,
+  DANCE_SINK_DEFAULT,
   DANCE_PACE_HZ,
   easeSpeed,
+  LONGEST_NEVER_SEC,
   LOOP_VIEW,
   LOOPS,
   PACE_STRETCH_MAX,
@@ -26,6 +30,8 @@ import {
   stepBounce,
   stepCuts,
   VIEW_HOLD_SEC,
+  VIEW_LONGEST_SEC,
+  VIEW_SINK_DEFAULT,
   VIEWS,
   type CutInput,
   type CutKind,
@@ -34,7 +40,7 @@ import {
 import { packSkin, projectToFrame } from "../src/render/scenes/alien/renderer.ts";
 import { card, SETTINGS } from "../src/render/scenes/alien/card.ts";
 import { easeHand, HAND_AT_REST, handCamera } from "../src/render/scenes/alien/camera.ts";
-import { STANDOUT_THRESHOLD_DEFAULT } from "../src/render/standout.ts";
+import type { LineTriggerSettings } from "../src/render/lineTrigger.ts";
 import { BAKED } from "../src/render/scenes/alien/loops/manifest.ts";
 import { CLIP_LIBRARY_URL, decodeClipLibrary, type Clip } from "../src/render/scenes/dancers/clipFormat.ts";
 import { danceMoves } from "../src/render/scenes/alien/pace.ts";
@@ -125,12 +131,26 @@ describe("alien mesh", () => {
 });
 
 describe("alien reel", () => {
-  const input = (over: Partial<CutInput>): CutInput => ({
+  const DANCE_SETTINGS: LineTriggerSettings = {
+    line: CUT_LINE_DEFAULT,
+    sink: DANCE_SINK_DEFAULT,
+    shortestSec: DANCE_HOLD_SEC,
+    longestSec: DANCE_LONGEST_SEC,
+    onBeat: true,
+  };
+  const CAMERA_SETTINGS: LineTriggerSettings = {
+    line: CUT_LINE_DEFAULT,
+    sink: VIEW_SINK_DEFAULT,
+    shortestSec: VIEW_HOLD_SEC,
+    longestSec: VIEW_LONGEST_SEC,
+    onBeat: true,
+  };
+  type InputOver = Partial<Omit<CutInput, "settings">> & { settings?: Partial<LineTriggerSettings> };
+  const input = (over: InputOver, base: LineTriggerSettings = DANCE_SETTINGS): CutInput => ({
     on: true,
     signal: 0,
-    threshold: STANDOUT_THRESHOLD_DEFAULT,
-    holdSec: DANCE_HOLD_SEC,
     ...over,
+    settings: { ...base, ...over.settings },
   });
   const OFF = input({ on: false });
   const run = (seconds: number, fn: (dt: number) => void): void => {
@@ -163,71 +183,90 @@ describe("alien reel", () => {
     return v;
   };
   /** The time of every dance cut over `seconds` of `signal(t)`, at 60 fps, Camera cut off. */
-  const cutTimes = (reel: Reel, seconds: number, signal: (t: number) => number, over: Partial<CutInput> = {}): number[] => {
+  const cutTimes = (reel: Reel, seconds: number, signal: (t: number) => number, over: InputOver = {}): number[] => {
     const cuts: number[] = [];
     for (let i = 0; i < Math.round(seconds * 60); i++) {
       const t = i / 60;
-      if (stepCuts(reel, 1 / 60, input({ signal: signal(t), ...over }), OFF) === "dance") cuts.push(t);
+      if (stepCuts(reel, 1 / 60, input({ signal: signal(t), ...over }), OFF, false, true) === "dance") cuts.push(t);
     }
     return cuts;
   };
   /** Every cut of either kind over `seconds`, both wires reading `signal(t)`. */
-  const bothCuts = (reel: Reel, seconds: number, signal: (t: number) => number, dance: Partial<CutInput>, camera: Partial<CutInput>) => {
+  const bothCuts = (reel: Reel, seconds: number, signal: (t: number) => number, dance: InputOver, camera: InputOver) => {
     const cuts: { t: number; kind: CutKind; loop: number; view: number }[] = [];
     for (let i = 0; i < Math.round(seconds * 60); i++) {
       const t = i / 60;
       const v = signal(t);
-      const kind = stepCuts(reel, 1 / 60, input({ signal: v, ...dance }), input({ signal: v, ...camera }));
+      const kind = stepCuts(reel, 1 / 60, input({ signal: v, ...dance }), input({ signal: v, ...camera }, CAMERA_SETTINGS), false, true);
       if (kind) cuts.push({ t, kind, loop: reel.loop, view: reel.view });
     }
     return cuts;
   };
   const kicksEvery = (gap: number, count: number) => Array.from({ length: count }, (_, i) => ({ t: 0.5 + i * gap, h: 1 }));
 
-  it("keeps looping on a held level, however long, and cuts on a hit", () => {
+  it("keeps looping on a held level under the line until Longest, and cuts on a climb through it after Shortest", () => {
     const reel = createReel();
-    expect(cutTimes(reel, 30, () => 0.2)).toEqual([]);
-    const cuts = cutTimes(reel, 1, (t) => Math.max(0.2, pulseAt([{ t: 0.5, h: 1 }], t)));
+    expect(cutTimes(reel, DANCE_LONGEST_SEC - 1, () => 0.3)).toEqual([]);
+    const climb = createReel();
+    const cuts = cutTimes(climb, 12, (t) => (t < 10 ? 0.2 : 0.9));
     expect(cuts).toHaveLength(1);
-    expect(cuts[0]).toBeCloseTo(0.5, 1);
-    expect(reel.loop).not.toBe(0);
+    expect(cuts[0]).toBeCloseTo(10, 1);
+    expect(climb.loop).not.toBe(0);
   });
 
   it("never cuts twice within Shortest dance, however fast the hits", () => {
     for (const holdSec of [DANCE_HOLD_SEC, 1, 3.5]) {
       const kicks = kicksEvery(0.5, 40);
-      const cuts = cutTimes(createReel(), 20.5, (t) => pulseAt(kicks, t), { holdSec });
+      const cuts = cutTimes(createReel(), 20.5, (t) => pulseAt(kicks, t), { settings: { shortestSec: holdSec } });
       for (let i = 1; i < cuts.length; i++) expect(cuts[i]! - cuts[i - 1]!).toBeGreaterThanOrEqual(holdSec - 1e-9);
       expect(cuts.length).toBeGreaterThanOrEqual(Math.floor(20 / (holdSec + 0.5)));
     }
   });
 
-  it("on a busy hit signal cuts on the accents, not on the everyday hits between them", () => {
+  it("with the line above the everyday hits, cuts on the accents and not on the hits between them", () => {
     // An accent every 2.5 s, a quieter hit every 0.25 s between (the hats a
-    // Bass or Mid hit wire also catches). A fixed line under 0.45 would cut
+    // Bass or Mid hit wire also catches). A line under their height would cut
     // on the hats as soon as each shot was old enough.
     const hits: { t: number; h: number }[] = [];
     for (let i = 0; i < 120; i++) {
       const t = 0.25 + i * 0.25;
-      hits.push({ t, h: i % 10 === 9 ? 1 : 0.3 + 0.15 * ((i * 7) % 5) / 4 });
+      hits.push({ t, h: i % 10 === 9 ? 1 : 0.3 + (0.15 * ((i * 7) % 5)) / 4 });
     }
-    const accents = hits.filter((h) => h.h === 1 && h.t > 5).map((h) => h.t);
-    const cuts = cutTimes(createReel(), 30, (t) => pulseAt(hits, t)).filter((t) => t > 5);
+    const accents = hits.filter((h) => h.h === 1).map((h) => h.t);
+    const cuts = cutTimes(createReel(), 30, (t) => pulseAt(hits, t), { settings: { sink: 0, longestSec: Infinity } });
+    expect(cuts.length).toBeGreaterThanOrEqual(Math.floor(30 / (DANCE_HOLD_SEC + 2.5)));
     for (const t of cuts) expect(accents.some((a) => Math.abs(a - t) < 0.1)).toBe(true);
-    expect(cuts.length).toBeGreaterThanOrEqual(accents.length - 1);
   });
 
-  it("never cuts with Dance cut off, but keeps listening", () => {
+  it("never cuts with Dance cut off, not even at Longest", () => {
     const reel = createReel();
-    const kicks = kicksEvery(0.5, 10);
-    expect(cutTimes(reel, 5.5, (t) => pulseAt(kicks, t), { on: false })).toEqual([]);
-    expect(reel.cut.detector.peak).toBeGreaterThan(0.5);
+    const kicks = kicksEvery(0.5, 80);
+    expect(cutTimes(reel, DANCE_LONGEST_SEC + 10, (t) => pulseAt(kicks, t), { on: false })).toEqual([]);
+    expect(reel.cut.sinceSec).toBe(0);
+  });
+
+  it("cuts by itself at Longest on a flat signal, on the first beat after it with on-beat on", () => {
+    const reel = createReel();
+    let at = -1;
+    for (let i = 0; i < 40 * 60; i++) {
+      const t = i / 60;
+      const beat = Math.abs(t - 31.2) < 1 / 120;
+      if (stepCuts(reel, 1 / 60, input({ signal: 0.1 }), OFF, beat, true) === "dance") at = t;
+    }
+    expect(at).toBeCloseTo(31.2, 1);
+    expect(reel.cuts).toBe(1);
+  });
+
+  it("waits through silence for the Longest cut", () => {
+    const reel = createReel();
+    for (let i = 0; i < 70 * 60; i++) expect(stepCuts(reel, 1 / 60, input({ signal: 0.1 }), OFF, false, false)).toBeNull();
+    expect(reel.cuts).toBe(0);
   });
 
   it("a camera cut keeps the dance and moves to another view that keeps his head in", () => {
     const reel = createReel();
     const kicks = kicksEvery(0.5, 60);
-    const cuts = bothCuts(reel, 30.5, (t) => pulseAt(kicks, t), { on: false }, { holdSec: VIEW_HOLD_SEC });
+    const cuts = bothCuts(reel, 30.5, (t) => pulseAt(kicks, t), { on: false }, {});
     expect(cuts.length).toBeGreaterThanOrEqual(5);
     let view = LOOP_VIEW[0]!;
     for (let i = 0; i < cuts.length; i++) {
@@ -247,7 +286,7 @@ describe("alien reel", () => {
     for (const cameraHold of [VIEW_HOLD_SEC, 0]) {
       const reel = createReel();
       const kicks = kicksEvery(0.25, 160);
-      const cuts = bothCuts(reel, 40.5, (t) => pulseAt(kicks, t), { holdSec: 5 }, { holdSec: cameraHold });
+      const cuts = bothCuts(reel, 40.5, (t) => pulseAt(kicks, t), { settings: { shortestSec: 5 } }, { settings: { shortestSec: cameraHold } });
       expect(cuts.some((c) => c.kind === "dance")).toBe(true);
       expect(cuts.some((c) => c.kind === "camera")).toBe(true);
       for (let i = 0; i < cuts.length; i++) {
@@ -261,11 +300,11 @@ describe("alien reel", () => {
 
   it("holding a dance shows it through its own view and starts Camera cut's wait over", () => {
     const reel = createReel();
-    reel.cameraCut.sinceFireSec = 10;
+    reel.cameraCut.sinceSec = 10;
     showLoop(reel, 5);
     expect(reel.loop).toBe(5);
     expect(reel.view).toBe(LOOP_VIEW[5]);
-    expect(reel.cameraCut.sinceFireSec).toBe(0);
+    expect(reel.cameraCut.sinceSec).toBe(0);
     reel.view = CUT_VIEWS[0]!;
     showLoop(reel, 5);
     expect(reel.view).toBe(CUT_VIEWS[0]);
@@ -432,15 +471,28 @@ describe("alien loops", () => {
     }
   });
 
-  it("marks the chip on screen on both rows, and wires each cut on its own with its own Shortest slider", () => {
+  it("marks the chip on screen on both rows, and wires each cut on its own with its own Line, Shortest, Longest, Sink and on-beat settings", () => {
     const spec = (key: string) => SETTINGS.find((s) => s.key === key)!;
     expect(spec("dance").onScreen).toBe(true);
     expect(spec("view").onScreen).toBe(true);
     expect(spec("cut").drive?.default).not.toBe(spec("cameraCut").drive?.default);
     expect(spec("cutHold").default).toBe(DANCE_HOLD_SEC);
     expect(spec("cameraHold").default).toBe(VIEW_HOLD_SEC);
-    for (const key of ["cutHold", "cameraHold"]) expect(spec(key).masterScale, key).toBe(false);
-    expect(card.panel?.[0]?.settings).toEqual(expect.arrayContaining(["dance", "cut", "cutHold"]));
+    expect(spec("cut").drive?.default).toBe("anim.dropLevel");
+    expect(spec("cut").drive?.threshold?.default).toBe(CUT_LINE_DEFAULT);
+    expect(spec("cameraCut").drive?.threshold?.default).toBe(CUT_LINE_DEFAULT);
+    expect(spec("cutLongest").default).toBe(DANCE_LONGEST_SEC);
+    expect(spec("cameraLongest").default).toBe(VIEW_LONGEST_SEC);
+    expect(spec("cutLongest").max).toBe(LONGEST_NEVER_SEC);
+    expect(spec("cameraLongest").max).toBe(LONGEST_NEVER_SEC);
+    expect(spec("cutSink").default).toBe(DANCE_SINK_DEFAULT);
+    expect(spec("cameraSink").default).toBe(VIEW_SINK_DEFAULT);
+    for (const key of ["cutOnBeat", "cameraOnBeat"]) {
+      expect(spec(key).type, key).toBe("boolean");
+      expect(spec(key).default, key).toBe(1);
+    }
+    for (const key of ["cutHold", "cameraHold", "cutLongest", "cameraLongest", "cutSink", "cameraSink"]) expect(spec(key).masterScale, key).toBe(false);
+    expect(card.panel?.[0]?.settings).toEqual(expect.arrayContaining(["dance", "cut", "cutHold", "cutLongest", "cutSink", "cutOnBeat"]));
   });
 
   it("sees every loop through a view VIEWS has", () => {

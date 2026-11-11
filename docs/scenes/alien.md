@@ -21,7 +21,8 @@ the camera by hand. In development, on main since #374.
 
 - `src/render/scenes/alien/card.ts`: the scene's card, loaded with the page: id,
   name, `SETTINGS`, the Motion section in `PANEL` (Move with its readout,
-  Bounce, Bounce smoothness, Dance, Dance cut and Shortest dance), `MOVE_GAIN`, the `gallery`
+  Bounce, Bounce smoothness, Dance, Dance cut, Shortest dance, Longest dance, Dance
+  line sink and Dance on the beat), `MOVE_GAIN`, the `gallery`
   record and `loadBody`, and `arrows`: which camera sliders the arrow keys
   move (`src/ui/sceneArrows.ts` handles the keys for any scene). The body
   spreads the card, so the registered settings are the body's own objects.
@@ -88,10 +89,11 @@ the camera by hand. In development, on main since #374.
   file layout. `alien.bin` is committed as `public/media/alien/mesh-v1.bin`.
 - Reused, not copied: the dancers' rig, clip format and clip library
   (`../dancers/`, `CLIP_LIBRARY_URL`); the drive system (`drives.value`, `drives.threshold`);
-  the Level signal (`feature.level`, #368); the standout detector
-  (`src/render/standout.ts`, a `StandoutTrigger` per cut, held in the reel
-  as `cut` and `cameraCut`), shared with Caustics' Beat ripple and Physarum
-  2's Dose.
+  the Level signal (`feature.level`, #368). The cuts' rule is
+  `src/render/lineTrigger.ts` (a `LineTrigger` per cut, held in the reel as
+  `cut` and `cameraCut`); the standout detector (`src/render/standout.ts`)
+  is no longer used here, only by Caustics' Beat ripple and Physarum 2's
+  Dose.
 - Tests: `tests/alien.test.ts`.
 
 ## References
@@ -449,6 +451,37 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
     0.00 → 0.00 ("the picture holds still" on both); hits a minute on the
     song 385 → 380, in silence 0 → 0. The reel opens on Toprock 2, now
     played at ×0.88, and stays on it most of the song.
+- 2026-11-11, #840, the cuts on a Line and a Wait, headless Chromium on
+  Metal, the defaults (main: Dance cut on Drop, standout threshold, Shortest
+  dance 2 s; this change: Dance cut on Drop level, Line 0.7, Shortest 4 s,
+  Longest 30 s, Sink 0.5, on the beat; Camera cut on Kick on both):
+  - `cutprobe.mjs` on `deTJ513J07Y`, 120 s:
+
+    | | dance cuts | dance gaps | camera cuts | camera gaps |
+    | --- | --- | --- | --- | --- |
+    | main | 1 (at 66.8 s) | – | 33 | 3.03–5.52 s |
+    | this change | 8 | 5.57–30.08 s | 30 | 3.02–5.64 s |
+
+    This change's dance cuts at 14.7, 33.3, 42.1, 50.1, 58.3, 63.8, 93.9
+    and 119.8 s; the 30.08 s gap is the cut at Longest dance, on a beat.
+  - `cutprobe.mjs` on 45 s of silence (a zero WAV), this change: 0 dance
+    cuts, 0 camera cuts.
+  - `tune-real` on `deTJ513J07Y`, then silence, 30 s from 4 s, main
+    (before) and this change (after) served side by side:
+
+    | source | change med | change p95 | hits/min | energy | fps |
+    | --- | --- | --- | --- | --- | --- |
+    | song, before | 0.97 | 1.88 | 466 | 0.49 | 120 |
+    | silence, before | 0.00 | 0.00 | 0 | 0.00 | 120 |
+    | song, after | 0.67 | 1.73 | 438 | 0.48 | 120 |
+    | silence, after | 0.00 | 0.00 | 0 | 0.00 | 120 |
+
+    Silence: "the picture holds still" on both. The song's change differs
+    with whichever dances the random cuts land on.
+  - Replayed offline on the idea page's recording of Sub Focus "Fine Day"
+    (Drop level, Line 0.7, Shortest 4 s, Longest 30 s), the same counts as
+    the page: Sink 0, 9 cuts (4 on the signal, 5 at Longest); Sink 0.5, 13
+    (10 and 3); with on the beat, every cut at Longest on a beat.
 
 ## Decisions and pivots
 
@@ -756,6 +789,42 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   captured, so Move's tuning holds; `PACE_STRETCH_MAX` keeps Lean back a
   little slower than the rest. Whether the measured pace looks even is the
   owner's call.
+- 2026-11-10, #840, the owner, on Dance cut: "this type of drivers with
+  clear treshold should have easy way to understand and configure how we
+  want it to be affected by signal … 2 regulators 1 is treshold by passing
+  which we triggering. min time that transition could't take less then and
+  max time and transition would happen automatically when approached". After
+  seeing the idea page: "can we have a checkbox for cutting on beat (the
+  first beat after time expiration). and also slider for line sink".
+  - Dance cut and Camera cut no longer use the standout detector. Each has a
+    **Line** (its threshold row, 0..1 in the graph's units, drawn dotted)
+    the wired input node has to climb up through, a **Shortest** time
+    before which nothing cuts, and a **Longest** time at which it cuts by
+    itself; **Sink** lowers the line from Shortest to Longest, and **on the
+    beat** moves the Longest cut to the first beat after it (or, with the
+    tempo not locked, a short wait after it). The far right of the Longest
+    sliders reads as never; the threshold's Off means no line, only
+    Longest. The rule is `src/render/lineTrigger.ts`; the saved keys
+    (`cut`, `cutHold`, `cameraCut`, `cameraHold`) keep their names.
+  - Why: a slow rise never counted for the detector, so Drop level reached
+    0.89 on a real song with no cut in 225 s.
+  - Settled by measurement, not asked; on 2026-11-11 the owner said "go"
+    to Drop level, Line 0.7, Shortest 4 s and Longest 30 s:
+    - Dance cut's default wire is Drop level (`anim.dropLevel`), not Drop:
+      on four recorded songs Drop fired 1 to 3 times a minute, mostly by the
+      timer, while Drop level with Sink 0.5 gave 3 to 7 a minute, 75 to
+      100% of them on the signal. Defaults: Line 0.7, Shortest 4 s,
+      Longest 30 s, Sink 0.5, on the beat on; Camera cut stays on Kick with
+      Sink 0 and Shortest 3 s.
+    - A crossing during Shortest is skipped, not remembered, so the dotted
+      line sits exactly where a cut can happen.
+    - Silence holds still: the Longest cut waits while the silence gate is
+      under half open; a crossing of the line still cuts, since the signals
+      are dimmed then anyway.
+  - A threshold someone saved before now reads as a line height.
+  - The idea page, with the rules played on recorded songs:
+
+    https://claude.ai/artifact/1dCYqkQbC6c7U1He8crppM
 
 ## Tuning notes
 
@@ -769,13 +838,16 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   sets how snappy it is and how far it overshoots. Bounce smoothness eases
   that spring toward `SMOOTH_HZ`, `SMOOTH_DAMPING`; if its smooth end sits
   too low on fast music, the damping is the knob that matters.
-- Dance cut on Drop: every drop stands out (drops are rare, so nothing
-  else on that signal teaches the floor). For regular dance changes wire it
-  to Kick: it cuts on a standout hit once each dance has lasted Shortest
-  dance, and Dance cut threshold thins those out (see Measurements).
-- Camera cut on Kick: there are enough standout hits that Shortest view
-  sets the pace (a cut every 3–4 s at 3 s). Raise Camera cut threshold to cut
-  only on the clearest hits, or Shortest view for longer shots.
+- Dance cut on Drop level: the line catches each rise into a loud stretch,
+  and Dance line sink lowers it toward Longest dance, so a song that never
+  gets that loud still cuts on its biggest rise before the clock does. Drop
+  itself fires a few times a song, so on Drop nearly every cut comes from
+  the clock. Wired to Kick at Fixed height, every kick crosses any line
+  under 1 and Shortest dance sets the pace; Graded height lets the line
+  pick the big kicks.
+- Camera cut on Kick: every kick crosses the line, so Shortest view sets
+  the pace. Raise Shortest view for longer shots, or set the wire's Height
+  to Graded and raise Camera cut line to cut only on the biggest kicks.
 - Judge the look in loop 0 (`?loop=0`), whose framing is the closest to the
   reference.
 - To polish one dance, hold it on Dance and step through View; the strip's
@@ -920,3 +992,5 @@ bundle, 12 s of white hiss at about −61 dBFS, 15 s more of the track), plus
   Dance and View rows.
 - #822 (draft, 2026-11-07): every dance keeps one pace, measured from how it
   moves (`pace.ts`).
+- #840 (2026-11-10): Dance cut and Camera cut on a Line and a Wait
+  (`src/render/lineTrigger.ts`).

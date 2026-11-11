@@ -53,8 +53,7 @@ while ((Date.now() - t0) / 1000 < seconds) {
     const a = window.__alien;
     if (!a) return null;
     const v = a.videos ? a.videos[a.reel.loop] : null;
-    const d = a.reel.cut.detector;
-    return { loop: a.reel.loop, head: v ? v.currentTime * 120 : null, paused: v ? v.paused : null, ready: v ? v.readyState : null, cuts: a.reel.cuts, floor: d.floor, peak: d.peak, ...a.last };
+    return { loop: a.reel.loop, head: v ? v.currentTime * 120 : null, paused: v ? v.paused : null, ready: v ? v.readyState : null, cuts: a.reel.cuts, sinceSec: a.reel.cut.sinceSec, ...a.last };
   });
   if (s) rows.push({ t: +t.toFixed(2), ...s });
   if (shots && nextShot < shots.at.length && t >= shots.at[nextShot]) {
