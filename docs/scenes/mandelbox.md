@@ -5,7 +5,7 @@ turning hues on black, about half the places on the fractal's own mirror
 lines, so they open as a kaleidoscope or a mirrored vault. The music's
 loudness sets the pace of the flight and of the colours, so silence holds
 still; kicks and claps flash the rims; a drop moves on to a new place. In
-development, in draft PR #842.
+development; the first version merged in #842.
 
 ## Where the code is
 
@@ -56,7 +56,7 @@ unless its line says it was read by eye or inferred:
   later and about 0 after 30–60 s; 9 hard cuts in the hour, 8 plus the loop
   wrap (`scripts/hour2.py`). Dissolves were never counted: one was seen by
   eye, about 1.5 s long at 75 s in the bundle. How long a look lasts isn't
-  known.
+  known (measured 2026-11-11, below).
 - Motion, from the bundle's 120 s window only (27:00–29:00, whole frame,
   `tools/ref-scan.py`): zoom mean +0.073 log-scale/s (×1.08/s) and median
   +0.048 (×1.05/s; the window's cut and dissolve inflate the mean, from its
@@ -65,14 +65,14 @@ unless its line says it was read by eye or inferred:
 - Colour: the chroma-weighted hue of lit pixels turns the same way in 74% of
   minutes, at a median of one turn per 52 s within a minute; 107 net turns
   in the hour, one per 35 s (`scripts/huerate.py`). What makes up the gap
-  between the two isn't measured.
+  between the two isn't measured (measured 2026-11-11, below).
 - Mirror: left-right mirrored (correlation above 0.9 at 64×36) 45% of the
   hour, in three runs (12:03–15:13, 27:53–32:56, 40:15–60:00); never top to
   bottom over the hour (`scripts/hour2.py`). Only one of the three runs
   starts within 6 s of a hard cut (27:53, against a cut at 27:58). 2-fold
   symmetry 0.95–1.00 in every regime of the bundle, including stretches the
   hour pass didn't call mirrored, 43% of objects on the axes (`report.md`).
-  Neither says how the symmetry was made.
+  Neither says how the symmetry was made (measured 2026-11-11, below).
 - Picture: ground near #000; strokes about 1.9 px; glow e-fold 3.5–10.6 px;
   per-regime brightness 0.09–0.48, median 0.18; lit (> 0.18) median 0.33;
   saturation median 0.48; share at the darkest level median 0.56
@@ -193,6 +193,92 @@ the M1 Pro's GPU, the dev server):
   | song | 14.63 | 21.88 | 336 | 118 | 20 | 200 | 80 | 0 | 0.66 | 120 |
   | silence | 0.00 | 0.00 | 0 | 0 | 0 | 0 | 0 | 0 | 0.00 | 120 |
 
+2026-11-11 (#830), the reference against ours, for the owner's calls. The
+whole loop was read again from a 240p download, at 5 fps (`scripts/decode.py`)
+or straight from the video; the 27:00–29:00 window at 720p. ffmpeg from the
+static build, on `PATH`.
+
+- What it is: a montage of separate clips, not one flight. Continuous flight
+  (`scripts/warplag.py`: frame t warped onto t + 1 s along the optical flow,
+  3 s median residual below 0.2) fills 60% of the hour, in 31 stretches of
+  10 s or more, median 23 s; the seven longest (85–384 s) cover 21.5 minutes,
+  the longest 5:36–12:00. Elsewhere the look changes every few seconds.
+- Changes of look, counted by eye on 1 s filmstrips of six sampled minutes
+  (`scripts/filmstrip.py`): about 6 at 0:00, 0 at 10:00 and 20:00, about 3 at
+  30:00, 1 at 40:00, about 3 at 50:00, so about 2 a minute. No detector was
+  clean enough to count the whole hour: colour and texture novelty misses
+  cuts between look-alike clips, a contrast dip and a blend test each catch
+  3 of 5 known dissolves, and the warped residual catches 14 of 18 changes
+  seen by eye but reads busy all through mirrored clips. Several dissolves
+  pass through black.
+- Mirror, made afterwards in 2D. Mirror runs start and end with dissolves
+  between clips (a white winged figure fades in at 12:01 and out at 15:13):
+  the correlation ramps over 0.5–2 s while both halves move
+  (`scripts/mirrorswitch.py`); neither a mirror faded over a still clip nor a
+  plain two-frame blend fits halfway (R² 0.1–0.5, `scripts/blendfit.py`).
+  Inside mirrored clips content streams sideways into the centre line, which
+  a camera on a 3D mirror plane can't show. `scripts/seamflow.py`, sideways
+  speed 10–14 px beside the line per row over the frame's median speed, at
+  640 wide:
+
+  | clip | ratio | offset at the line, px/frame |
+  |---|---|---|
+  | the reference, mirrored, 27:56–28:14 | 0.147 | 0.123 |
+  | floor: a mirrored reference frame zoomed about its centre (`scripts/zoomclip.py`) | 0.060 | 0.004 |
+  | the reference's unmirrored 27:30–27:48, mirrored by ffmpeg | 0.247 | 0.263 |
+  | ours on a mirror plane, exact shading | 0.054 | 0.006 |
+  | ours, a free place mirrored afterwards | 0.067 | 0.013 |
+
+  Ours can't tell the two apart: its flight has no sideways motion at the
+  centre. At 240p (426 wide; floor 0.076, the reference's 5:00 mirrored by
+  ffmpeg 0.380) the mirrored windows at 29:40, 44:40 and 54:40 read 0.290,
+  0.256 and 0.265; the one at 13:00 (0.041) is held by a near-still figure on
+  the line. Crops of the line show V shapes meeting on it throughout, where a
+  Mandelbox's surfaces meet its own mirror planes at right angles
+  (`scripts/kymo.py` draws the streaming). Mirrored share of the hour at
+  1 fps: 47%. Left-right correlation of mirrored frames at full size,
+  0.985–0.992 at 720p (`scripts/lrcorr.py`), as much as the compression
+  allows.
+- Colour, minute by minute (`scripts/huemin.py`): 113 net turns in the hour;
+  the median minute turns once, the fastest 10 minutes hold 67 of 120 turns
+  (some 7–12 turns, one every 5–9 s), and many minutes don't turn. That
+  unevenness makes up the gap between the within-minute median and the net
+  rate. Across 18 changes of look (10 dissolves or fades, 8 cuts) the hue
+  jumps a median 0.21 turns beyond its drift (61% over 0.15), against 0.042
+  over random 2 s spans: an unrelated new palette, as `hueJump` draws.
+- Motion (`scripts/steer.py`, a zoom, roll, pan and tilt fitted to the
+  optical flow every 0.2 s; its zoom reads about twice `tools/ref-scan.py`'s,
+  on the reference and on ours alike). Calm unmirrored flight: zoom median
+  +0.026 log-scale/s, pan 0.005 and tilt 0.006 half-heights/s, roll 0.33°/s
+  (p90 0.78). Summed over the long flights: 5:36–12:00 zooms 3.7 e-folds, its
+  heading drifts 2.2 half-heights one way (about 0.2°/s) and it rolls 161°;
+  18:56 and 22:11 (about 3 minutes each) zoom 7.5–7.9 e-folds and roll
+  12–48°. No 10 s window moves more than our own straight push-in's parallax
+  reads, so the reference never turns through an opening. Mirrored clips
+  barely zoom (calm median +0.001) and scroll vertically instead (40:08–43:14
+  by 7 half-heights).
+- Pace on one estimator (`scripts/steer.py`): the 27:00–29:00 window +0.093/s,
+  ours at `BASE_RATE` 0.1 (#829's clip) +0.098/s, the hour's unmirrored
+  median +0.030/s. The window #829 matched is one of the fastest stretches; a
+  typical continuous flight in the reference pushes in about a third as fast
+  as ours.
+- Boxiness (`scripts/boxiness.py`: in 16 px patches of a 960-wide frame, how
+  strongly edge directions cluster at right angles). The reference's 720p
+  frames read 0.15–0.23, median 0.18 (the bold mirrored `look_2` 0.33). Ours,
+  median of seeds 2, 8 and 12 at a place's start: Roundness 0.0 0.39, 0.1
+  0.47, 0.2 0.30, 0.3 0.24, 0.4 0.17, 0.5 0.14, 0.6 (default) 0.13; 25 s in
+  they scatter more (0.18–0.50). Below 0.3 ours turns to giant cubes and
+  straight beams, and some places degenerate (seed 8 at 0 nearly black at
+  25 s, streaks at seed 12). Near-white pixels (luma above 0.6, saturation
+  below 0.3): the reference's median 0.06 (0.006–0.23), ours about 0.03.
+- Other folds: positive fold scales (+2, +2.5, +3 through `mbx-lab.html`'s
+  `scale`) gave smooth rings and flat walls, and +3 big boxes with round
+  holes; seed 2 at +2 found no place in 5 s. Rotations between folds weren't
+  tried: the CPU flight's `de` and the shader's would have to change together.
+- Ours, mirrored to the pixel: `scripts/mbx-lab.html?exact` (normal and rims
+  from six probes along the axes, a light with no sideways part) renders
+  mirror-plane and axis places at left-right correlation 1.0000.
+
 ## Decisions and pivots
 
 - 2026-11-07: asked "can we create something like in this video". Measured
@@ -209,7 +295,8 @@ the M1 Pro's GPU, the dev server):
   centred vaults, and places on the symmetry lines looked much closer to it
   than a wall seen across (by eye). Symmetry alone can't tell a camera on a
   mirror plane from a mirror applied afterwards, so how the reference was
-  made isn't known; no one has looked for a seam.
+  made isn't known; no one has looked for a seam. (2026-11-11: the
+  reference's was applied afterwards; Measurements.)
 - 2026-11-08: the flight closes a share of the free distance straight ahead
   each second, not of the gap to the nearest wall, which zoomed several
   times slower than the reference wherever the view looked down an opening.
@@ -224,7 +311,9 @@ the M1 Pro's GPU, the dev server):
 - 2026-11-08: the colours drift at the reference's within-minute pace, and
   each new place arrives with its own jump (`hueJump`): a guess at what
   makes up the reference's faster net turn rate, never measured across one
-  of its dissolves.
+  of its dissolves. (2026-11-11: the reference does jump to an unrelated
+  palette at each change, but its net rate comes from a few fast-cycling
+  clips; Measurements.)
 - 2026-11-08: Rim flash toned down after it held the frame half white on a
   song with a kick and a clap every beat.
 - 2026-11-10 (#829): `BASE_RATE` from 0.073 to 0.1, so that our whole
@@ -239,7 +328,13 @@ the M1 Pro's GPU, the dev server):
 ## Tuning notes
 
 - Roundness sets the fold scale (`foldScale`); boxier views come from lower
-  values, not yet compared with the reference's box panels.
+  values. Against the reference's box panels (2026-11-11,
+  `scripts/boxiness.py`), 0.3–0.4 matches its squareness, and below 0.3 ours
+  overshoots into cubes and beams.
+- The lab page takes `?exact` (shading mirrored to the pixel) and
+  `show({ scale })` (a fold scale outside Roundness's range, its search given
+  up after 5 s); `scripts/lab-shot.mjs` shoots a flight as frames for an item
+  with `seq: [frames, fps]`.
 - Mirror's Per place mix is `KIND_SHARES`; On keeps to axes and planes, Off
   to free places.
 - Judge the look with `scripts/mbx-lab.html` at fixed seeds and hues, and
@@ -256,18 +351,29 @@ the M1 Pro's GPU, the dev server):
 ## Known issues and next steps
 
 - The reference's cells are boxier, whiter panels; at the default Roundness
-  ours lean toward bubble lattices.
+  ours lean toward bubble lattices: squareness 0.13 against its 0.15–0.23,
+  and about half its share of near-white (2026-11-11). The owner's call, with
+  #828.
 - Axis places look alike: each axis is one family of views along a line.
-- The camera never steers: a place ends when its zoom is spent, where the
-  reference's camera may turn through openings.
+- The camera never steers: a place ends when its zoom is spent. The
+  reference doesn't turn through openings either, but its long flights drift
+  one way (about 0.2°/s) and roll up to 160° over minutes, and its mirrored
+  clips scroll vertically instead of flying in (2026-11-11).
+- `BASE_RATE` was matched to 27:00–29:00, one of the reference's fastest
+  stretches; its typical continuous flight pushes in about a third as fast,
+  and its longest flights last 1.5–6.4 minutes against our places' 45 s
+  (2026-11-11). The owner's call.
+- Colour drift keeps one speed for every place; the reference's speed
+  changes from clip to clip, from still to a turn every 5 s (2026-11-11).
 - Mirror On's views aren't mirrored to the pixel, though the fractal is:
   `MARCH_BODY` finds the normal and the rims from four probes at the corners
   of a tetrahedron about 2 px across, which isn't mirror-symmetric, at a
   scale where the fractal has detail, and its light comes from the upper
   right. In a lab copy (2026-11-10, the 20 views above), six probes along
   the axes took the median correlation from 0.74 to 0.97, and a light with
-  no sideways part as well to 1.000. A change to the look: the owner's call,
-  with #830.
+  no sideways part as well to 1.000; `scripts/mbx-lab.html?exact` is that
+  copy. A change to the look: the owner's call, with #830's finding that the
+  reference mirrors its picture afterwards.
 - At Flight speed 0 a free place keeps rolling, by up to `ROLL_MAX`: the roll
   follows the pace, not Flight speed.
 - Places whose straight path grazes a wall, found by replaying the flight
@@ -306,6 +412,16 @@ the M1 Pro's GPU, the dev server):
   (`search-bench.mjs`), shooting the sketch (`sketch-shot.mjs`), and
   recording a clip of ours with a song at a steady pace, for
   `tools/ref-scan.py` to measure its motion (`record-clip.mjs`).
+- `mandelbox/scripts/`, #830's measurements (2026-11-11), each reading video
+  through `vidio.py`: decoding the hour to a stack (`decode.py`), how the
+  mirror was made (`mirrorswitch.py`, `blendfit.py`, `seamflow.py` with
+  `zoomclip.py` for its floor, `kymo.py` to see it, `lrcorr.py`), changes of
+  look and colour (`warplag.py`, `filmstrip.py`, `huemin.py`), motion and
+  steering (`steer.py`), and boxiness (`boxiness.py`).
+- The whole video at 240p (all three loops, 10800 s), for the hour passes:
+  the local cache `tools/.cache/refs/_downloads/fractal-loop-2T33-hour240.mp4`.
+  The owner's review page for #830 holds the reference's frames, so it stays
+  out of this repo.
 - `mandelbox/artifacts/mandelbox-flight.html`: the source of the live sketch
   "Mandelbox Flight", https://claude.ai/artifact/561CAdeMLCFJ2bDs8aX6Bb (our
   own code, no reference images).
@@ -321,6 +437,8 @@ the M1 Pro's GPU, the dev server):
 - Chosen places: `node docs/scenes/mandelbox/scripts/lab-shot.mjs <port> <outdir> '[{"name":"a","seed":2,"hue":0.5,"fly":30}]'`.
 - Whole-frame motion: `node docs/scenes/mandelbox/scripts/record-clip.mjs <port> <song.wav> <out.webm>`, then `uv run tools/ref-scan.py <out.webm> --name ours-mandelbox-clip --dur 60` with a working ffmpeg first on `PATH`.
 - GPU cost per preset: `node tools/gpu-bench.mjs --port <port> --app --scene mandelbox --dpr 2 --quality <preset> [--wait 45]`.
+- A flight as frames, mirrored to the pixel: `node docs/scenes/mandelbox/scripts/lab-shot.mjs <port> <outdir> '[{"name":"p","seed":1,"mirror":1,"fly":10,"seq":[180,30]}]' exact`.
+- #830's video measurements: `uv run --with numpy --with scipy --with pillow --with opencv-python-headless python docs/scenes/mandelbox/scripts/<script>.py …` with a working ffmpeg first on `PATH`; each script's header gives its arguments. The hour stack: `decode.py <hour240.mp4> hour128.npy 0 3720 5 128 72`.
 - Gotchas: a black picture in flight means the camera has no target (log
   `flight.gap` and `flight.ahead` once a second); a setting's `u<Key>` must
   not collide with `EXTRA_UNIFORMS` (`uFlash` is the setting, `uFlashNow` the
@@ -329,6 +447,9 @@ the M1 Pro's GPU, the dev server):
 ## History
 
 - #826 (draft, closed): the first version, its record and materials.
-- #842 (draft, supersedes #826 after a rebase): #829, the checks the first
+- #842 (merged; superseded #826 after a rebase): #829, the checks the first
   version skipped, the record saying only what was measured, and
   `BASE_RATE` 0.1.
+- #830 (research): the reference measured against ours for the owner's
+  calls on the mirror, the look, the pace and moving on; the lab's `exact`,
+  `scale` and `seq` options.

@@ -10,6 +10,18 @@ import { COMMON_UNIFORMS_GLSL, DRIVE_GLSL, ROOM_UV_GLSL, settingUniformName } fr
 const gl = document.getElementById("c").getContext("webgl2", { preserveDrawingBuffer: true });
 const vs = `#version 300 es
 layout(location = 0) in vec2 aPos; out vec2 vUv; void main() { vUv = aPos * 0.5 + 0.5; gl_Position = vec4(aPos, 0.0, 1.0); }`;
+// ?exact: shade with probes along the world axes and a light with no sideways part, so a place on a
+// mirror plane renders mirrored to the pixel (MARCH_BODY's tetrahedral probes and side light don't).
+let body = MARCH_BODY;
+if (new URLSearchParams(location.search).has("exact")) {
+  const probes = /vec2 k = vec2\(1\.0, -1\.0\);[\s\S]*?float lap = [^;]*;/;
+  const light = "uCamUp * 0.55 + uCamRight * 0.35";
+  if (!probes.test(body) || !body.includes(light)) { document.title = "COMPILE exact patch no longer matches MARCH_BODY"; throw new Error(document.title); }
+  body = body.replace(probes, `vec3 ex = vec3(h, 0.0, 0.0), ey = vec3(0.0, h, 0.0), ez = vec3(0.0, 0.0, h);
+    float a = de(q + ex, tr), a2 = de(q - ex, tr), b = de(q + ey, tr), b2 = de(q - ey, tr), c = de(q + ez, tr), c2 = de(q - ez, tr);
+    vec3 n = normalize(vec3(a - a2, b - b2, c - c2));
+    float lap = (a + a2 + b + b2 + c + c2 - 6.0 * d) / h;`).replace(light, "uCamUp * 0.55");
+}
 const fs = `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -19,7 +31,7 @@ ${SETTINGS.map((s) => `uniform float ${settingUniformName(s.key)};`).join("\n")}
 ${DRIVE_GLSL(SETTINGS)}
 ${EXTRA_UNIFORMS}
 ${ROOM_UV_GLSL}
-${MARCH_BODY}`;
+${body}`;
 const prog = gl.createProgram();
 for (const [type, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
   const sh = gl.createShader(type);
@@ -37,8 +49,11 @@ gl.enableVertexAttribArray(0);
 gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 const U = (n) => gl.getUniformLocation(prog, n);
 window.lab = {
-  show({ seed = 6, mirror = 2, roundness = 0.6, fly = 0, rate = 0.073, rims = 1, punch = 0.7, hue = 0.72, folds } = {}) {
-    const place = stepPlaceSearch(createPlaceSearch(foldScale(roundness), seed, mirror), Infinity);
+  // `scale` overrides the fold scale Roundness gives (foldScale), to try scales outside its range.
+  show({ seed = 6, mirror = 2, roundness = 0.6, scale, fly = 0, rate = 0.1, rims = 1, punch = 0.7, hue = 0.72, folds } = {}) {
+    // A scale with no place that passes the view test would search forever: give up after 5 s.
+    const place = stepPlaceSearch(createPlaceSearch(scale ?? foldScale(roundness), seed, mirror), 5000);
+    if (!place) { gl.clearColor(0.3, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT); return { kind: "none found in 5 s" }; }
     const f = createFlight(place);
     for (let t = 0; t < fly; t += 0.05) advanceFlight(f, 0.05, rate, 1);
     const right = new Float32Array(3), up = new Float32Array(3);
