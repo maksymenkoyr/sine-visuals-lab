@@ -15,7 +15,7 @@
 //   node tools/workflow-stats.mjs import rows.jsonl        # add rows another machine exported
 //   node tools/workflow-stats.mjs handoffs [--json] [--no-gh]  # handoffs to builder, per setup
 //   node tools/workflow-stats.mjs handoff <id-prefix>          # one handoff in full, plan included
-//   node tools/workflow-stats.mjs handoff-ship                  # from /ship: what the session changed after each coder
+//   node tools/workflow-stats.mjs handoff-ship                  # from /finish-changes: what the session changed after each coder
 //   node tools/workflow-stats.mjs handoff-hook                  # Claude Code hook entry (stdin), see below
 //
 // `record` finds the run under ~/.claude/projects/*/*/workflows/<runId>.json,
@@ -51,7 +51,7 @@
 // is completed by SubagentStop, not by its PostToolUse. A pending file stays
 // until it is PENDING_DAYS old, since PostToolUse and SubagentStop may both
 // finish the same handoff and the later one replaces the row. `handoff-ship` runs
-// before /ship's rebase and records each handoff's review stage (the planner
+// before /finish-changes's rebase and records each handoff's review stage (the planner
 // reading the coder's diff and fixing it; handoffStatsLib.mjs says what it
 // counts), so its fixes hold only the session's own edits; a rebase first
 // would count main's changes as the session's. The paid-scene
@@ -367,7 +367,7 @@ function writeHandoffs(rows) {
 
 /**
  * Writes the row of a finished handoff. A later finish of the same handoff
- * (PostToolUse, then SubagentStop) replaces the row, and keeps what /ship set.
+ * (PostToolUse, then SubagentStop) replaces the row, and keeps what /finish-changes set.
  */
 function finishHandoff(pending, { subagents, status, toolUses }) {
   const agentEntries = pending.agentId ? readJsonlSafe(join(subagents, `agent-${pending.agentId}.jsonl`)) : [];
@@ -501,7 +501,7 @@ function sessionTranscript(row) {
 }
 
 /**
- * `handoff-ship`, run by /ship before its rebase: records each handoff's
+ * `handoff-ship`, run by /finish-changes before its rebase: records each handoff's
  * review stage. The span runs from the coder's end to the next coder's start
  * (or to now): the diff over it is what the session fixed, and the session's
  * requests in it are what the review cost. Rows are updated in place, so the

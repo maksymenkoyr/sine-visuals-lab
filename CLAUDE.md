@@ -40,7 +40,7 @@ A browser-based, real-time WebGL2 audio visualizer.
   `low dif`), a token label (`<100K tok` to `>10M tok`) and, when a person is
   needed at some point or likely (over 30%), `human`.
   `docs/issue-labels.md` has the rules; a hook refuses a new issue without a
-  difficulty and a token label, and `/ship` records the difficulty the work
+  difficulty and a token label, and `/finish-changes` records the difficulty the work
   actually had and the tokens it took.
 - An agent is one subagent this session starts and reads back, like
   `builder`. A workflow is a script in `.claude/workflows/` that runs
@@ -62,7 +62,7 @@ A browser-based, real-time WebGL2 audio visualizer.
   or unasked when it's plainly large and mechanical (new modules with tests,
   one edit across many files). If it might fit but isn't obvious, suggest
   it; don't weigh it.
-- Finish every change with `/ship`, and close a session with `/wrap`.
+- Finish every change with `/finish-changes`, and close a session with `/wrap`.
 
 Before touching one of these, read what is listed:
 

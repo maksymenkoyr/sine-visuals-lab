@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The issue difficulty correction loop (docs/issue-labels.md): an issue is
 // filed with a guess at its difficulty and its token use, and once the work
-// is done /ship records what it actually took, so the guesses can be checked
+// is done /finish-changes records what it actually took, so the guesses can be checked
 // and, later, a model trained to correct them.
 //
 //   npm run difficulty -- record 412 --actual mid --human no --tokens session --pr 450 --why "…"
