@@ -61,7 +61,7 @@ the correction loop below.
 ## After the work: the correction loop
 
 A label is a guess made before anyone has done the task. Once a PR closes an
-issue, `/ship` records the difficulty the task actually had and the tokens it
+issue, `/finish-changes` records the difficulty the task actually had and the tokens it
 took:
 
     npm run difficulty -- record <issue> --actual <low|mid|high> --human <yes|no> --tokens session --pr <pr> --why "<one line>"

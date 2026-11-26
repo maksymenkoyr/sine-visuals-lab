@@ -8,13 +8,17 @@ Finish the change on this branch:
    behaviour shows up and check or fix those too. It isn't fixed until they
    are.
 
-2. **Gates.** `npm run check` passes (the `tools/check.mjs` header lists its
+2. **Review.** Unless this session already reviewed the branch's whole diff
+   (`/plan-build` does), run `/code-review low` on the branch and fix the real
+   findings, so the gates below check the fixed code.
+
+3. **Gates.** `npm run check` passes (the `tools/check.mjs` header lists its
    steps and how to fix each kind of finding). CI runs the same command on
    every PR and before every deploy (channels and releasing: the
    `src/version.ts` header). The pre-push hook runs only its `--changed`
    form, so run the whole command here.
 
-3. **Screenshots.** Any visualization or UI change: headless Playwright
+4. **Screenshots.** Any visualization or UI change: headless Playwright
    screenshots from before and after, with their paths in your summary. Put
    a couple in the PR body — `npm run pr-shots -- before.png after.png`
    prints the markdown. Never for a paid scene.
@@ -22,21 +26,24 @@ Finish the change on this branch:
    For a visualization change, also run `npm run dev` and give the user the
    scene link it prints at startup, not the gallery root.
 
-4. **Handoffs.** If a coder agent made part of this change, run
+5. **Handoffs.** If a coder agent made part of this change, run
    `node tools/workflow-stats.mjs handoff-ship` before rebasing: it records
    your review of each coder's diff (its cost and what you changed after it)
    for the handoff stats, and a rebase first would count main's changes as
    yours.
 
-5. **Rebase.** Fetch, rebase (never merge) on `origin/main`, and check again
-   for divergence right before pushing.
+6. **Rebase.** Fetch, rebase (never merge) on `origin/main`, and check again
+   for divergence right before pushing. A branch already on origin then
+   needs `git push --force-with-lease`, never `--force`. Where force pushes
+   aren't allowed (a background job), don't rebase a pushed branch: push the
+   new commits on top and say whether it's behind or conflicts.
 
-6. **Check the PR state.** If this branch already has a PR,
+7. **Check the PR state.** If this branch already has a PR,
    `gh api 'repos/{owner}/{repo}/pulls?head={owner}:<branch>&state=all' --jq '.[] | .state, .merged_at'`
    (REST: cloud sessions refuse `gh pr view`): a merged or closed branch still accepts
    pushes that nobody sees. If it's merged, move the commits to a new branch.
 
-7. **Push and open a draft PR**, or update the open one: push, then rewrite
+8. **Push and open a draft PR**, or update the open one: push, then rewrite
    its body so it describes the whole branch as it now stands, not just what
    the first push carried — `/release` writes the release notes from PR
    bodies. Keep the screenshots that still hold. Search open issues again
@@ -44,9 +51,9 @@ Finish the change on this branch:
    have drifted from the issue found before starting, or one was filed since.
    The body says `Closes #<n>` or `Refs #<n>` for each related one.
    `gh api -X PATCH 'repos/{owner}/{repo}/pulls/<n>' -F body=@<file>` (REST,
-   as in step 6).
+   as in step 7).
 
-8. **Record the difficulty and tokens** of each issue the PR closes, also when
+9. **Record the difficulty and tokens** of each issue the PR closes, also when
    the labels held: `npm run difficulty -- record <issue> --actual … --human …
    --tokens session --pr <pr> --why "…"`, adding earlier sessions that worked
    on the issue to `--tokens`. The correction loop in `docs/issue-labels.md`

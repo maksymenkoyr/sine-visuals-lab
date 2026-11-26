@@ -86,7 +86,7 @@ Run `$ARGUMENTS` through the workflow,
    only call a gap real when it holds across runs and is larger than the
    grader's own spread.
 
-6. **Don't ship on your own.** Ask which branches to finish with `/ship`. Every
+6. **Don't ship on your own.** Ask which branches to finish with `/finish-changes`. Every
    branch stays local until then. Never offer to ship a `bench` branch: it
    starts from an old commit and exists only to be measured.
 

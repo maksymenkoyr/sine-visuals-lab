@@ -51,7 +51,7 @@ Each phase is one build session and one PR. PR #429 (the workflow, `/plan-code-r
   - Done when: a run completed and left unrecorded shows up after the next session starts; a session start with nothing new prints nothing extra and stays inside the hook's timeout; `npm run typecheck` and `npm test` pass.
 
 - [ ] **2. Asking Claude to build a medium-difficulty issue runs it through Opus plan → Haiku code → Opus review, and its PR lands in the stats**
-  - Touches: `CLAUDE.md` and `AGENTS.md` (two self-contained copies; edit the rule in both) — the delegation table and a line on when a GitHub issue goes through `/plan-code-review`; `.claude/commands/plan-code-review.md` (the everyday path: default setup, no fork, a tag like `r<N>`, then `/ship` the branches the user picks).
+  - Touches: `CLAUDE.md` and `AGENTS.md` (two self-contained copies; edit the rule in both) — the delegation table and a line on when a GitHub issue goes through `/plan-code-review`; `.claude/commands/plan-code-review.md` (the everyday path: default setup, no fork, a tag like `r<N>`, then `/finish-changes` the branches the user picks).
   - Read first: the `.claude/workflows/plan-code-review.js` header, `.claude/commands/plan-code-review.md`, and both answers to the open questions above.
   - Done when: one real issue goes through the everyday path end to end, its row appears in `npm run workflow-stats -- report` under the default setup (no `bench`, no `fork`), and once its PR merges, the report's merged count includes it.
 

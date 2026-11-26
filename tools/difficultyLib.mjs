@@ -4,7 +4,7 @@
 // in one place:
 //   - .claude/hooks/issue-labels.mjs, which refuses a new issue without a
 //     difficulty and a token label (checkNewIssue);
-//   - tools/difficulty.mjs, the correction loop: after the work is done, /ship
+//   - tools/difficulty.mjs, the correction loop: after the work is done, /finish-changes
 //     records the difficulty the task actually had and the tokens it took
 //     next to what it was filed with, and `export` turns those records into a
 //     dataset for a future model that corrects the labels at filing time.

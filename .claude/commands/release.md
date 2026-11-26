@@ -43,7 +43,7 @@ reorder before any picture is taken.
 
 Run `npm run gallery-stills` (header of `tools/gallery-stills.mjs`). It shoots every free scene into
 `src/ui/stills/`; look at every image: the scene recognisable, no app chrome, nothing paid. Land
-them on main with `/ship` before step 5, so the Stable build ships them.
+them on main with `/finish-changes` before step 5, so the Stable build ships them.
 
 ## 5. The release pull request
 

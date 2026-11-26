@@ -26,7 +26,7 @@ says so as well as on `/plan-build` or the user naming it.
    row in one line before it starts.
 5. **Review.** Read its whole diff against the plan, run the checks
    yourself and fix what's wrong; its "done" isn't proof.
-6. **Finish with `/ship`.**
+6. **Finish with `/finish-changes`.**
 
 `/plan-build #<n>` builds the next part of issue `n`: `/handoff #<n>`'s
 pick-up steps choose and read the part, and this command builds it.

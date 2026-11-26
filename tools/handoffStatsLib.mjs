@@ -13,7 +13,7 @@
 // it finds: the handoff's review stage, the same stage the reviewer agent runs
 // in the plan-code-review workflow, done here by the planner itself. Its cost
 // is the session's requests from the coder's finish to the next coder's start
-// or to `handoff-ship`, so it includes /ship's own steps before that call and
+// or to `handoff-ship`, so it includes /finish-changes's own steps before that call and
 // any other work the session did meanwhile. Its fixes are the lines the
 // session changed in that span.
 //
